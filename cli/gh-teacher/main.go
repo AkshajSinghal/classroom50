@@ -19,6 +19,7 @@ func main() {
 	root.AddCommand(whoamiCmd())
 	root.AddCommand(authCmd())
 	root.AddCommand(inviteCmd())
+	root.AddCommand(removeCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)

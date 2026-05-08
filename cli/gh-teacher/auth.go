@@ -1,9 +1,11 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -26,8 +28,17 @@ func authCmd() *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
+
+			if fi, err := os.Stdin.Stat(); err == nil && (fi.Mode()&os.ModeCharDevice) == 0 {
+				return errors.New("gh teacher auth requires an interactive terminal (it shells out to gh auth refresh, which opens a browser)")
+			}
+
 			ghArgs := []string{"auth", "refresh", "-s", "admin:org"}
 			for _, s := range scopes {
+				s = strings.TrimSpace(s)
+				if s == "" {
+					continue
+				}
 				ghArgs = append(ghArgs, "-s", s)
 			}
 
@@ -37,7 +48,7 @@ func authCmd() *cobra.Command {
 			sub.Stderr = cmd.ErrOrStderr()
 
 			if err := sub.Run(); err != nil {
-				return fmt.Errorf("gh %v: %w", ghArgs, err)
+				return fmt.Errorf("gh auth refresh: %w", err)
 			}
 			return nil
 		},
