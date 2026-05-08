@@ -30,6 +30,8 @@ gh teacher invite --admin {org} {username}   # admin
 1. Invite user ID to org, per <https://docs.github.com/en/rest/orgs/members?apiVersion=2026-03-10#create-an-organization-invitation>.
 1. Advise user to visit `https://github.com/{org}` to accept the invitation atop the page.
 
+The org-invitation endpoint requires the `admin:org` OAuth scope, which is not granted by `gh auth login` by default. Run `gh teacher auth` once to refresh the token with that scope before the first org invite.
+
 ### Accept an assignment ([gh-student/](gh-student/))
 
 Uses the API to create a repo from a template repo for the student called `{username}-{assignment}` in `{org}`, then uses git to clone it locally.
@@ -58,11 +60,25 @@ Uses the API to invite a classmate (or teaching assistant) to `{org}/{repo}`.
 
 ```
 gh student invite {org}/{repo} {username}
-gh teacher invite {org}/{repo} {username}
+gh teacher invite {org}/{repo} {username}                 # default: push
+gh teacher invite -p maintain {org}/{repo} {username}     # other permissions
 ```
 
-1. Invite `{username}` to `{repo}` with `push` permission, per <https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#add-a-repository-collaborator>.
+1. Invite `{username}` to `{repo}`, per <https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#add-a-repository-collaborator>. Default permission is `push`; `gh teacher invite` accepts `-p / --permission` with one of `pull`, `triage`, `push`, `maintain`, `admin`. Re-running with a different `-p` updates the existing collaborator's permission in place.
     * Is this necessary? Should students just use the GitHub.com GUI or the Classroom 50 GUI for such?
+
+### Remove user from org or repo ([gh-teacher/](gh-teacher/))
+
+Uses the API to remove a user from an organization or from a specific repository.
+
+```
+gh teacher remove {org} {username}           # remove from organization
+gh teacher remove {org}/{repo} {username}    # remove from repository
+```
+
+1. For org targets, `DELETE /orgs/{org}/memberships/{username}`, per <https://docs.github.com/en/rest/orgs/members?apiVersion=2026-03-10#remove-organization-membership-for-a-user>. Revokes access to every repository in the org, removes the user from all teams, and cancels any pending invitation in one call.
+1. For repo targets, `DELETE /repos/{owner}/{repo}/collaborators/{username}`, per <https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#remove-a-repository-collaborator>.
+1. Both forms are idempotent: a `204` response prints "removed `{username}`", and a `404` (user is not a member or collaborator) prints a clear message and exits 0 so re-runs are safe.
 
 ### Submit an assignment ([gh-student/](gh-student/))
 
