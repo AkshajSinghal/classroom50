@@ -6,15 +6,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/cli/go-gh/v2/pkg/api"
-	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
 	"io"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/cli/go-gh/v2/pkg/api"
+	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 func submitCmd() *cobra.Command {
@@ -99,10 +100,14 @@ func submitAssignment(client *api.RESTClient, out io.Writer, errOut io.Writer, o
 		config.Source.Branch,
 	)
 
+	// .gitignore and .github/ are required template artifacts: every assignment
+	// template ships them, and submit relies on them being current. A 404 here
+	// signals a misconfigured template (or a wrong ref/repo in
+	// .classroom50.yml) — fail loudly so the teacher can fix it rather than
+	// silently submitting without instructor files.
 	if err := fetchRepoPath(client, tmp, config.Source.Owner, config.Source.Repo, config.Source.Branch, ".gitignore"); err != nil {
 		return fmt.Errorf("fetch instructor .gitignore: %w", err)
 	}
-
 	if err := fetchRepoPath(client, tmp, config.Source.Owner, config.Source.Repo, config.Source.Branch, ".github"); err != nil {
 		return fmt.Errorf("fetch instructor .github: %w", err)
 	}
@@ -127,7 +132,7 @@ func gitOutput(dir string, args ...string) (string, error) {
 		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 			return "", fmt.Errorf("%s: %s", strings.Join(cmd.Args, " "), strings.TrimSpace(string(exitErr.Stderr)))
 		}
-		return "", err
+		return "", fmt.Errorf("%s: %w", strings.Join(cmd.Args, " "), err)
 	}
 
 	return string(out), nil
@@ -155,8 +160,8 @@ func fetchRepoPath(
 	path string,
 ) error {
 	apiPath := fmt.Sprintf("repos/%s/%s/contents/%s?ref=%s",
-		owner,
-		repo,
+		url.PathEscape(owner),
+		url.PathEscape(repo),
 		escapeContentPath(path),
 		url.QueryEscape(ref),
 	)
@@ -244,7 +249,12 @@ func pushSnapshot(tmp string, remoteURL string, branch string, message string, o
 		return err
 	}
 
-	_ = runGit(tmp, out, errOut, "fetch", "origin", branch+":refs/remotes/origin/"+branch)
+	// fetch is best-effort: if it fails (e.g., empty remote on first submit), the
+	// push below still proceeds. Log the failure so --force-with-lease's degraded
+	// behavior is at least visible.
+	if err := runGit(tmp, out, errOut, "fetch", "origin", branch+":refs/remotes/origin/"+branch); err != nil {
+		_, _ = fmt.Fprintf(errOut, "fetch origin %s failed; pushing without remote-tracking ref: %v\n", branch, err)
+	}
 
 	if err := runGit(tmp, out, errOut, "push", "--force-with-lease", "origin", "HEAD:refs/heads/"+branch); err != nil {
 		return fmt.Errorf("push submission snapshot: %w", err)
@@ -258,7 +268,10 @@ func runGit(dir string, out io.Writer, errOut io.Writer, args ...string) error {
 	cmd.Dir = dir
 	cmd.Stdout = out
 	cmd.Stderr = errOut
-	cmd.Stdin = os.Stdin
+	// Don't pass stdin to git: `git push` will otherwise prompt for credentials
+	// when the gh credential helper fails, which hangs non-interactive callers.
+	// GIT_TERMINAL_PROMPT=0 makes git fail fast instead of blocking on a prompt.
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s: %w", strings.Join(cmd.Args, " "), err)

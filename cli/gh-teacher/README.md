@@ -33,10 +33,10 @@ brew install go golangci-lint
 Run all CI checks locally before pushing:
 
 ```
-gofmt -w . && go mod tidy && golangci-lint run && go build ./...
+golangci-lint fmt && go mod tidy && golangci-lint run && go build ./... && go test ./...
 ```
 
-If that exits 0, CI will pass. The same checks run in [`gh-teacher-ci.yml`](../../.github/workflows/gh-teacher-ci.yml).
+If that exits 0, CI will pass. `golangci-lint fmt` applies both `gofmt` and `goimports` (configured in [`.golangci.yml`](.golangci.yml)) so import grouping stays consistent across files. The same checks run in [`gh-teacher-ci.yml`](../../.github/workflows/gh-teacher-ci.yml).
 
 VSCode users: install the [Go extension](https://marketplace.visualstudio.com/items?itemName=golang.Go) and add this to `.vscode/settings.json` for format-and-lint on save:
 

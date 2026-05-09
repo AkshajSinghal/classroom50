@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 
 	"github.com/cli/go-gh/v2/pkg/api"
@@ -20,13 +22,23 @@ func inviteCmd() *cobra.Command {
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
-			target := args[0]
-			username := args[1]
+			target := strings.TrimSpace(args[0])
+			username := strings.TrimSpace(args[1])
+			if target == "" {
+				return errors.New("target must not be empty")
+			}
+			if username == "" {
+				return errors.New("username must not be empty")
+			}
 
-			org, repo, ok := strings.Cut(target, "/")
-			if !ok || org == "" || repo == "" {
+			// {org}/{repo} — must be exactly two slash-separated components, each
+			// non-empty. SplitN(...,3) catches "a/b/c" and surfaces it as invalid
+			// rather than silently dropping the trailing component.
+			parts := strings.SplitN(target, "/", 3)
+			if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 				return fmt.Errorf("invalid target %q: expected {org}/{repo}", target)
 			}
+			org, repo := parts[0], parts[1]
 
 			client, err := api.DefaultRESTClient()
 			if err != nil {
@@ -35,14 +47,17 @@ func inviteCmd() *cobra.Command {
 
 			out := cmd.OutOrStdout()
 
-			return inviteUserToPush(client, out, username, repo, org)
+			return inviteUserToPush(client, out, org, repo, username)
 		},
 	}
 
 	return cmd
 }
 
-func inviteUserToPush(client *api.RESTClient, out io.Writer, username, repo, org string) error {
+// inviteUserToPush invites the given user to the given repo with `push` permission.
+// Argument order mirrors the API path itself (org → repo → username) so positional
+// mistakes are caught visually at the call site.
+func inviteUserToPush(client *api.RESTClient, out io.Writer, org, repo, username string) error {
 	body, err := json.Marshal(map[string]string{
 		"permission": "push",
 	})
@@ -50,7 +65,8 @@ func inviteUserToPush(client *api.RESTClient, out io.Writer, username, repo, org
 		return fmt.Errorf("error creating PUT body: %w", err)
 	}
 
-	path := fmt.Sprintf("repos/%s/%s/collaborators/%s", org, repo, username)
+	path := fmt.Sprintf("repos/%s/%s/collaborators/%s",
+		url.PathEscape(org), url.PathEscape(repo), url.PathEscape(username))
 
 	if err := client.Put(path, bytes.NewReader(body), nil); err != nil {
 		return fmt.Errorf("PUT %s: %w", path, err)
