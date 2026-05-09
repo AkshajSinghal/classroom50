@@ -8,11 +8,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
+	"net/url"
 	"os/exec"
 	"strings"
 	"time"
-	"net/url"
 
 	"github.com/cli/go-gh/v2/pkg/api"
 	"github.com/spf13/cobra"
@@ -27,18 +26,21 @@ func acceptCmd() *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
-			target := args[0]
+			target := strings.TrimSpace(args[0])
 
-			// {org}/{classroom}/{assignment}
+			// {org}/{classroom}/{assignment} — all three components must be present
+			// and non-empty so we don't propagate empty strings into API paths or
+			// .classroom50.yml metadata.
 			parts := strings.Split(target, "/")
-
 			if len(parts) != 3 {
-				return fmt.Errorf("expected target with 3 components separated by /, got %d", len(parts))
+				return fmt.Errorf("expected target {org}/{classroom}/{assignment} with 3 components separated by /, got %d", len(parts))
 			}
-
-			org := parts[0]
-			classroom := parts[1]
-			assignment := parts[2]
+			org := strings.TrimSpace(parts[0])
+			classroom := strings.TrimSpace(parts[1])
+			assignment := strings.TrimSpace(parts[2])
+			if org == "" || classroom == "" || assignment == "" {
+				return fmt.Errorf("invalid target %q: org/classroom/assignment must all be non-empty", target)
+			}
 
 			client, err := api.DefaultRESTClient()
 			if err != nil {
@@ -57,8 +59,6 @@ func acceptCmd() *cobra.Command {
 			switch status.StatusCode {
 			// part of the org or invited (200)
 			case http.StatusOK:
-				// _, _ = fmt.Fprintf(out, "%s: %s\n", org, status.State)
-
 				// if pending invite, we want to auto accept; else, carry on to accept assignment
 				if status.State == "pending" {
 					acceptStatus, err := acceptOrgInvite(client, org)
@@ -116,7 +116,7 @@ type OrgStatus struct {
  * Returns { State: string, StatusCode: int } to also carry HTTP result info.
  */
 func checkOrgStatus(client *api.RESTClient, org string) (OrgStatus, error) {
-	path := fmt.Sprintf("user/memberships/orgs/%s", org)
+	path := fmt.Sprintf("user/memberships/orgs/%s", url.PathEscape(org))
 	var resp struct {
 		State string `json:"state"`
 	}
@@ -152,7 +152,7 @@ func acceptOrgInvite(client *api.RESTClient, org string) (AcceptStatus, error) {
 		return AcceptStatus{}, fmt.Errorf("encode body: %w", err)
 	}
 
-	path := fmt.Sprintf("/user/memberships/orgs/%s", org)
+	path := fmt.Sprintf("user/memberships/orgs/%s", url.PathEscape(org))
 	var resp struct {
 		State string `json:"state"`
 	}
@@ -172,47 +172,68 @@ func acceptOrgInvite(client *api.RESTClient, org string) (AcceptStatus, error) {
 	}, nil
 }
 
-type AcceptAssignmentStatus struct {
-	State      string
-	StatusCode int
-}
-
-/**
- * Main function that drives the flow of accepting an assignment as a student.
- */
 func acceptAssignment(client *api.RESTClient, out io.Writer, org, classroom, assignment string) error {
 	// grab username, used for other things
-	username, usernameErr := getAuthedUsername(client)
-	if usernameErr != nil {
-		return fmt.Errorf("error retrieving authed username: %w", usernameErr)
+	username, err := getAuthedUsername(client)
+	if err != nil {
+		return fmt.Errorf("retrieving authed username: %w", err)
 	}
 
-	// 1) create private assignment repo
-	createRepoURL, createRepoErr := createTemplatedPrivateAssignmentRepoInOrg(client, out, username, assignment, org)
-	if createRepoErr != nil {
-		return createRepoErr
+	// Look up the template's default branch so .classroom50.yml records the
+	// branch the template actually publishes from (templates using master or
+	// develop would otherwise silently round-trip "main" through submit).
+	sourceBranch, err := lookupRepoDefaultBranch(client, org, assignment)
+	if err != nil {
+		return err
 	}
 
-	// 2) invite username to the repo with `maintain` permission
-	inviteMaintainErr := inviteUserToMaintain(client, out, username, assignment, org)
-	if inviteMaintainErr != nil {
-		return inviteMaintainErr
+	// 1) create private assignment repo (idempotent: a 422 already-exists from
+	//    a partial prior run is treated as resume, not failure)
+	createRepoURL, err := createTemplatedPrivateAssignmentRepoInOrg(client, out, username, assignment, org)
+	if err != nil {
+		return err
+	}
+
+	// 2) invite username to the repo with `maintain` permission. PUT collaborators
+	//    is upsert in the GitHub API, so this also serves as the spec's step 4
+	//    downgrade from the creator-default `admin` to `maintain` in a single call.
+	if err := inviteUserToMaintain(client, out, username, assignment, org); err != nil {
+		return err
 	}
 
 	// 3) create .classroom50.yml metadata file in repo
-	createYamlErr := createYamlMetadata(client, out, username, assignment, org, classroom)
-	if createYamlErr != nil {
-		return createYamlErr
+	if err := createYamlMetadata(client, out, username, assignment, org, classroom, sourceBranch); err != nil {
+		return err
 	}
 
-	// 4) instruct user to clone repo, or do it automatically with --clone
-	// temporarily hardcoding to false
-	cloneErr := promptToClone(out, createRepoURL, false)
-	if cloneErr != nil {
-		return cloneErr
+	// 4) tell the user how to clone their new repo (and warn them off if they're
+	//    currently inside a git repo, to avoid accidental nesting)
+	if err := promptToClone(out, createRepoURL); err != nil {
+		return err
 	}
 
 	return nil
+}
+
+/**
+ * Returns the default branch of a repo (e.g. "main", "master", "develop"), used
+ * to record source.branch in .classroom50.yml so the round-trip through `gh
+ * student submit` fetches from the right place regardless of template defaults.
+ */
+func lookupRepoDefaultBranch(client *api.RESTClient, org, repo string) (string, error) {
+	path := fmt.Sprintf("repos/%s/%s", url.PathEscape(org), url.PathEscape(repo))
+	var info struct {
+		DefaultBranch string `json:"default_branch"`
+	}
+	if err := client.Get(path, &info); err != nil {
+		return "", fmt.Errorf("GET %s: %w", path, err)
+	}
+	if info.DefaultBranch == "" {
+		// API contract guarantees a default_branch; defend anyway so a malformed
+		// response doesn't propagate an empty string into the YAML.
+		return "main", nil
+	}
+	return info.DefaultBranch, nil
 }
 
 type AuthenticatedUser struct {
@@ -229,10 +250,6 @@ func getAuthedUsername(client *api.RESTClient) (string, error) {
 	return user.Login, nil
 }
 
-type CreatePrivateRepoStatus struct {
-	State      string
-	StatusCode int
-}
 type GeneratedRepo struct {
 	Name     string `json:"name"`
 	FullName string `json:"full_name"`
@@ -250,7 +267,11 @@ type GeneratedRepo struct {
  * https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#create-a-repository-using-a-template
  * Disable issues, projects, and wiki by default.
  *
- * Returns a string for the repo itself if successfully created, else an empty string.
+ * Idempotent on retry: if the repo already exists from a partial prior run
+ * (HTTP 422 on /generate), GET it instead and continue. The PATCH that disables
+ * issues/projects/wiki is itself idempotent.
+ *
+ * Returns the new repo's HTMLURL on success.
  */
 func createTemplatedPrivateAssignmentRepoInOrg(client *api.RESTClient, out io.Writer, username, assignment, org string) (string, error) {
 	newRepoName := fmt.Sprintf("%s-%s", strings.ToLower(username), strings.ToLower(assignment))
@@ -264,11 +285,22 @@ func createTemplatedPrivateAssignmentRepoInOrg(client *api.RESTClient, out io.Wr
 		return "", fmt.Errorf("error encoding json for template: %w", err)
 	}
 
-	createPath := fmt.Sprintf("repos/%s/%s/generate", org, assignment)
+	createPath := fmt.Sprintf("repos/%s/%s/generate", url.PathEscape(org), url.PathEscape(assignment))
 
 	var created GeneratedRepo
 	if err := client.Post(createPath, bytes.NewReader(createBody), &created); err != nil {
-		return "", fmt.Errorf("POST %s: %w", createPath, err)
+		// 422 means the target repo already exists (typically from a previous
+		// partial run that failed before step 2/3 completed). GET it so re-runs
+		// can resume from the next step rather than aborting.
+		if httpErr, ok := errors.AsType[*api.HTTPError](err); ok && httpErr.StatusCode == http.StatusUnprocessableEntity {
+			getPath := fmt.Sprintf("repos/%s/%s", url.PathEscape(org), url.PathEscape(newRepoName))
+			if getErr := client.Get(getPath, &created); getErr != nil {
+				return "", fmt.Errorf("POST %s returned 422 and follow-up GET %s failed: %w", createPath, getPath, getErr)
+			}
+			_, _ = fmt.Fprintf(out, "private repo %s already exists, resuming setup\n", created.FullName)
+		} else {
+			return "", fmt.Errorf("POST %s: %w", createPath, err)
+		}
 	}
 
 	patchBody, err := json.Marshal(map[string]any{
@@ -280,7 +312,7 @@ func createTemplatedPrivateAssignmentRepoInOrg(client *api.RESTClient, out io.Wr
 		return "", fmt.Errorf("patch body encode error: %w", err)
 	}
 
-	patchPath := fmt.Sprintf("repos/%s/%s", org, newRepoName)
+	patchPath := fmt.Sprintf("repos/%s/%s", url.PathEscape(org), url.PathEscape(newRepoName))
 
 	var updated GeneratedRepo
 	if err := client.Patch(patchPath, bytes.NewReader(patchBody), &updated); err != nil {
@@ -297,6 +329,13 @@ func createTemplatedPrivateAssignmentRepoInOrg(client *api.RESTClient, out io.Wr
 	return updated.HTMLURL, nil
 }
 
+/**
+ * Invites the user to their own assignment repo with `maintain` permission.
+ *
+ * GitHub treats PUT /repos/{owner}/{repo}/collaborators/{username} as upsert,
+ * so a single call also satisfies the spec's step 4 (downgrade from the
+ * creator-default `admin` to `maintain`) without a separate re-add.
+ */
 func inviteUserToMaintain(client *api.RESTClient, out io.Writer, username, assignment, org string) error {
 	body, err := json.Marshal(map[string]string{
 		"permission": "maintain",
@@ -306,7 +345,8 @@ func inviteUserToMaintain(client *api.RESTClient, out io.Writer, username, assig
 	}
 
 	fullRepoName := fmt.Sprintf("%s-%s", strings.ToLower(username), strings.ToLower(assignment))
-	path := fmt.Sprintf("repos/%s/%s/collaborators/%s", org, fullRepoName, username)
+	path := fmt.Sprintf("repos/%s/%s/collaborators/%s",
+		url.PathEscape(org), url.PathEscape(fullRepoName), url.PathEscape(username))
 
 	if err := client.Put(path, bytes.NewReader(body), nil); err != nil {
 		return fmt.Errorf("PUT %s: %w", path, err)
@@ -324,7 +364,7 @@ func escapeContentPath(path string) string {
 	}
 	return strings.Join(parts, "/")
 }
-func createYamlMetadata(client *api.RESTClient, out io.Writer, username, assignment, org, classroom string) error {
+func createYamlMetadata(client *api.RESTClient, out io.Writer, username, assignment, org, classroom, sourceBranch string) error {
 	path := ".classroom50.yml"
 	repoName := fmt.Sprintf("%s-%s", strings.ToLower(username), strings.ToLower(assignment))
 
@@ -339,7 +379,7 @@ func createYamlMetadata(client *api.RESTClient, out io.Writer, username, assignm
 		assignment,
 		org,
 		assignment,
-		"main",
+		sourceBranch,
 	)
 
 	encodedContent := base64.StdEncoding.EncodeToString([]byte(yamlContent))
@@ -351,29 +391,37 @@ func createYamlMetadata(client *api.RESTClient, out io.Writer, username, assignm
 		escapeContentPath(path),
 	)
 
+	// Wait for the just-created repo's default branch to become reachable BEFORE
+	// asking about an existing file: a freshly-generated repo briefly returns
+	// 409 "Git Repository is empty" from the contents API while replication
+	// completes, and that 409 is indistinguishable from a real conflict.
+	if err := waitForStableBranch(client, org, repoName, sourceBranch); err != nil {
+		return err
+	}
+
 	var existing struct {
 		SHA string `json:"sha"`
 	}
 
-	getPath := fmt.Sprintf("%s?ref=%s", apiPath, "main")
+	getPath := fmt.Sprintf("%s?ref=%s", apiPath, url.QueryEscape(sourceBranch))
 	err := client.Get(getPath, &existing)
 	if err != nil {
-		// ignore 404 but return an error for other codes
+		// 404 means the file doesn't exist yet (the typical fresh-repo case).
+		// 409 means the repo is still empty/replicating; treat as "no existing
+		// file" and let the PUT below create it. Anything else is a real error.
 		if httpErr, ok := errors.AsType[*api.HTTPError](err); ok {
-			switch httpErr.StatusCode {
-			case 404:
-			default:
-				return fmt.Errorf("error code when checking repo resource: %w", httpErr)
+			if httpErr.StatusCode != http.StatusNotFound && httpErr.StatusCode != http.StatusConflict {
+				return fmt.Errorf("GET %s: %w", getPath, httpErr)
 			}
 		} else {
-			return fmt.Errorf("error checking repo resource: %w", err)
+			return fmt.Errorf("GET %s: %w", getPath, err)
 		}
 	}
 
 	body := map[string]any{
 		"message": fmt.Sprintf("create or update %s", path),
 		"content": encodedContent,
-		"branch":  "main",
+		"branch":  sourceBranch,
 	}
 
 	if err == nil && existing.SHA != "" {
@@ -395,9 +443,6 @@ func createYamlMetadata(client *api.RESTClient, out io.Writer, username, assignm
 		} `json:"commit"`
 	}
 
-	if err := waitForStableBranch(client, org, repoName, "main"); err != nil {
-		return err
-	}
 	if err := client.Put(apiPath, bytes.NewReader(requestBody), &putResp); err != nil {
 		return fmt.Errorf("PUT %s: %w", apiPath, err)
 	}
@@ -464,9 +509,13 @@ func currentGitRoot() (string, bool, error) {
 	return strings.TrimSpace(string(out)), true, nil
 }
 
-func promptToClone(out io.Writer, repo string, clone bool) error {
-	// first off, we want to detect whether we're in a git repository first and abort
-	// any potential clone if so, instead supplying an instruction on how to clone
+/**
+ * Tells the user how to clone the just-created assignment repo. If the user is
+ * already inside a git repo, warns them so they don't accidentally nest one
+ * checkout inside another. Cloning is intentionally not done in-process: the
+ * student picks where it lives on their disk.
+ */
+func promptToClone(out io.Writer, repo string) error {
 	root, insideRepo, err := currentGitRoot()
 	if err != nil {
 		return err
@@ -475,25 +524,10 @@ func promptToClone(out io.Writer, repo string, clone bool) error {
 	if insideRepo {
 		_, _ = fmt.Fprintf(out, "Warning: you are currently inside a Git repository:\n\n  %s\n\n", root)
 		_, _ = fmt.Fprintf(out, "Clone the repository from a parent/workspace directory to avoid nesting repositories:\n\n")
-		_, _ = fmt.Fprintf(out, "  git clone %s.git\n\n", repo)
-	}
-
-	// at this point, we can clone it ourselves if they passed the --clone flag
-	if clone {
-		cmd := exec.Command("git", "clone", repo)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Stdin = os.Stdin
-
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("git clone %s: %w", repo, err)
-		}
-
-		fmt.Print("Your assignment repo has been successfully cloned!\n\n")
 	} else {
 		_, _ = fmt.Fprintf(out, "Your assignment repo is now ready to be cloned:\n\n")
-		_, _ = fmt.Fprintf(out, "  git clone %s.git\n\n", repo)
 	}
+	_, _ = fmt.Fprintf(out, "  git clone %s.git\n\n", repo)
 
 	return nil
 }

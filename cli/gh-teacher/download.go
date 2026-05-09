@@ -42,7 +42,10 @@ func downloadCmd() *cobra.Command {
 			if assignment == "" {
 				return errors.New("assignment must not be empty")
 			}
-			if !cmd.Flags().Changed("dir") {
+			// Both `-d` not passed and `-d ""` should resolve to the per-org default
+			// so we don't end up creating clones at the cwd root.
+			dir = strings.TrimSpace(dir)
+			if dir == "" {
 				dir = org + "_submissions"
 			}
 
@@ -61,13 +64,24 @@ func downloadCmd() *cobra.Command {
 }
 
 func downloadAssignment(client *api.RESTClient, out, errOut io.Writer, org, assignment, dir string, quiet bool) error {
-	suffix := "-" + assignment
+	// `gh student accept` lowercases assignment when forming repo names, so the
+	// stored names are always lowercase regardless of how the teacher typed the
+	// arg. Lowercase here too so a `gh teacher download cs50 PSet1` invocation
+	// still matches `alice-pset1` etc.
+	suffix := "-" + strings.ToLower(assignment)
 
 	repos, err := listOrgRepoNames(client, org)
 	if err != nil {
 		return err
 	}
 
+	// Match by `gh student accept`'s naming convention: <username>-<assignment>.
+	// `len(name) > len(suffix)` guarantees a non-empty username prefix; the
+	// HasSuffix check anchors the assignment slug at end-of-name. This match is
+	// intentionally per-spec — see cli/README.md. It can over-match when the
+	// org also contains unrelated repos that happen to end in -<assignment>
+	// (e.g., a `<org>-<assignment>` template fork). Teachers running download
+	// against a noisy org should keep classroom orgs focused.
 	var matched []string
 	for _, name := range repos {
 		if len(name) > len(suffix) && strings.HasSuffix(name, suffix) {
