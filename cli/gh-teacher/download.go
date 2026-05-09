@@ -23,9 +23,8 @@ const dirTimestampFormat = "2006_01_02_T_15_04_05"
 
 func downloadCmd() *cobra.Command {
 	var (
-		dir     string
-		quiet   bool
-		verbose bool
+		dir   string
+		quiet bool
 	)
 
 	cmd := &cobra.Command{
@@ -66,17 +65,16 @@ func downloadCmd() *cobra.Command {
 				return fmt.Errorf("REST client: %w", err)
 			}
 
-			return downloadAssignment(client, cmd.OutOrStdout(), cmd.ErrOrStderr(), org, assignment, dir, quiet, verbose)
+			return downloadAssignment(client, cmd.OutOrStdout(), cmd.ErrOrStderr(), org, assignment, dir, quiet)
 		},
 	}
 
 	cmd.Flags().StringVarP(&dir, "dir", "d", "", "Directory to clone repos into (default: <org>_submissions_<timestamp>)")
 	cmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Suppress informational output and pass --quiet to git clone (errors still go to stderr)")
-	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Stream raw git output for each clone instead of the concise per-repo summary")
 	return cmd
 }
 
-func downloadAssignment(client *api.RESTClient, out, errOut io.Writer, org, assignment, dir string, quiet, verbose bool) error {
+func downloadAssignment(client *api.RESTClient, out, errOut io.Writer, org, assignment, dir string, quiet bool) error {
 	// `gh student accept` lowercases assignment when forming repo names, so the
 	// stored names are always lowercase regardless of how the teacher typed the
 	// arg. Lowercase here too so a `gh teacher download cs50 PSet1` invocation
@@ -144,7 +142,7 @@ func downloadAssignment(client *api.RESTClient, out, errOut io.Writer, org, assi
 			}
 		}
 
-		if err := cloneOrgRepo(out, errOut, org, name, target, quiet, verbose); err != nil {
+		if err := cloneOrgRepo(out, errOut, org, name, target, quiet); err != nil {
 			if quiet {
 				_, _ = fmt.Fprintf(errOut, "%s: clone failed: %v\n", name, err)
 			} else if verbose {
@@ -209,7 +207,7 @@ const stderrTailCap = 8 * 1024
 // and the last <stderrTailCap> bytes of stderr are captured so the per-repo
 // "Failed: …" line carries git's actual diagnostic instead of just
 // "exit status 1".
-func cloneOrgRepo(out, errOut io.Writer, org, repo, target string, quiet, verbose bool) error {
+func cloneOrgRepo(out, errOut io.Writer, org, repo, target string, quiet bool) error {
 	args := []string{"repo", "clone", fmt.Sprintf("%s/%s", org, repo), target}
 	if quiet {
 		args = append(args, "--", "--quiet")

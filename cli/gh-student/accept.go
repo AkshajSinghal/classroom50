@@ -223,17 +223,14 @@ func acceptAssignment(client *api.RESTClient, out io.Writer, org, classroom, ass
 	if err := WriteClassroomMetadata(client, org, repoName, sourceBranch, cfg); err != nil {
 		return err
 	}
-	// "wrote" instead of "created": WriteClassroomMetadata upserts via
-	// GET-for-SHA → PUT, so re-runs update an existing file in place.
-	_, _ = fmt.Fprintf(out, "wrote %s in %s/%s\n", ClassroomMetadataPath, org, repoName)
-
-	// 4) tell the user how to clone their new repo (and warn them off if they're
-	//    currently inside a git repo, to avoid accidental nesting)
-	if err := promptToClone(out, htmlURL); err != nil {
-		return err
+	if verbose {
+		// "wrote" instead of "created": WriteClassroomMetadata upserts via
+		// GET-for-SHA → PUT, so re-runs update an existing file in place.
+		_, _ = fmt.Fprintf(out, "wrote %s in %s/%s\n", ClassroomMetadataPath, org, repoName)
 	}
 
-	return nil
+	// 4) tell the user the assignment is accepted and how to clone it.
+	return reportAccepted(out, fullName, htmlURL)
 }
 
 // is422AlreadyExists reports whether a 422 from /generate carries an
@@ -253,6 +250,15 @@ func is422AlreadyExists(httpErr *api.HTTPError) bool {
 	return false
 }
 
+// reportAccepted prints the friendly message that wraps up `gh student accept`
+// on the success path: a one-line "Assignment accepted" header followed by
+// clone instructions. Per-step operational details (create / invite / yaml
+// write) are gated behind --verbose; this is what the user sees by default.
+func reportAccepted(out io.Writer, fullName, htmlURL string) error {
+	_, _ = fmt.Fprintf(out, "Assignment accepted: %s\n\n", fullName)
+	return printCloneInstructions(out, htmlURL)
+}
+
 // reportAlreadyAccepted prints the friendly message used when the student
 // re-runs `gh student accept` for an assignment they've already accepted. The
 // existing repo is left alone — no PATCH, no collaborator update, no metadata
@@ -261,7 +267,14 @@ func reportAlreadyAccepted(out io.Writer, fullName, htmlURL string) error {
 	_, _ = fmt.Fprintf(out, "Assignment already accepted: %s\n\n", fullName)
 	_, _ = fmt.Fprintln(out, "Your existing repository contains your latest submissions and commits.")
 	_, _ = fmt.Fprintln(out)
+	return printCloneInstructions(out, htmlURL)
+}
 
+// printCloneInstructions writes the "Clone it with:" block + the clone
+// command, preceded by a warning if the user is currently inside a Git
+// repository (to avoid an accidental nested clone). Shared by both the
+// new-accept and already-accepted reports.
+func printCloneInstructions(out io.Writer, htmlURL string) error {
 	root, insideRepo, err := currentGitRoot()
 	if err != nil {
 		return err
@@ -384,12 +397,14 @@ func createTemplatedPrivateAssignmentRepoInOrg(client *api.RESTClient, out io.Wr
 		return "", "", false, fmt.Errorf("created %s/%s, but failed to disable issues/projects/wiki: %w", org, newRepoName, err)
 	}
 
-	_, _ = fmt.Fprintf(
-		out,
-		"created private repo %s, with issues/projects/wiki disabled: %s\n",
-		updated.FullName,
-		updated.HTMLURL,
-	)
+	if verbose {
+		_, _ = fmt.Fprintf(
+			out,
+			"created private repo %s, with issues/projects/wiki disabled: %s\n",
+			updated.FullName,
+			updated.HTMLURL,
+		)
+	}
 
 	return updated.HTMLURL, updated.FullName, false, nil
 }
@@ -417,7 +432,9 @@ func inviteUserToMaintain(client *api.RESTClient, out io.Writer, username, assig
 		return fmt.Errorf("PUT %s: %w", path, err)
 	}
 
-	_, _ = fmt.Fprintf(out, "invited %s to %s/%s with maintain permission\n", username, org, fullRepoName)
+	if verbose {
+		_, _ = fmt.Fprintf(out, "invited %s to %s/%s with maintain permission\n", username, org, fullRepoName)
+	}
 
 	return nil
 }
@@ -437,27 +454,4 @@ func currentGitRoot() (string, bool, error) {
 	}
 
 	return strings.TrimSpace(string(out)), true, nil
-}
-
-/**
- * Tells the user how to clone the just-created assignment repo. If the user is
- * already inside a git repo, warns them so they don't accidentally nest one
- * checkout inside another. Cloning is intentionally not done in-process: the
- * student picks where it lives on their disk.
- */
-func promptToClone(out io.Writer, repo string) error {
-	root, insideRepo, err := currentGitRoot()
-	if err != nil {
-		return err
-	}
-
-	if insideRepo {
-		_, _ = fmt.Fprintf(out, "Warning: you are currently inside a Git repository:\n\n  %s\n\n", root)
-		_, _ = fmt.Fprintf(out, "Clone the repository from a parent/workspace directory to avoid nesting repositories:\n\n")
-	} else {
-		_, _ = fmt.Fprintf(out, "Your assignment repo is now ready to be cloned:\n\n")
-	}
-	_, _ = fmt.Fprintf(out, "  git clone %s.git\n\n", repo)
-
-	return nil
 }

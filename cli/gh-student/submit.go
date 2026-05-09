@@ -88,17 +88,21 @@ func submitAssignment(client *api.RESTClient, out io.Writer, errOut io.Writer, o
 		_ = os.RemoveAll(tmp)
 	}()
 
-	_, _ = fmt.Fprintf(out, "Preparing submission snapshot from %s\n", root)
+	if verbose {
+		_, _ = fmt.Fprintf(out, "Preparing submission snapshot from %s\n", root)
+	}
 
 	if err := copySubmittableFiles(root, tmp); err != nil {
 		return err
 	}
 
-	_, _ = fmt.Fprintf(out, "Fetching latest instructor .gitignore and .github from %s/%s@%s\n",
-		config.Source.Owner,
-		config.Source.Repo,
-		config.Source.Branch,
-	)
+	if verbose {
+		_, _ = fmt.Fprintf(out, "Fetching latest instructor .gitignore and .github from %s/%s@%s\n",
+			config.Source.Owner,
+			config.Source.Repo,
+			config.Source.Branch,
+		)
+	}
 
 	// .gitignore and .github/ are required template artifacts: every assignment
 	// template ships them, and submit relies on them being current. A 404 here
@@ -112,13 +116,15 @@ func submitAssignment(client *api.RESTClient, out io.Writer, errOut io.Writer, o
 		return fmt.Errorf("fetch instructor .github: %w", err)
 	}
 
-	_, _ = fmt.Fprintf(out, "Pushing submission to %s %s\n", opts.Remote, opts.Branch)
+	if verbose {
+		_, _ = fmt.Fprintf(out, "Pushing submission to %s %s\n", opts.Remote, opts.Branch)
+	}
 
 	if err := pushSnapshot(tmp, remoteURL, opts.Branch, opts.Message, out, errOut); err != nil {
 		return err
 	}
 
-	_, _ = fmt.Fprintf(out, "submitted %s to %s\n", config.AssignmentID, remoteURL)
+	_, _ = fmt.Fprintf(out, "Submitted %s to %s\n", config.AssignmentID, remoteURL)
 
 	return nil
 }
