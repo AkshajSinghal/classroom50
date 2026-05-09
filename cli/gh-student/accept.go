@@ -177,25 +177,35 @@ func acceptAssignment(client *api.RESTClient, out io.Writer, org, classroom, ass
 		return fmt.Errorf("retrieving authed username: %w", err)
 	}
 
-	// Look up the template's default branch so .classroom50.yml records the
-	// branch the template actually publishes from (templates using master or
-	// develop would otherwise silently round-trip "main" through submit).
-	sourceBranch, err := lookupRepoDefaultBranch(client, org, assignment)
+	// 1) create private assignment repo. If it already exists (the student
+	//    has accepted this assignment before), short-circuit with a friendly
+	//    "already accepted" message — running the rest of the setup against
+	//    an existing repo is wrong: the student is no longer admin (they were
+	//    downgraded to maintain on first accept), so the PATCH that disables
+	//    issues/projects/wiki would fail with a misleading 404, and re-doing
+	//    the collaborator and metadata writes risks touching student work.
+	htmlURL, fullName, alreadyExisted, err := createTemplatedPrivateAssignmentRepoInOrg(client, out, username, assignment, org)
 	if err != nil {
 		return err
 	}
-
-	// 1) create private assignment repo (idempotent: a 422 already-exists from
-	//    a partial prior run is treated as resume, not failure)
-	createRepoURL, err := createTemplatedPrivateAssignmentRepoInOrg(client, out, username, assignment, org)
-	if err != nil {
-		return err
+	if alreadyExisted {
+		return reportAlreadyAccepted(out, fullName, htmlURL)
 	}
 
 	// 2) invite username to the repo with `maintain` permission. PUT collaborators
 	//    is upsert in the GitHub API, so this also serves as the spec's step 4
 	//    downgrade from the creator-default `admin` to `maintain` in a single call.
 	if err := inviteUserToMaintain(client, out, username, assignment, org); err != nil {
+		return err
+	}
+
+	// Look up the template's default branch so .classroom50.yml records the
+	// branch the template actually publishes from (templates using master or
+	// develop would otherwise silently round-trip "main" through submit).
+	// Deferred until here so a deleted/inaccessible template doesn't break
+	// the already-accepted short-circuit above — that path doesn't need it.
+	sourceBranch, err := lookupRepoDefaultBranch(client, org, assignment)
+	if err != nil {
 		return err
 	}
 
@@ -219,10 +229,51 @@ func acceptAssignment(client *api.RESTClient, out io.Writer, org, classroom, ass
 
 	// 4) tell the user how to clone their new repo (and warn them off if they're
 	//    currently inside a git repo, to avoid accidental nesting)
-	if err := promptToClone(out, createRepoURL); err != nil {
+	if err := promptToClone(out, htmlURL); err != nil {
 		return err
 	}
 
+	return nil
+}
+
+// is422AlreadyExists reports whether a 422 from /generate carries an
+// "already exists" message anywhere in its top-level message or items. The
+// match is case-insensitive so it tolerates wording drift across GitHub
+// responses without overreaching to other 422 reasons (invalid name,
+// template-not-flagged, private-repos-disallowed, etc.).
+func is422AlreadyExists(httpErr *api.HTTPError) bool {
+	if strings.Contains(strings.ToLower(httpErr.Message), "already exists") {
+		return true
+	}
+	for _, item := range httpErr.Errors {
+		if strings.Contains(strings.ToLower(item.Message), "already exists") {
+			return true
+		}
+	}
+	return false
+}
+
+// reportAlreadyAccepted prints the friendly message used when the student
+// re-runs `gh student accept` for an assignment they've already accepted. The
+// existing repo is left alone — no PATCH, no collaborator update, no metadata
+// write — so the student's work is never touched.
+func reportAlreadyAccepted(out io.Writer, fullName, htmlURL string) error {
+	_, _ = fmt.Fprintf(out, "Assignment already accepted: %s\n\n", fullName)
+	_, _ = fmt.Fprintln(out, "Your existing repository contains your latest submissions and commits.")
+	_, _ = fmt.Fprintln(out)
+
+	root, insideRepo, err := currentGitRoot()
+	if err != nil {
+		return err
+	}
+	if insideRepo {
+		_, _ = fmt.Fprintf(out, "Warning: you are currently inside a Git repository:\n\n  %s\n\n", root)
+		_, _ = fmt.Fprintln(out, "Clone from a parent/workspace directory to avoid nesting repositories:")
+	} else {
+		_, _ = fmt.Fprintln(out, "Clone it with:")
+	}
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintf(out, "  git clone %s.git\n\n", htmlURL)
 	return nil
 }
 
@@ -278,40 +329,43 @@ type GeneratedRepo struct {
  * https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#create-a-repository-using-a-template
  * Disable issues, projects, and wiki by default.
  *
- * Idempotent on retry: if the repo already exists from a partial prior run
- * (HTTP 422 on /generate), GET it instead and continue. The PATCH that disables
- * issues/projects/wiki is itself idempotent.
+ * If the repo already exists (HTTP 422 on /generate), the student has accepted
+ * this assignment before. GET the repo and return it with alreadyExisted=true
+ * so the caller can short-circuit the rest of the accept flow. We do NOT run
+ * the PATCH (disable issues/projects/wiki) on this path: the student is no
+ * longer admin on their own repo (they were downgraded to maintain on first
+ * accept), so the PATCH would fail with a misleading 404.
  *
- * Returns the new repo's HTMLURL on success.
+ * Returns (htmlURL, fullName, alreadyExisted, err).
  */
-func createTemplatedPrivateAssignmentRepoInOrg(client *api.RESTClient, out io.Writer, username, assignment, org string) (string, error) {
+func createTemplatedPrivateAssignmentRepoInOrg(client *api.RESTClient, out io.Writer, username, assignment, org string) (htmlURL, fullName string, alreadyExisted bool, err error) {
 	newRepoName := fmt.Sprintf("%s-%s", strings.ToLower(username), strings.ToLower(assignment))
 	createBody, err := json.Marshal(map[string]any{
 		"owner":   org,
 		"name":    newRepoName,
 		"private": true,
 	})
-
 	if err != nil {
-		return "", fmt.Errorf("error encoding json for template: %w", err)
+		return "", "", false, fmt.Errorf("error encoding json for template: %w", err)
 	}
 
 	createPath := fmt.Sprintf("repos/%s/%s/generate", url.PathEscape(org), url.PathEscape(assignment))
 
 	var created GeneratedRepo
 	if err := client.Post(createPath, bytes.NewReader(createBody), &created); err != nil {
-		// 422 means the target repo already exists (typically from a previous
-		// partial run that failed before step 2/3 completed). GET it so re-runs
-		// can resume from the next step rather than aborting.
-		if httpErr, ok := errors.AsType[*api.HTTPError](err); ok && httpErr.StatusCode == http.StatusUnprocessableEntity {
+		// Only treat a 422 as "already accepted" when the body actually says
+		// the name already exists. Other 422 reasons (invalid name format,
+		// template-not-flagged-as-template, org disallows private repos) must
+		// keep flowing through the wrapped-error path so the user sees the
+		// real cause instead of a misleading "already accepted" prompt.
+		if httpErr, ok := errors.AsType[*api.HTTPError](err); ok && httpErr.StatusCode == http.StatusUnprocessableEntity && is422AlreadyExists(httpErr) {
 			getPath := fmt.Sprintf("repos/%s/%s", url.PathEscape(org), url.PathEscape(newRepoName))
 			if getErr := client.Get(getPath, &created); getErr != nil {
-				return "", fmt.Errorf("POST %s returned 422 and follow-up GET %s failed: %w", createPath, getPath, getErr)
+				return "", "", false, fmt.Errorf("POST %s returned 422 and follow-up GET %s failed: %w", createPath, getPath, getErr)
 			}
-			_, _ = fmt.Fprintf(out, "private repo %s already exists, resuming setup\n", created.FullName)
-		} else {
-			return "", fmt.Errorf("POST %s: %w", createPath, err)
+			return created.HTMLURL, created.FullName, true, nil
 		}
+		return "", "", false, fmt.Errorf("POST %s: %w", createPath, err)
 	}
 
 	patchBody, err := json.Marshal(map[string]any{
@@ -320,14 +374,14 @@ func createTemplatedPrivateAssignmentRepoInOrg(client *api.RESTClient, out io.Wr
 		"has_wiki":     false,
 	})
 	if err != nil {
-		return "", fmt.Errorf("patch body encode error: %w", err)
+		return "", "", false, fmt.Errorf("patch body encode error: %w", err)
 	}
 
 	patchPath := fmt.Sprintf("repos/%s/%s", url.PathEscape(org), url.PathEscape(newRepoName))
 
 	var updated GeneratedRepo
 	if err := client.Patch(patchPath, bytes.NewReader(patchBody), &updated); err != nil {
-		return "", fmt.Errorf("created %s/%s, but failed to disable issues/projects/wiki: %w", org, newRepoName, err)
+		return "", "", false, fmt.Errorf("created %s/%s, but failed to disable issues/projects/wiki: %w", org, newRepoName, err)
 	}
 
 	_, _ = fmt.Fprintf(
@@ -337,7 +391,7 @@ func createTemplatedPrivateAssignmentRepoInOrg(client *api.RESTClient, out io.Wr
 		updated.HTMLURL,
 	)
 
-	return updated.HTMLURL, nil
+	return updated.HTMLURL, updated.FullName, false, nil
 }
 
 /**
