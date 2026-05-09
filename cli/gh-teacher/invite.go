@@ -103,7 +103,7 @@ func validRepoPermission(p string) bool {
 func inviteToOrg(client *api.RESTClient, out, errOut io.Writer, org, username, role string, quiet bool) error {
 	userID, err := lookupUserID(client, username)
 	if err != nil {
-		return fmt.Errorf("lookup user %s: %w", username, err)
+		return err
 	}
 
 	body, err := json.Marshal(map[string]any{
@@ -116,7 +116,7 @@ func inviteToOrg(client *api.RESTClient, out, errOut io.Writer, org, username, r
 
 	path := fmt.Sprintf("orgs/%s/invitations", url.PathEscape(org))
 	if err := client.Post(path, bytes.NewReader(body), nil); err != nil {
-		return fmt.Errorf("POST %s: %w", path, err)
+		return classifyOrgInviteError(client, org, username, path, err)
 	}
 
 	if !quiet {
@@ -132,9 +132,86 @@ func lookupUserID(client *api.RESTClient, username string) (int64, error) {
 		ID int64 `json:"id"`
 	}
 	if err := client.Get(path, &user); err != nil {
+		if httpErr, ok := errors.AsType[*api.HTTPError](err); ok && httpErr.StatusCode == http.StatusNotFound {
+			return 0, fmt.Errorf("GitHub user %q not found", username)
+		}
 		return 0, fmt.Errorf("GET %s: %w", path, err)
 	}
 	return user.ID, nil
+}
+
+// classifyOrgInviteError converts a raw error from POST /orgs/{org}/invitations
+// into an actionable user-facing message for the common failure modes
+// (missing scope, not an admin, org doesn't exist, already a member, pending
+// invite). Anything we don't recognize — non-HTTP errors (network/DNS/context
+// cancellation), unrecognized HTTP statuses, or 422s with an indeterminate
+// membership state — falls through to a single wrapped error that preserves
+// both the request context and the underlying cause for debugging.
+func classifyOrgInviteError(client *api.RESTClient, org, username, path string, err error) error {
+	if httpErr, ok := errors.AsType[*api.HTTPError](err); ok {
+		switch httpErr.StatusCode {
+		case http.StatusUnauthorized:
+			return errors.New("authentication failed; run `gh teacher auth` to refresh your token")
+
+		case http.StatusForbidden:
+			// Distinguish "missing admin:org scope" from "has scope but isn't
+			// an admin". GitHub returns the token's current scopes in
+			// X-OAuth-Scopes; if the header is absent (e.g. fine-grained PAT)
+			// we fall back to a generic message that covers both.
+			scopes := httpErr.Headers.Get("X-OAuth-Scopes")
+			switch {
+			case scopes == "":
+				return fmt.Errorf("forbidden: ensure your token has the admin:org scope (`gh teacher auth`) and that you are an admin of %s", org)
+			case !hasOrgAdminScope(scopes):
+				return errors.New("missing admin:org OAuth scope; run `gh teacher auth` to grant it")
+			default:
+				return fmt.Errorf("you must be an admin of %s to invite members", org)
+			}
+
+		case http.StatusNotFound:
+			return fmt.Errorf("%s: organization not found or not accessible", org)
+
+		case http.StatusUnprocessableEntity:
+			// 422 covers "already a member", "pending invite", "spam-blocked",
+			// "invitee blocked org", etc. A follow-up GET on the membership
+			// endpoint distinguishes the two common cases precisely. Other
+			// 422 reasons fall through to the wrapped error below.
+			if state, ok := getMembershipState(client, org, username); ok {
+				switch state {
+				case "active":
+					return fmt.Errorf("%s is already a member of %s", username, org)
+				case "pending":
+					return fmt.Errorf("%s already has a pending invitation to %s; advise them to visit https://github.com/%s to accept", username, org, org)
+				}
+			}
+		}
+	}
+	return fmt.Errorf("POST %s: %w", path, err)
+}
+
+// hasOrgAdminScope reports whether the comma-separated scope list from the
+// X-OAuth-Scopes response header includes admin:org.
+func hasOrgAdminScope(scopes string) bool {
+	for _, s := range strings.Split(scopes, ",") {
+		if strings.TrimSpace(s) == "admin:org" {
+			return true
+		}
+	}
+	return false
+}
+
+// getMembershipState returns the user's membership state in org ("active"
+// or "pending"), or false if the lookup itself failed. Used only on the
+// post-422 disambiguation path.
+func getMembershipState(client *api.RESTClient, org, username string) (string, bool) {
+	path := fmt.Sprintf("orgs/%s/memberships/%s", url.PathEscape(org), url.PathEscape(username))
+	var resp struct {
+		State string `json:"state"`
+	}
+	if err := client.Get(path, &resp); err != nil {
+		return "", false
+	}
+	return resp.State, true
 }
 
 func inviteToRepo(client *api.RESTClient, out io.Writer, owner, repo, username, permission string, quiet bool) error {
