@@ -147,7 +147,7 @@ func classifyOrgInviteError(client *api.RESTClient, org, username, path string, 
 	if httpErr, ok := errors.AsType[*api.HTTPError](err); ok {
 		switch httpErr.StatusCode {
 		case http.StatusUnauthorized:
-			return errors.New("authentication failed; run `gh teacher auth` to refresh your token")
+			return errors.New("authentication failed; run `gh teacher login` to (re)authenticate")
 
 		case http.StatusForbidden:
 			// X-OAuth-Scopes distinguishes missing-scope from not-an-admin;
@@ -155,9 +155,9 @@ func classifyOrgInviteError(client *api.RESTClient, org, username, path string, 
 			scopes := httpErr.Headers.Get("X-OAuth-Scopes")
 			switch {
 			case scopes == "":
-				return fmt.Errorf("forbidden: ensure your token has the admin:org scope (`gh teacher auth`) and that you are an admin of %s", org)
+				return fmt.Errorf("forbidden: ensure your token has the admin:org scope (`gh teacher login`) and that you are an admin of %s", org)
 			case !hasOrgAdminScope(scopes):
-				return errors.New("missing admin:org OAuth scope; run `gh teacher auth` to grant it")
+				return errors.New("missing admin:org OAuth scope; run `gh teacher login` to grant it")
 			default:
 				return fmt.Errorf("you must be an admin of %s to invite members", org)
 			}

@@ -23,7 +23,8 @@ func main() {
 	root.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Show operational details (per-step API/git output)")
 
 	root.AddCommand(whoamiCmd())
-	root.AddCommand(authCmd())
+	root.AddCommand(loginCmd())
+	root.AddCommand(logoutCmd())
 	root.AddCommand(acceptCmd())
 	root.AddCommand(inviteCmd())
 	root.AddCommand(submitCmd())
