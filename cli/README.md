@@ -19,7 +19,7 @@ The full lifecycle, end-to-end. Each step assumes the previous ones are done.
 
 ### 1. Install (from this repo)
 
-You'll need [Go](https://go.dev/doc/install), the [GitHub CLI (`gh`)](https://cli.github.com/), and an authenticated `gh` session (run `gh auth login` first if you haven't already). The extensions themselves aren't published yet, so install them from a local checkout:
+You'll need [Go](https://go.dev/doc/install) and the [GitHub CLI (`gh`)](https://cli.github.com/). The auth steps below (`gh teacher login` / `gh student login`) handle GitHub authentication, so you don't need to run `gh auth login` separately first. The extensions themselves aren't published yet, so install them from a local checkout:
 
 ```
 git clone https://github.com/foundation50/classroom50-prototype
@@ -42,15 +42,15 @@ The CLI doesn't create or configure orgs. Do these once, on github.com:
 2. **Set the org's base permission to "No permission"** at `https://github.com/organizations/{org}/settings/member_privileges` so students don't get implicit access to other repos in the org.
 3. **Create a template assignment repo.** Any repo you flag as a template (in the repo's Settings, tick "Template repository") works. **The template must be public** so students can read it: the "No permission" baseline from the previous step blocks org members from reading private repos they aren't explicit collaborators on, and a private template would 404 on `gh student accept`. The Free and Team plans don't have a way around this. (GitHub Enterprise Cloud has a third visibility called "internal" that all enterprise members can read without per-repo collaboration; on that plan an internal template works without going public. See [GitHub's docs on internal repositories](https://docs.github.com/en/enterprise-cloud@latest/repositories/creating-and-managing-repositories/about-repositories#about-internal-repositories).) See [`templates/example-assignment/`](../templates/example-assignment/) in this repo for the expected file structure (`.gitignore`, `.github/`, starter code, README); copy that layout into your own template repo.
 
-### 3. Teacher: refresh your gh token
+### 3. Teacher: log in with the right scopes
 
 Org invitations require the `admin:org` OAuth scope, which `gh auth login` doesn't grant by default. Run once:
 
 ```
-gh teacher auth
+gh teacher login
 ```
 
-This shells out to `gh auth refresh -s admin:org` and opens a browser to authorize.
+This shells out to `gh auth login -s admin:org` and opens a browser to authorize. If you haven't logged in to `gh` before, it performs the initial login and grants `admin:org` in one shot; if you have, it re-authenticates with the new scope appended. Either way, this is the only auth step you need before inviting students.
 
 ### 4. Teacher: invite students to the org
 
@@ -120,7 +120,7 @@ gh teacher invite --admin {org} {username}   # admin
 1. Invite user ID to org, per <https://docs.github.com/en/rest/orgs/members?apiVersion=2026-03-10#create-an-organization-invitation>.
 1. Advise user to visit `https://github.com/{org}` to accept the invitation atop the page.
 
-The org-invitation endpoint requires the `admin:org` OAuth scope, which is not granted by `gh auth login` by default. Run `gh teacher auth` once to refresh the token with that scope before the first org invite.
+The org-invitation endpoint requires the `admin:org` OAuth scope, which is not granted by `gh auth login` by default. Run `gh teacher login` once before the first org invite; it shells out to `gh auth login -s admin:org` so it doubles as the initial login step on a fresh setup.
 
 ### Accept an assignment ([gh-student/](gh-student/))
 
