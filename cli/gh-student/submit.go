@@ -106,12 +106,14 @@ func submitAssignment(client *api.RESTClient, out io.Writer, errOut io.Writer, o
 	}
 
 	if err := fetchRepoPath(client, tmp, config.Source.Owner, config.Source.Repo, config.Source.Branch, ".gitignore"); err != nil {
-		if httpErr, ok := errors.AsType[*api.HTTPError](err); !ok || httpErr.StatusCode != http.StatusNotFound {
+		if !isNotFoundHTTPError(err) {
 			return fmt.Errorf("fetch instructor .gitignore: %w", err)
 		}
 	}
 	if err := fetchRepoPath(client, tmp, config.Source.Owner, config.Source.Repo, config.Source.Branch, ".github"); err != nil {
-		return fmt.Errorf("fetch instructor .github: %w", err)
+		if !isNotFoundHTTPError(err) {
+			return fmt.Errorf("fetch instructor .github: %w", err)
+		}
 	}
 
 	if verbose {
@@ -125,6 +127,11 @@ func submitAssignment(client *api.RESTClient, out io.Writer, errOut io.Writer, o
 	_, _ = fmt.Fprintf(out, "Submitted %s to %s\n", config.AssignmentID, remoteURL)
 
 	return nil
+}
+
+func isNotFoundHTTPError(err error) bool {
+	httpErr, ok := errors.AsType[*api.HTTPError](err)
+	return ok && httpErr.StatusCode == http.StatusNotFound
 }
 
 func gitOutput(dir string, args ...string) (string, error) {
