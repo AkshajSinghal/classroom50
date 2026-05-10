@@ -121,7 +121,7 @@ func inviteToOrg(client *api.RESTClient, out, errOut io.Writer, org, username, r
 
 	if !quiet {
 		_, _ = fmt.Fprintf(out, "%s: invited %s as %s\n", org, username, role)
-		_, _ = fmt.Fprintf(errOut, "Advise %s to visit https://github.com/%s to accept the invitation atop the page.\n", username, org)
+		_, _ = fmt.Fprintf(errOut, "Advise %s to sign in to https://github.com as %s, then visit https://github.com/%s to accept the invitation at the top of the page.\n", username, username, org)
 	}
 	return nil
 }
