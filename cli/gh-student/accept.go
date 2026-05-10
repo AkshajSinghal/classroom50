@@ -153,7 +153,7 @@ func acceptAssignment(client *api.RESTClient, out io.Writer, org, classroom, ass
 
 	// 1) create the assignment repo. If it already exists, short-circuit:
 	//    the student accepted before; don't touch their work.
-	htmlURL, fullName, alreadyExisted, err := createTemplatedPrivateAssignmentRepoInOrg(client, out, username, assignment, org)
+	htmlURL, fullName, alreadyExisted, err := createTemplatedPrivateAssignmentRepoInOrg(client, out, username, classroom, assignment, org)
 	if err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func acceptAssignment(client *api.RESTClient, out io.Writer, org, classroom, ass
 
 	// 2) invite as `maintain`. PUT collaborators is upsert; this also covers
 	//    the spec's admin->maintain downgrade in a single call.
-	if err := inviteUserToMaintain(client, out, username, assignment, org); err != nil {
+	if err := inviteUserToMaintain(client, out, username, classroom, assignment, org); err != nil {
 		return err
 	}
 
@@ -175,7 +175,7 @@ func acceptAssignment(client *api.RESTClient, out io.Writer, org, classroom, ass
 	}
 
 	// 3) write .classroom50.yml.
-	repoName := fmt.Sprintf("%s-%s", strings.ToLower(username), strings.ToLower(assignment))
+	repoName := fmt.Sprintf("%s-%s-%s", strings.ToLower(classroom), strings.ToLower(assignment), strings.ToLower(username))
 	cfg := ClassroomConfig{
 		ClassroomID:  classroom,
 		AssignmentID: assignment,
@@ -286,12 +286,12 @@ type GeneratedRepo struct {
 }
 
 // createTemplatedPrivateAssignmentRepoInOrg generates a private repo named
-// {username}-{assignment} (lowercased) from the assignment template and
+// {classroom}-{assignment}-{username} (lowercased) from the assignment template and
 // disables issues/projects/wiki. On 422-already-exists, returns
 // alreadyExisted=true and skips the PATCH so re-runs don't disturb an
 // existing repo. See: GitHub "Create a repository using a template" REST API.
-func createTemplatedPrivateAssignmentRepoInOrg(client *api.RESTClient, out io.Writer, username, assignment, org string) (htmlURL, fullName string, alreadyExisted bool, err error) {
-	newRepoName := fmt.Sprintf("%s-%s", strings.ToLower(username), strings.ToLower(assignment))
+func createTemplatedPrivateAssignmentRepoInOrg(client *api.RESTClient, out io.Writer, username, classroom, assignment, org string) (htmlURL, fullName string, alreadyExisted bool, err error) {
+	newRepoName := fmt.Sprintf("%s-%s-%s", strings.ToLower(classroom), strings.ToLower(assignment), strings.ToLower(username))
 	createBody, err := json.Marshal(map[string]any{
 		"owner":   org,
 		"name":    newRepoName,
@@ -348,7 +348,7 @@ func createTemplatedPrivateAssignmentRepoInOrg(client *api.RESTClient, out io.Wr
 // inviteUserToMaintain adds username as a maintain-level collaborator on
 // their assignment repo. PUT collaborators is upsert; this also covers the
 // spec's admin->maintain downgrade.
-func inviteUserToMaintain(client *api.RESTClient, out io.Writer, username, assignment, org string) error {
+func inviteUserToMaintain(client *api.RESTClient, out io.Writer, username, classroom, assignment, org string) error {
 	body, err := json.Marshal(map[string]string{
 		"permission": "maintain",
 	})
@@ -356,7 +356,7 @@ func inviteUserToMaintain(client *api.RESTClient, out io.Writer, username, assig
 		return fmt.Errorf("error creating PUT body: %w", err)
 	}
 
-	fullRepoName := fmt.Sprintf("%s-%s", strings.ToLower(username), strings.ToLower(assignment))
+	fullRepoName := fmt.Sprintf("%s-%s-%s", strings.ToLower(classroom), strings.ToLower(assignment), strings.ToLower(username))
 	path := fmt.Sprintf("repos/%s/%s/collaborators/%s",
 		url.PathEscape(org), url.PathEscape(fullRepoName), url.PathEscape(username))
 
