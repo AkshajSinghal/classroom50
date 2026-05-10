@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/cli/go-gh/v2/pkg/auth"
 	"github.com/spf13/cobra"
 )
 
@@ -28,11 +29,19 @@ func loginCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
-			if fi, err := os.Stdin.Stat(); err == nil && (fi.Mode()&os.ModeCharDevice) == 0 {
+			if !isInteractiveTTY() {
 				return errors.New("gh student login requires an interactive terminal (it shells out to gh auth login, which opens a browser)")
 			}
 
-			ghArgs := []string{"auth", "login", "-s", "read:org", "-s", "repo"}
+			host, _ := auth.DefaultHost()
+			if host == "" {
+				host = "github.com"
+			}
+
+			ghArgs := []string{"auth", "login", "--hostname", host}
+			for _, s := range requiredScopes {
+				ghArgs = append(ghArgs, "-s", s)
+			}
 			for _, s := range scopes {
 				s = strings.TrimSpace(s)
 				if s == "" {

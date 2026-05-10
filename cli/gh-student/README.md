@@ -53,7 +53,7 @@ VSCode users: install the [Go extension](https://marketplace.visualstudio.com/it
 | Command                                            | Description                                                       |
 | -------------------------------------------------- | ----------------------------------------------------------------- |
 | `gh student whoami`                                | Print the authenticated GitHub user.                              |
-| `gh student login`                                 | Log in to GitHub via `gh auth login`, requesting the `read:org` and `repo` scopes (required for accepting assignments) on top of the gh defaults. Pass `-s` to add other scopes. |
+| `gh student login`                                 | Log in to GitHub via `gh auth login`, requesting the `read:org` and `repo` scopes (required for accepting assignments) on top of the gh defaults. Pass `-s` to add other scopes. Other commands trigger this same login flow automatically when no token is configured for `github.com`. |
 | `gh student logout`                                | Log out of GitHub via `gh auth logout`. |
 | `gh student accept <org>/<classroom>/<assignment>` | Accept an assignment: auto-accept any pending org invite, create a private repo from the template, add the student as `maintain`, write `.classroom50.yml`, and print clone instructions. Default output is the `Assignment accepted: <org>/<repo>` header plus a `git clone` command. Re-running on an already-accepted assignment short-circuits with an `Assignment already accepted: <org>/<repo>` message and leaves the existing repo (and the student's work in it) untouched. |
 | `gh student invite <org>/<repo> <user>`            | Invite a classmate or TA to the repo with `push` permission.      |

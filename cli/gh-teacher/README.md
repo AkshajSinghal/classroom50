@@ -53,7 +53,7 @@ VSCode users: install the [Go extension](https://marketplace.visualstudio.com/it
 | Command                                  | Description                                                       |
 | ---------------------------------------- | ----------------------------------------------------------------- |
 | `gh teacher whoami`                      | Print the authenticated GitHub user.                              |
-| `gh teacher login`                       | Log in to GitHub via `gh auth login`, requesting the `admin:org` scope (required for org invites) on top of the gh defaults. Pass `-s` to add other scopes. |
+| `gh teacher login`                       | Log in to GitHub via `gh auth login`, requesting the `admin:org` scope (required for org invites) on top of the gh defaults. Pass `-s` to add other scopes. Other commands trigger this same login flow automatically when no token is configured for `github.com`. |
 | `gh teacher logout`                      | Log out of GitHub via `gh auth logout`. |
 | `gh teacher invite <org> <user>`         | Invite user to an org (use `--admin` for the org admin role). Common API failures (missing scope, not an admin, org not found, already a member, pending invite) surface as actionable messages instead of raw HTTP errors. |
 | `gh teacher invite <org>/<repo> <user>`  | Invite user to a specific repository. Default permission is `push`; override with `-p {pull,triage,push,maintain,admin}`. Re-running with a different `-p` updates the existing collaborator. |

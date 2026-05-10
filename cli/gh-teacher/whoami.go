@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 
-	"github.com/cli/go-gh/v2/pkg/api"
 	"github.com/spf13/cobra"
 )
 
@@ -14,9 +13,9 @@ func whoamiCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
-			client, err := api.DefaultRESTClient()
+			client, err := requireAuthClient(cmd)
 			if err != nil {
-				return fmt.Errorf("REST client: %w", err)
+				return err
 			}
 			var user struct {
 				Login string `json:"login"`

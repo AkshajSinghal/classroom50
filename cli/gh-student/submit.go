@@ -27,9 +27,9 @@ func submitCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
-			client, err := api.DefaultRESTClient()
+			client, err := requireAuthClient(cmd)
 			if err != nil {
-				return fmt.Errorf("REST client: %w", err)
+				return err
 			}
 
 			out := cmd.OutOrStdout()

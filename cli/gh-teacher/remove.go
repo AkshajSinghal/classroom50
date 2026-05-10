@@ -39,9 +39,9 @@ func removeCmd() *cobra.Command {
 				return errors.New("username must not be empty")
 			}
 
-			client, err := api.DefaultRESTClient()
+			client, err := requireAuthClient(cmd)
 			if err != nil {
-				return fmt.Errorf("REST client: %w", err)
+				return err
 			}
 
 			out := cmd.OutOrStdout()

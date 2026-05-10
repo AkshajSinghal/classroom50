@@ -52,6 +52,8 @@ gh teacher login
 
 This shells out to `gh auth login -s admin:org` and opens a browser to authorize. If you haven't logged in to `gh` before, it performs the initial login and grants `admin:org` in one shot; if you have, it re-authenticates with the new scope appended. Either way, this is the only auth step you need before inviting students.
 
+If you skip this step and run another command first (e.g. `gh teacher invite`), it will detect the missing token and run `gh teacher login` for you before continuing — the explicit step is just for predictability on a fresh setup.
+
 ### 4. Teacher: invite students to the org
 
 For each student:

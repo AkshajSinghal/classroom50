@@ -38,9 +38,9 @@ func acceptCmd() *cobra.Command {
 				return fmt.Errorf("invalid target %q: org/classroom/assignment must all be non-empty", target)
 			}
 
-			client, err := api.DefaultRESTClient()
+			client, err := requireAuthClient(cmd)
 			if err != nil {
-				return fmt.Errorf("REST client: %w", err)
+				return err
 			}
 
 			out := cmd.OutOrStdout()
