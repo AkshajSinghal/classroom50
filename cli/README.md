@@ -82,7 +82,7 @@ From inside the cloned repo:
 gh student submit
 ```
 
-This snapshots the current branch, fetches the latest instructor `.gitignore` (if present) and `.github/` from the template, and force-pushes the result to the assignment repo's `main` branch. Run this after each meaningful change; the latest submission is what the teacher sees.
+This snapshots the current branch, fetches the latest instructor `.gitignore` and `.github/` (if present) from the template, and force-pushes the result to the assignment repo's `main` branch. Run this after each meaningful change; the latest submission is what the teacher sees.
 
 ### 7. Teacher: download submissions
 
@@ -169,7 +169,7 @@ gh teacher remove {org}/{repo} {username}    # remove from repository
 
 ### Submit an assignment ([gh-student/](gh-student/))
 
-Snapshots the current working tree and force-pushes it to the assignment repo's `main` branch (hardcoded for now; templates whose default branch is `master`/`develop` will end up with a separate `main` after submit). Fetches the latest instructor `.gitignore` and `.github/` from the template recorded in `.classroom50.yml` first.
+Snapshots the current working tree and force-pushes it to the assignment repo's `main` branch (hardcoded for now; templates whose default branch is `master`/`develop` will end up with a separate `main` after submit). Fetches the latest instructor `.gitignore` and `.github/` (if present) from the template recorded in `.classroom50.yml` first.
 
 ```
 gh student submit
@@ -177,7 +177,7 @@ gh student submit
 
 1. Read `.classroom50.yml` from the local clone for `source.owner`, `source.repo`, and `source.branch`.
 1. Copy tracked + untracked-not-ignored files from the working tree into a temp directory so the submission isn't polluted by build artifacts or unrelated state.
-1. Fetch the latest instructor `.gitignore` (if present) and `.github/` from `source.owner/source.repo@source.branch` via the GitHub contents API, per <https://docs.github.com/en/rest/repos/contents?apiVersion=2026-03-10#get-repository-content>.
+1. Fetch the latest instructor `.gitignore` and `.github/` (if present) from `source.owner/source.repo@source.branch` via the GitHub contents API, per <https://docs.github.com/en/rest/repos/contents?apiVersion=2026-03-10#get-repository-content>.
 1. `git init` the temp directory, commit the snapshot, and force-push to the student's assignment repo. The snapshot semantics deliberately replace the remote branch with a fresh commit each time so submissions stay conflict-free.
 
 Also relies on a GitHub Action (see [workflows/](../workflows/)) to create a full-diff tagged commit (on which the teacher can comment) and to create a release for that tag, with Markdown linking to autograding results (when ready).
