@@ -38,9 +38,9 @@ func inviteCmd() *cobra.Command {
 			}
 			org, repo := parts[0], parts[1]
 
-			client, err := api.DefaultRESTClient()
+			client, err := requireAuthClient(cmd)
 			if err != nil {
-				return fmt.Errorf("REST client: %w", err)
+				return err
 			}
 
 			out := cmd.OutOrStdout()

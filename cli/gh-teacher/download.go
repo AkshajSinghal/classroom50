@@ -57,9 +57,9 @@ func downloadCmd() *cobra.Command {
 				dir = fmt.Sprintf("%s_submissions_%s", org, time.Now().Format(dirTimestampFormat))
 			}
 
-			client, err := api.DefaultRESTClient()
+			client, err := requireAuthClient(cmd)
 			if err != nil {
-				return fmt.Errorf("REST client: %w", err)
+				return err
 			}
 
 			return downloadAssignment(client, cmd.OutOrStdout(), cmd.ErrOrStderr(), org, assignment, dir, quiet)
