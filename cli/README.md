@@ -118,7 +118,7 @@ gh teacher invite --admin {org} {username}   # admin
 
 1. Get user ID from username, per <https://docs.github.com/en/rest/users/users?apiVersion=2026-03-10#get-a-user>.
 1. Invite user ID to org, per <https://docs.github.com/en/rest/orgs/members?apiVersion=2026-03-10#create-an-organization-invitation>.
-1. Advise user to visit `https://github.com/{org}` to accept the invitation atop the page.
+1. Advise the user to sign in to `https://github.com` as the invited GitHub user, then visit `https://github.com/{org}` to accept the invitation at the top of the page.
 
 The org-invitation endpoint requires the `admin:org` OAuth scope, which is not granted by `gh auth login` by default. Run `gh teacher login` once before the first org invite; it shells out to `gh auth login -s admin:org` so it doubles as the initial login step on a fresh setup.
 
