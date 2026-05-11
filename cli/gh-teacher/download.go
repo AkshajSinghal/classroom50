@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -26,35 +25,48 @@ func downloadCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "download <org> <assignment>",
+		Use:   "download <org>/<classroom>/<assignment>",
 		Short: "Clone every student submission repo for an assignment",
-		Long: "Clone every repo in <org> whose name ends in -<assignment>, the convention\n" +
-			"established by `gh student accept` (which creates <username>-<assignment>).\n\n" +
+		Long: "Clone every repo in <org> whose name starts with <classroom>-<assignment>-,\n" +
+			"the convention established by `gh student accept` (which creates\n" +
+			"<classroom>-<assignment>-<username>). The target shape mirrors\n" +
+			"`gh student accept <org>/<classroom>/<assignment>` so teachers and\n" +
+			"students share the same identifier triple.\n\n" +
 			"Repos are cloned via `gh repo clone`, so authentication is inherited from the\n" +
-			"current gh session. The default destination is <org>_submissions_<timestamp>/\n" +
-			"in the current directory so each run produces a fresh folder, preserving\n" +
-			"prior downloads. Pass -d/--dir to override the destination; the value is\n" +
-			"used literally (no timestamp). When the target directory already exists,\n" +
-			"individual repos already on disk are skipped, so re-runs with -d pick up\n" +
-			"new submissions without aborting on the ones already cloned.",
-		Example: "  gh teacher download cs50-fall-2026 hello                  # clones into cs50-fall-2026_submissions_2026_05_09_T_14_30_45/\n" +
-			"  gh teacher download -d submissions cs50-fall-2026 hello   # clones into submissions/",
-		Args: cobra.ExactArgs(2),
+			"current gh session. The default destination is\n" +
+			"<classroom>-<assignment>_submissions_<timestamp>/ in the current directory so\n" +
+			"each run produces a fresh folder, preserving prior downloads. Pass -d/--dir\n" +
+			"to override the destination; the value is used literally (no timestamp). When\n" +
+			"the target directory already exists, individual repos already on disk are\n" +
+			"skipped, so re-runs with -d pick up new submissions without aborting on the\n" +
+			"ones already cloned.",
+		Example: "  gh teacher download cs50/cs50-fall-2026/hello                  # clones into cs50-fall-2026-hello_submissions_2026_05_09_T_14_30_45/\n" +
+			"  gh teacher download -d submissions cs50/cs50-fall-2026/hello   # clones into submissions/",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
-			org := strings.TrimSpace(args[0])
-			assignment := strings.TrimSpace(args[1])
-			if org == "" {
-				return errors.New("org must not be empty")
+			target := strings.TrimSpace(args[0])
+
+			// {org}/{classroom}/{assignment}: all three required.
+			parts := strings.Split(target, "/")
+			if len(parts) != 3 {
+				return fmt.Errorf("expected target {org}/{classroom}/{assignment} with 3 components separated by /, got %d", len(parts))
 			}
-			if assignment == "" {
-				return errors.New("assignment must not be empty")
+			org := strings.TrimSpace(parts[0])
+			classroom := strings.TrimSpace(parts[1])
+			assignment := strings.TrimSpace(parts[2])
+			if org == "" || classroom == "" || assignment == "" {
+				return fmt.Errorf("invalid target %q: org/classroom/assignment must all be non-empty", target)
 			}
+
 			// `-d` unset or empty falls back to the timestamped default; an
 			// explicit `-d <name>` is taken literally (no timestamp).
 			dir = strings.TrimSpace(dir)
 			if dir == "" {
-				dir = fmt.Sprintf("%s_submissions_%s", org, time.Now().Format(dirTimestampFormat))
+				dir = fmt.Sprintf("%s-%s_submissions_%s",
+					strings.ToLower(classroom),
+					strings.ToLower(assignment),
+					time.Now().Format(dirTimestampFormat))
 			}
 
 			client, err := requireAuthClient(cmd)
@@ -62,36 +74,35 @@ func downloadCmd() *cobra.Command {
 				return err
 			}
 
-			return downloadAssignment(client, cmd.OutOrStdout(), cmd.ErrOrStderr(), org, assignment, dir, quiet)
+			return downloadAssignment(client, cmd.OutOrStdout(), cmd.ErrOrStderr(), org, classroom, assignment, dir, quiet)
 		},
 	}
 
-	cmd.Flags().StringVarP(&dir, "dir", "d", "", "Directory to clone repos into (default: <org>_submissions_<timestamp>)")
+	cmd.Flags().StringVarP(&dir, "dir", "d", "", "Directory to clone repos into (default: <classroom>-<assignment>_submissions_<timestamp>)")
 	cmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Suppress informational output and pass --quiet to git clone (errors still go to stderr)")
 	return cmd
 }
 
-func downloadAssignment(client *api.RESTClient, out, errOut io.Writer, org, assignment, dir string, quiet bool) error {
-	// lowercase to match accept's naming (it lowercases when creating repos).
-	suffix := "-" + strings.ToLower(assignment)
+func downloadAssignment(client *api.RESTClient, out, errOut io.Writer, org, classroom, assignment, dir string, quiet bool) error {
+	// Deterministic head of assignmentRepoName in cli/gh-student/accept.go;
+	// see the cross-binary contract note there before changing the shape.
+	prefix := strings.ToLower(classroom) + "-" + strings.ToLower(assignment) + "-"
 
 	repos, err := listOrgRepoNames(client, org)
 	if err != nil {
 		return err
 	}
 
-	// Match accept's naming: <username>-<assignment>. Suffix-only per spec;
-	// can over-match if the org has other repos ending in -<assignment>.
 	var matched []string
 	for _, name := range repos {
-		if len(name) > len(suffix) && strings.HasSuffix(name, suffix) {
+		if strings.HasPrefix(strings.ToLower(name), prefix) {
 			matched = append(matched, name)
 		}
 	}
 
 	if len(matched) == 0 {
 		if !quiet {
-			_, _ = fmt.Fprintf(out, "%s: no repos matching *%s\n", org, suffix)
+			_, _ = fmt.Fprintf(out, "%s: no repos matching %s*\n", org, prefix)
 		}
 		return nil
 	}

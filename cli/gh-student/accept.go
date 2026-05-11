@@ -17,9 +17,15 @@ import (
 
 func acceptCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "accept {org}/{classroom}/{assignment}",
-		Short:   "Accept an assignment from an organization's classroom",
-		Long:    "Accept an assignment from an organization's classroom",
+		Use:   "accept {org}/{classroom}/{assignment}",
+		Short: "Accept an assignment from an organization's classroom",
+		Long: "Accept an assignment from a classroom by creating a private copy of\n" +
+			"the template repo named {classroom}-{assignment}-{username} (lowercased)\n" +
+			"in {org}. If the student has a pending org invite it is auto-accepted\n" +
+			"first. After creating the repo, the student is added as a `maintain`\n" +
+			"collaborator, `.classroom50.yml` is written with the source coordinates,\n" +
+			"and clone instructions are printed. Re-running on an already-accepted\n" +
+			"assignment short-circuits without touching the existing repo.",
 		Example: "  gh student accept cs50/cs50-fall-2026/assignment-0\n",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -175,10 +181,10 @@ func acceptAssignment(client *api.RESTClient, out io.Writer, org, classroom, ass
 	}
 
 	// 3) write .classroom50.yml.
-	repoName := fmt.Sprintf("%s-%s-%s", strings.ToLower(classroom), strings.ToLower(assignment), strings.ToLower(username))
+	repoName := assignmentRepoName(classroom, assignment, username)
 	cfg := ClassroomConfig{
-		ClassroomID:  classroom,
-		AssignmentID: assignment,
+		Classroom:  classroom,
+		Assignment: assignment,
 		Source: ClassroomSource{
 			Owner:  org,
 			Repo:   assignment,
@@ -285,13 +291,27 @@ type GeneratedRepo struct {
 	HasWiki     bool `json:"has_wiki"`
 }
 
+// assignmentRepoName returns the canonical {classroom}-{assignment}-{username}
+// name (lowercased) that `gh student accept` creates. Cross-binary contract:
+// cli/gh-teacher/download.go rebuilds the {classroom}-{assignment}- prefix by
+// hand to find these repos (separate go.mod modules, no shared symbol).
+// Changing the shape here without updating it there silently makes
+// `gh teacher download` return zero repos.
+func assignmentRepoName(classroom, assignment, username string) string {
+	return fmt.Sprintf("%s-%s-%s",
+		strings.ToLower(classroom),
+		strings.ToLower(assignment),
+		strings.ToLower(username),
+	)
+}
+
 // createTemplatedPrivateAssignmentRepoInOrg generates a private repo named
 // {classroom}-{assignment}-{username} (lowercased) from the assignment template and
 // disables issues/projects/wiki. On 422-already-exists, returns
 // alreadyExisted=true and skips the PATCH so re-runs don't disturb an
 // existing repo. See: GitHub "Create a repository using a template" REST API.
 func createTemplatedPrivateAssignmentRepoInOrg(client *api.RESTClient, out io.Writer, username, classroom, assignment, org string) (htmlURL, fullName string, alreadyExisted bool, err error) {
-	newRepoName := fmt.Sprintf("%s-%s-%s", strings.ToLower(classroom), strings.ToLower(assignment), strings.ToLower(username))
+	newRepoName := assignmentRepoName(classroom, assignment, username)
 	createBody, err := json.Marshal(map[string]any{
 		"owner":   org,
 		"name":    newRepoName,
@@ -356,7 +376,7 @@ func inviteUserToMaintain(client *api.RESTClient, out io.Writer, username, class
 		return fmt.Errorf("error creating PUT body: %w", err)
 	}
 
-	fullRepoName := fmt.Sprintf("%s-%s-%s", strings.ToLower(classroom), strings.ToLower(assignment), strings.ToLower(username))
+	fullRepoName := assignmentRepoName(classroom, assignment, username)
 	path := fmt.Sprintf("repos/%s/%s/collaborators/%s",
 		url.PathEscape(org), url.PathEscape(fullRepoName), url.PathEscape(username))
 

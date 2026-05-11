@@ -70,7 +70,7 @@ The student gets an email invitation. They can accept it by visiting `https://gi
 gh student accept {org}/{classroom}/{assignment}
 ```
 
-This creates a private copy of the template at `{org}/{username}-{assignment}` (lowercased) and prints a `git clone` command. Re-running on an already-accepted assignment short-circuits with an `Assignment already accepted: ...` message and leaves the existing repo (and any work in it) alone.
+This creates a private copy of the template at `{org}/{classroom}-{assignment}-{username}` (lowercased) and prints a `git clone` command. Re-running on an already-accepted assignment short-circuits with an `Assignment already accepted: ...` message and leaves the existing repo (and any work in it) alone.
 
 `{classroom}` is currently a free-form label the CLI just records in `.classroom50.yml` as `classroom`; it isn't validated against any GitHub concept, so any non-empty string works for now. Pick a stable name your class agrees on (e.g. `cs50-fall-2026`) since it'll persist in metadata for downstream tooling.
 
@@ -82,17 +82,17 @@ From inside the cloned repo:
 gh student submit
 ```
 
-This snapshots the current branch, fetches the latest instructor `.gitignore` and `.github/` (if present) from the template, and force-pushes the result to the assignment repo's `main` branch. Run this after each meaningful change; the latest submission is what the teacher sees.
+This snapshots the current branch, fetches the latest instructor `.gitignore` and `.github/` (if present) from the template, and pushes the result as a new commit on top of the assignment repo's `main` branch. Run this after each meaningful change; the latest submission is what the teacher sees.
 
 ### 7. Teacher: download submissions
 
 To pull every student's latest submission for an assignment:
 
 ```
-gh teacher download {org} {assignment}
+gh teacher download {org}/{classroom}/{assignment}
 ```
 
-Each run produces a fresh timestamped folder (`{org}_submissions_<timestamp>/`), so re-running picks up newer submissions without overwriting earlier downloads. Pass `-d <dir>` to override the destination (the value is taken literally, no timestamp).
+Same `{org}/{classroom}/{assignment}` shape as `gh student accept`, so the identifier triple is symmetric across both CLIs. Each run produces a fresh timestamped folder (`{classroom}-{assignment}_submissions_<timestamp>/`), so re-running picks up newer submissions without overwriting earlier downloads. Pass `-d <dir>` to override the destination (the value is taken literally, no timestamp).
 
 ### Debugging
 
@@ -100,7 +100,7 @@ Pass `--verbose` / `-v` to any teacher or student command to see per-step operat
 
 ```
 gh student submit -v
-gh teacher download -v {org} {assignment}
+gh teacher download -v {org}/{classroom}/{assignment}
 ```
 
 For raw REST request/response logging, set `GH_DEBUG=api` in the environment; this is honored by the underlying [`go-gh`](https://github.com/cli/go-gh) library.
@@ -136,8 +136,8 @@ gh student accept {org}/{classroom}/{assignment}
 1. Create a private repo called `{classroom}-{assignment}-{username}`, **canonicalized as lowercase**, in `{org}` using the assignment's repo template, per <https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#create-a-repository-using-a-template>. Disable issues, projects, and wiki by default. If the repo already exists (HTTP 422 already-exists), short-circuit with an `Assignment already accepted` message rather than touching the existing repo.
 1. Add `{username}` as a `maintain` collaborator on the new repo via `PUT /repos/{owner}/{repo}/collaborators/{username}`, per <https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#add-a-repository-collaborator>. The PUT is upsert: a single call covers both the initial add and the downgrade from the creator-default `admin` to `maintain`.
 1. Create a `.classroom50.yml` file in the student's repo on the template's default branch containing requisite metadata as key-value pairs, per <https://docs.github.com/en/rest/repos/contents?apiVersion=2026-03-10#create-or-update-file-contents>:
-    * classroom ID
-    * assignment ID
+    * classroom
+    * assignment
     * Owner/Repo/Branch from which the repo was created (the template repo's default branch is looked up at accept time so master/develop templates round-trip correctly).
 1. Tell the student how to clone the new repo, with a warning if they're currently inside a git repo (to avoid an accidental nested clone).
 
@@ -169,27 +169,27 @@ gh teacher remove {org}/{repo} {username}    # remove from repository
 
 ### Submit an assignment ([gh-student/](gh-student/))
 
-Snapshots the current working tree and force-pushes it to the assignment repo's `main` branch (hardcoded for now; templates whose default branch is `master`/`develop` will end up with a separate `main` after submit). Fetches the latest instructor `.gitignore` and `.github/` (if present) from the template recorded in `.classroom50.yml` first.
+Snapshots the current working tree and pushes it as a new commit on top of the assignment repo's `main` branch (hardcoded for now; templates whose default branch is `master`/`develop` will end up with a separate `main` after submit). Fetches the latest instructor `.gitignore` and `.github/` (if present) from the template recorded in `.classroom50.yml` first.
 
 ```
 gh student submit
 ```
 
 1. Read `.classroom50.yml` from the local clone for `source.owner`, `source.repo`, and `source.branch`.
-1. Copy tracked + untracked-not-ignored files from the working tree into a temp directory so the submission isn't polluted by build artifacts or unrelated state.
+1. Copy tracked + untracked-not-ignored files from the working tree into a temp worktree so the submission isn't polluted by build artifacts or unrelated state.
 1. Fetch the latest instructor `.gitignore` and `.github/` (if present) from `source.owner/source.repo@source.branch` via the GitHub contents API, per <https://docs.github.com/en/rest/repos/contents?apiVersion=2026-03-10#get-repository-content>.
-1. `git init` the temp directory, commit the snapshot, and force-push to the student's assignment repo. The snapshot semantics deliberately replace the remote branch with a fresh commit each time so submissions stay conflict-free.
+1. `git clone --bare` the remote, stage the temp worktree on top of the existing `main`, commit the snapshot, and push as a fast-forward. Submissions overlay as commits on top of existing history rather than force-pushing, so prior commits stay reachable for review.
 
 Also relies on a GitHub Action (see [workflows/](../workflows/)) to create a full-diff tagged commit (on which the teacher can comment) and to create a release for that tag, with Markdown linking to autograding results (when ready).
 
 ### Download students' submissions ([gh-teacher/](gh-teacher/))
 
 ```
-gh teacher download {org} {assignment}              # clones into {org}_submissions_<timestamp>/
-gh teacher download -d {dir} {org} {assignment}     # clones into {dir}/ (literal, no timestamp)
-gh teacher download -v {org} {assignment}           # streams raw git output per repo
+gh teacher download {org}/{classroom}/{assignment}              # clones into {classroom}-{assignment}_submissions_<timestamp>/
+gh teacher download -d {dir} {org}/{classroom}/{assignment}     # clones into {dir}/ (literal, no timestamp)
+gh teacher download -v {org}/{classroom}/{assignment}           # streams raw git output per repo
 ```
 
-1. Page through `GET /orgs/{org}/repos`, per <https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#list-organization-repositories>, collecting every repo whose name ends in `-{assignment}` (the `gh student accept` convention of `{username}-{assignment}`). The `{assignment}` argument is lowercased before matching so teachers can pass any case; the suffix match itself is exact against the lowercase names that `gh student accept` creates.
-1. For each match, shell out to `gh repo clone {org}/{name} {dir}/{name}` so authentication flows through the current `gh` session — no separate git credential setup needed for private classroom repos. Default `{dir}` is `{org}_submissions_YYYY_MM_DD_T_HH_MM_SS` (24-hour local time) so each run produces a fresh folder and prior downloads are preserved without manual cleanup; pass `-d` to override (the value is taken literally, no timestamp appended). Pass `--quiet` / `-q` to suppress the per-repo summary and forward `--quiet` to git; pass `--verbose` / `-v` to stream raw git output instead of the concise `Cloning <name>... Done` summary.
+1. Page through `GET /orgs/{org}/repos`, per <https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#list-organization-repositories>, collecting every repo whose name starts with `{classroom}-{assignment}-` (the `gh student accept` convention of `{classroom}-{assignment}-{username}`). The `{classroom}` and `{assignment}` arguments are lowercased before matching so teachers can pass any case; the prefix match itself is against the lowercase names that `gh student accept` creates.
+1. For each match, shell out to `gh repo clone {org}/{name} {dir}/{name}` so authentication flows through the current `gh` session — no separate git credential setup needed for private classroom repos. Default `{dir}` is `{classroom}-{assignment}_submissions_YYYY_MM_DD_T_HH_MM_SS` (24-hour local time) so each run produces a fresh folder and prior downloads are preserved without manual cleanup; pass `-d` to override (the value is taken literally, no timestamp appended). Pass `--quiet` / `-q` to suppress the per-repo summary and forward `--quiet` to git; pass `--verbose` / `-v` to stream raw git output instead of the concise `Cloning <name>... Done` summary.
 1. Skip targets that already exist on disk so re-runs with `-d` pick up new submissions without aborting on the ones already cloned. Failures carry git's actionable diagnostic (e.g. `fatal: ...`) rather than just an exit code, and a non-zero exit code surfaces if any clone failed after the rest still run.

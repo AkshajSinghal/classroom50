@@ -15,10 +15,13 @@ import (
 
 func inviteCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "invite {org}/{repo} {username}",
-		Short:   "Invite a user by username to be able to push to a repository.",
-		Long:    "Invite a user by username to be able to push to a repository.",
-		Example: "  gh student invite cs50/bob-assignment-0 cs50-duck\n",
+		Use:   "invite {org}/{repo} {username}",
+		Short: "Invite a classmate or TA to push to your assignment repo",
+		Long: "Add {username} as a `push`-level collaborator on {org}/{repo}. The\n" +
+			"invitee receives a GitHub invitation they must accept before they can\n" +
+			"push. Re-running on an existing collaborator is a no-op (GitHub upserts\n" +
+			"the permission).",
+		Example: "  gh student invite cs50/cs50-fall-2026-hello-alice cs50-duck\n",
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
