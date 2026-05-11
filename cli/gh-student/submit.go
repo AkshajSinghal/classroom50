@@ -21,9 +21,13 @@ import (
 
 func submitCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "submit",
-		Short:   "Uses Git to add, commit, push contents of current branch to remote, after fetching parent repo's latest .gitignore and .github",
-		Long:    "Uses Git to add, commit, push contents of current branch to remote, after fetching parent repo's latest .gitignore and .github",
+		Use:   "submit",
+		Short: "Submit the current assignment to its remote",
+		Long: "Snapshot the current branch and push it as a new commit on top of the\n" +
+			"assignment repo's `main` branch. The latest instructor `.gitignore` and\n" +
+			"`.github/` (both optional) are fetched from the template recorded in\n" +
+			"`.classroom50.yml` first, so any autograding the teacher updates flows\n" +
+			"back to existing student repos at submit time.",
 		Example: "  gh student submit",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
@@ -72,7 +76,7 @@ func submitAssignment(client *api.RESTClient, out io.Writer, errOut io.Writer, o
 	}
 
 	if opts.Message == "" {
-		opts.Message = fmt.Sprintf("Submit %s", config.AssignmentID)
+		opts.Message = fmt.Sprintf("Submit %s", config.Assignment)
 	}
 
 	remoteURL, err := gitOutput(root, "config", "--get", "remote."+opts.Remote+".url")
@@ -141,7 +145,7 @@ func submitAssignment(client *api.RESTClient, out io.Writer, errOut io.Writer, o
 		return err
 	}
 
-	_, _ = fmt.Fprintf(out, "Submitted %s to %s\n", config.AssignmentID, remoteURL)
+	_, _ = fmt.Fprintf(out, "Submitted %s to %s\n", config.Assignment, remoteURL)
 
 	return nil
 }
@@ -404,10 +408,10 @@ func readClassroomConfig(path string) (*ClassroomConfig, error) {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 
-	if config.ClassroomID == "" {
+	if config.Classroom == "" {
 		return nil, fmt.Errorf("missing classroom in %s", path)
 	}
-	if config.AssignmentID == "" {
+	if config.Assignment == "" {
 		return nil, fmt.Errorf("missing assignment in %s", path)
 	}
 	if config.Source.Owner == "" || config.Source.Repo == "" || config.Source.Branch == "" {
