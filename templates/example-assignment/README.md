@@ -26,6 +26,6 @@ expose. The slug you give the repo (e.g. `example-assignment`) is
 what students pass to `gh student accept`.
 
 Students: after your teacher invites you to the org, run
-`gh student accept {org}/{classroom}/example-assignment`. That
+`gh student accept {org} {classroom} example-assignment`. That
 creates your private copy. Clone it, edit `hello.c`, and run
 `gh student submit` from inside the clone.
