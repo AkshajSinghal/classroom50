@@ -67,7 +67,7 @@ The student gets an email invitation. They can accept it by visiting `https://gi
 ### 5. Student: accept an assignment
 
 ```
-gh student accept {org}/{classroom}/{assignment}
+gh student accept {org} {classroom} {assignment}
 ```
 
 This creates a private copy of the template at `{org}/{classroom}-{assignment}-{username}` (lowercased) and prints a `git clone` command. Re-running on an already-accepted assignment short-circuits with an `Assignment already accepted: ...` message and leaves the existing repo (and any work in it) alone.
@@ -89,10 +89,10 @@ This snapshots the current branch, fetches the latest instructor `.gitignore` an
 To pull every student's latest submission for an assignment:
 
 ```
-gh teacher download {org}/{classroom}/{assignment}
+gh teacher download {org} {classroom} {assignment}
 ```
 
-Same `{org}/{classroom}/{assignment}` shape as `gh student accept`, so the identifier triple is symmetric across both CLIs. Each run produces a fresh timestamped folder (`{classroom}-{assignment}_submissions_<timestamp>/`), so re-running picks up newer submissions without overwriting earlier downloads. Pass `-d <dir>` to override the destination (the value is taken literally, no timestamp).
+Same `{org} {classroom} {assignment}` shape as `gh student accept`, so the identifier triple is symmetric across both CLIs. Each run produces a fresh timestamped folder (`{classroom}-{assignment}_submissions_<timestamp>/`), so re-running picks up newer submissions without overwriting earlier downloads. Pass `-d <dir>` to override the destination (the value is taken literally, no timestamp).
 
 ### Debugging
 
@@ -100,7 +100,7 @@ Pass `--verbose` / `-v` to any teacher or student command to see per-step operat
 
 ```
 gh student submit -v
-gh teacher download -v {org}/{classroom}/{assignment}
+gh teacher download -v {org} {classroom} {assignment}
 ```
 
 For raw REST request/response logging, set `GH_DEBUG=api` in the environment; this is honored by the underlying [`go-gh`](https://github.com/cli/go-gh) library.
@@ -129,7 +129,7 @@ The org-invitation endpoint requires the `admin:org` OAuth scope, which is not g
 Uses the API to create a repo from a template repo for the student called `{classroom}-{assignment}-{username}` in `{org}`, then uses git to clone it locally.
 
 ```
-gh student accept {org}/{classroom}/{assignment}
+gh student accept {org} {classroom} {assignment}
 ```
 
 1. If the student has a pending org invitation, auto-accept it via `PATCH /user/memberships/orgs/{org}` with `{"state": "active"}`, per <https://docs.github.com/en/rest/orgs/members?apiVersion=2026-03-10#update-an-organization-membership-for-the-authenticated-user>.
@@ -185,9 +185,9 @@ Also relies on a GitHub Action (see [workflows/](../workflows/)) to create a ful
 ### Download students' submissions ([gh-teacher/](gh-teacher/))
 
 ```
-gh teacher download {org}/{classroom}/{assignment}              # clones into {classroom}-{assignment}_submissions_<timestamp>/
-gh teacher download -d {dir} {org}/{classroom}/{assignment}     # clones into {dir}/ (literal, no timestamp)
-gh teacher download -v {org}/{classroom}/{assignment}           # streams raw git output per repo
+gh teacher download {org} {classroom} {assignment}              # clones into {classroom}-{assignment}_submissions_<timestamp>/
+gh teacher download -d {dir} {org} {classroom} {assignment}     # clones into {dir}/ (literal, no timestamp)
+gh teacher download -v {org} {classroom} {assignment}           # streams raw git output per repo
 ```
 
 1. Page through `GET /orgs/{org}/repos`, per <https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#list-organization-repositories>, collecting every repo whose name starts with `{classroom}-{assignment}-` (the `gh student accept` convention of `{classroom}-{assignment}-{username}`). The `{classroom}` and `{assignment}` arguments are lowercased before matching so teachers can pass any case; the prefix match itself is against the lowercase names that `gh student accept` creates.

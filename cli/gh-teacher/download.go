@@ -25,12 +25,12 @@ func downloadCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "download <org>/<classroom>/<assignment>",
+		Use:   "download <org> <classroom> <assignment>",
 		Short: "Clone every student submission repo for an assignment",
 		Long: "Clone every repo in <org> whose name starts with <classroom>-<assignment>-,\n" +
 			"the convention established by `gh student accept` (which creates\n" +
-			"<classroom>-<assignment>-<username>). The target shape mirrors\n" +
-			"`gh student accept <org>/<classroom>/<assignment>` so teachers and\n" +
+			"<classroom>-<assignment>-<username>). The argument shape mirrors\n" +
+			"`gh student accept <org> <classroom> <assignment>` so teachers and\n" +
 			"students share the same identifier triple.\n\n" +
 			"Repos are cloned via `gh repo clone`, so authentication is inherited from the\n" +
 			"current gh session. The default destination is\n" +
@@ -40,23 +40,17 @@ func downloadCmd() *cobra.Command {
 			"the target directory already exists, individual repos already on disk are\n" +
 			"skipped, so re-runs with -d pick up new submissions without aborting on the\n" +
 			"ones already cloned.",
-		Example: "  gh teacher download cs50/cs50-fall-2026/hello                  # clones into cs50-fall-2026-hello_submissions_2026_05_09_T_14_30_45/\n" +
-			"  gh teacher download -d submissions cs50/cs50-fall-2026/hello   # clones into submissions/",
-		Args: cobra.ExactArgs(1),
+		Example: "  gh teacher download cs50 cs50-fall-2026 hello                  # clones into cs50-fall-2026-hello_submissions_2026_05_09_T_14_30_45/\n" +
+			"  gh teacher download -d submissions cs50 cs50-fall-2026 hello   # clones into submissions/",
+		Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
-			target := strings.TrimSpace(args[0])
 
-			// {org}/{classroom}/{assignment}: all three required.
-			parts := strings.Split(target, "/")
-			if len(parts) != 3 {
-				return fmt.Errorf("expected target {org}/{classroom}/{assignment} with 3 components separated by /, got %d", len(parts))
-			}
-			org := strings.TrimSpace(parts[0])
-			classroom := strings.TrimSpace(parts[1])
-			assignment := strings.TrimSpace(parts[2])
+			org := strings.TrimSpace(args[0])
+			classroom := strings.TrimSpace(args[1])
+			assignment := strings.TrimSpace(args[2])
 			if org == "" || classroom == "" || assignment == "" {
-				return fmt.Errorf("invalid target %q: org/classroom/assignment must all be non-empty", target)
+				return fmt.Errorf("invalid arguments: org, classroom, and assignment must all be non-empty")
 			}
 
 			// `-d` unset or empty falls back to the timestamped default; an

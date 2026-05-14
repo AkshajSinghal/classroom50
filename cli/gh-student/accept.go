@@ -17,7 +17,7 @@ import (
 
 func acceptCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "accept {org}/{classroom}/{assignment}",
+		Use:   "accept <org> <classroom> <assignment>",
 		Short: "Accept an assignment from an organization's classroom",
 		Long: "Accept an assignment from a classroom by creating a private copy of\n" +
 			"the template repo named {classroom}-{assignment}-{username} (lowercased)\n" +
@@ -26,22 +26,16 @@ func acceptCmd() *cobra.Command {
 			"collaborator, `.classroom50.yml` is written with the source coordinates,\n" +
 			"and clone instructions are printed. Re-running on an already-accepted\n" +
 			"assignment short-circuits without touching the existing repo.",
-		Example: "  gh student accept cs50/cs50-fall-2026/assignment-0\n",
-		Args:    cobra.ExactArgs(1),
+		Example: "  gh student accept cs50 cs50-fall-2026 assignment-0\n",
+		Args:    cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
-			target := strings.TrimSpace(args[0])
 
-			// {org}/{classroom}/{assignment}: all three required.
-			parts := strings.Split(target, "/")
-			if len(parts) != 3 {
-				return fmt.Errorf("expected target {org}/{classroom}/{assignment} with 3 components separated by /, got %d", len(parts))
-			}
-			org := strings.TrimSpace(parts[0])
-			classroom := strings.TrimSpace(parts[1])
-			assignment := strings.TrimSpace(parts[2])
+			org := strings.TrimSpace(args[0])
+			classroom := strings.TrimSpace(args[1])
+			assignment := strings.TrimSpace(args[2])
 			if org == "" || classroom == "" || assignment == "" {
-				return fmt.Errorf("invalid target %q: org/classroom/assignment must all be non-empty", target)
+				return fmt.Errorf("invalid arguments: org, classroom, and assignment must all be non-empty")
 			}
 
 			client, err := requireAuthClient(cmd)
