@@ -18,6 +18,8 @@ You don't need to accept the org invitation in the GitHub UI — `gh student acc
 gh student login
 ```
 
+![Demo: gh student login](images/gh_student_auth.gif)
+
 This runs `gh auth login` with the `read:org` and `repo` scopes that the classroom commands need. If you skip this step, the next command you run will trigger the login flow automatically.
 
 `gh student logout` mirrors `gh auth logout`.
@@ -27,6 +29,8 @@ This runs `gh auth login` with the `read:org` and `repo` scopes that the classro
 ```sh
 gh student accept <org> <classroom> <assignment>
 ```
+
+![Demo: gh student accept](images/gh_student_accept.gif)
 
 - `<org>` — the GitHub org your class uses.
 - `<classroom>` — a free-form label your class agrees on (e.g. `cs50-fall-2026`). It's recorded in `.classroom50.yml` inside your repo and used as a prefix when the teacher collects submissions.
@@ -61,6 +65,8 @@ From inside the cloned repo:
 ```sh
 gh student submit
 ```
+
+![Demo: gh student submit](images/gh_student_submit.gif)
 
 `gh student submit` snapshots your current branch and pushes it as a new commit on top of the assignment repo's `main` branch (hardcoded for now). Before snapshotting, it fetches the latest instructor `.gitignore` and `.github/` (if present) from the template, so any autograding the teacher updates flows back into your repo automatically.
 
