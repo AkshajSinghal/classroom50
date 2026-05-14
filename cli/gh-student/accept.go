@@ -20,8 +20,8 @@ func acceptCmd() *cobra.Command {
 		Use:   "accept <org> <classroom> <assignment>",
 		Short: "Accept an assignment from an organization's classroom",
 		Long: "Accept an assignment from a classroom by creating a private copy of\n" +
-			"the template repo named {classroom}-{assignment}-{username} (lowercased)\n" +
-			"in {org}. If the student has a pending org invite it is auto-accepted\n" +
+			"the template repo named <classroom>-<assignment>-<username> (lowercased)\n" +
+			"in <org>. If the student has a pending org invite it is auto-accepted\n" +
 			"first. After creating the repo, the student is added as a `maintain`\n" +
 			"collaborator, `.classroom50.yml` is written with the source coordinates,\n" +
 			"and clone instructions are printed. Re-running on an already-accepted\n" +
@@ -285,9 +285,9 @@ type GeneratedRepo struct {
 	HasWiki     bool `json:"has_wiki"`
 }
 
-// assignmentRepoName returns the canonical {classroom}-{assignment}-{username}
+// assignmentRepoName returns the canonical <classroom>-<assignment>-<username>
 // name (lowercased) that `gh student accept` creates. Cross-binary contract:
-// cli/gh-teacher/download.go rebuilds the {classroom}-{assignment}- prefix by
+// cli/gh-teacher/download.go rebuilds the <classroom>-<assignment>- prefix by
 // hand to find these repos (separate go.mod modules, no shared symbol).
 // Changing the shape here without updating it there silently makes
 // `gh teacher download` return zero repos.
@@ -300,7 +300,7 @@ func assignmentRepoName(classroom, assignment, username string) string {
 }
 
 // createTemplatedPrivateAssignmentRepoInOrg generates a private repo named
-// {classroom}-{assignment}-{username} (lowercased) from the assignment template and
+// <classroom>-<assignment>-<username> (lowercased) from the assignment template and
 // disables issues/projects/wiki. On 422-already-exists, returns
 // alreadyExisted=true and skips the PATCH so re-runs don't disturb an
 // existing repo. See: GitHub "Create a repository using a template" REST API.
