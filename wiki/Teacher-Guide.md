@@ -18,6 +18,8 @@ Org invitations require the `admin:org` OAuth scope, which `gh auth login` doesn
 gh teacher login
 ```
 
+![Demo: gh teacher login](images/gh_teacher_auth.gif)
+
 This shells out to `gh auth login -s admin:org` and opens a browser to authorize. If you haven't logged in to `gh` before, it performs the initial login and grants `admin:org` in one shot; if you have, it re-authenticates with the new scope appended.
 
 If you skip this step and run another command first (e.g. `gh teacher invite`), it will detect the missing scope and run `gh teacher login` for you before continuing.
@@ -29,6 +31,8 @@ For each student:
 ```sh
 gh teacher invite <org> <username>
 ```
+
+![Demo: gh teacher invite](images/gh_teacher_invite.gif)
 
 The student gets an email invitation. They can accept it by visiting `https://github.com/<org>`, or skip ahead and let `gh student accept` auto-accept the pending invite when they accept their first assignment.
 
@@ -65,6 +69,8 @@ After students have run `gh student submit`, pull every student's latest submiss
 ```sh
 gh teacher download <org> <classroom> <assignment>
 ```
+
+![Demo: gh teacher download](images/gh_teacher_download.gif)
 
 This pages through the org's repos, finds every one whose name starts with `<classroom>-<assignment>-` (the convention `gh student accept` uses: `<classroom>-<assignment>-<username>`), and shells out to `gh repo clone` for each. Authentication flows through the current `gh` session — no separate git credential setup is needed for private classroom repos.
 
