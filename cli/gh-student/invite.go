@@ -15,9 +15,9 @@ import (
 
 func inviteCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "invite {org}/{repo} {username}",
+		Use:   "invite <org>/<repo> <username>",
 		Short: "Invite a classmate or TA to push to your assignment repo",
-		Long: "Add {username} as a `push`-level collaborator on {org}/{repo}. The\n" +
+		Long: "Add <username> as a `push`-level collaborator on <org>/<repo>. The\n" +
 			"invitee receives a GitHub invitation they must accept before they can\n" +
 			"push. Re-running on an existing collaborator is a no-op (GitHub upserts\n" +
 			"the permission).",
@@ -34,10 +34,10 @@ func inviteCmd() *cobra.Command {
 				return errors.New("username must not be empty")
 			}
 
-			// {org}/{repo}: exactly two non-empty components.
+			// <org>/<repo>: exactly two non-empty components.
 			parts := strings.SplitN(target, "/", 3)
 			if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-				return fmt.Errorf("invalid target %q: expected {org}/{repo}", target)
+				return fmt.Errorf("invalid target %q: expected <org>/<repo>", target)
 			}
 			org, repo := parts[0], parts[1]
 

@@ -59,7 +59,7 @@ If you skip this step and run another command first (e.g. `gh teacher invite`), 
 For each student:
 
 ```
-gh teacher invite {org} {username}
+gh teacher invite <org> <username>
 ```
 
 The student gets an email invitation. They can accept it by visiting `https://github.com/{org}`, or just skip ahead to step 5: `gh student accept` auto-accepts any pending org invite for the authenticated user before creating the assignment repo. Common API failures (missing scope, not an admin, org not found, already a member, pending invite) surface as actionable messages instead of raw HTTP errors.
@@ -67,12 +67,12 @@ The student gets an email invitation. They can accept it by visiting `https://gi
 ### 5. Student: accept an assignment
 
 ```
-gh student accept {org} {classroom} {assignment}
+gh student accept <org> <classroom> <assignment>
 ```
 
-This creates a private copy of the template at `{org}/{classroom}-{assignment}-{username}` (lowercased) and prints a `git clone` command. Re-running on an already-accepted assignment short-circuits with an `Assignment already accepted: ...` message and leaves the existing repo (and any work in it) alone.
+This creates a private copy of the template at `<org>/<classroom>-<assignment>-<username>` (lowercased) and prints a `git clone` command. Re-running on an already-accepted assignment short-circuits with an `Assignment already accepted: ...` message and leaves the existing repo (and any work in it) alone.
 
-`{classroom}` is currently a free-form label the CLI just records in `.classroom50.yml` as `classroom`; it isn't validated against any GitHub concept, so any non-empty string works for now. Pick a stable name your class agrees on (e.g. `cs50-fall-2026`) since it'll persist in metadata for downstream tooling.
+`<classroom>` is currently a free-form label the CLI just records in `.classroom50.yml` as `classroom`; it isn't validated against any GitHub concept, so any non-empty string works for now. Pick a stable name your class agrees on (e.g. `cs50-fall-2026`) since it'll persist in metadata for downstream tooling.
 
 ### 6. Student: submit
 
@@ -89,10 +89,10 @@ This snapshots the current branch, fetches the latest instructor `.gitignore` an
 To pull every student's latest submission for an assignment:
 
 ```
-gh teacher download {org} {classroom} {assignment}
+gh teacher download <org> <classroom> <assignment>
 ```
 
-Same `{org} {classroom} {assignment}` shape as `gh student accept`, so the identifier triple is symmetric across both CLIs. Each run produces a fresh timestamped folder (`{classroom}-{assignment}_submissions_<timestamp>/`), so re-running picks up newer submissions without overwriting earlier downloads. Pass `-d <dir>` to override the destination (the value is taken literally, no timestamp).
+Same `<org> <classroom> <assignment>` shape as `gh student accept`, so the identifier triple is symmetric across both CLIs. Each run produces a fresh timestamped folder (`<classroom>-<assignment>_submissions_<timestamp>/`), so re-running picks up newer submissions without overwriting earlier downloads. Pass `-d <dir>` to override the destination (the value is taken literally, no timestamp).
 
 ### Debugging
 
@@ -100,7 +100,7 @@ Pass `--verbose` / `-v` to any teacher or student command to see per-step operat
 
 ```
 gh student submit -v
-gh teacher download -v {org} {classroom} {assignment}
+gh teacher download -v <org> <classroom> <assignment>
 ```
 
 For raw REST request/response logging, set `GH_DEBUG=api` in the environment; this is honored by the underlying [`go-gh`](https://github.com/cli/go-gh) library.
@@ -111,11 +111,11 @@ The behavior below is the design target for both extensions. Implementation stat
 
 ### Invite student to org ([gh-teacher/](gh-teacher/))
 
-Uses the API to invite a student (or teaching assistant) to `{org}`.
+Uses the API to invite a student (or teaching assistant) to `<org>`.
 
 ```
-gh teacher invite {org} {username}           # direct_member
-gh teacher invite --admin {org} {username}   # admin
+gh teacher invite <org> <username>           # direct_member
+gh teacher invite --admin <org> <username>   # admin
 ```
 
 1. Get user ID from username, per <https://docs.github.com/en/rest/users/users?apiVersion=2026-03-10#get-a-user>.
@@ -126,15 +126,15 @@ The org-invitation endpoint requires the `admin:org` OAuth scope, which is not g
 
 ### Accept an assignment ([gh-student/](gh-student/))
 
-Uses the API to create a repo from a template repo for the student called `{classroom}-{assignment}-{username}` in `{org}`, then uses git to clone it locally.
+Uses the API to create a repo from a template repo for the student called `<classroom>-<assignment>-<username>` in `<org>`, then uses git to clone it locally.
 
 ```
-gh student accept {org} {classroom} {assignment}
+gh student accept <org> <classroom> <assignment>
 ```
 
 1. If the student has a pending org invitation, auto-accept it via `PATCH /user/memberships/orgs/{org}` with `{"state": "active"}`, per <https://docs.github.com/en/rest/orgs/members?apiVersion=2026-03-10#update-an-organization-membership-for-the-authenticated-user>.
-1. Create a private repo called `{classroom}-{assignment}-{username}`, **canonicalized as lowercase**, in `{org}` using the assignment's repo template, per <https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#create-a-repository-using-a-template>. Disable issues, projects, and wiki by default. If the repo already exists (HTTP 422 already-exists), short-circuit with an `Assignment already accepted` message rather than touching the existing repo.
-1. Add `{username}` as a `maintain` collaborator on the new repo via `PUT /repos/{owner}/{repo}/collaborators/{username}`, per <https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#add-a-repository-collaborator>. The PUT is upsert: a single call covers both the initial add and the downgrade from the creator-default `admin` to `maintain`.
+1. Create a private repo called `<classroom>-<assignment>-<username>`, **canonicalized as lowercase**, in `<org>` using the assignment's repo template, per <https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#create-a-repository-using-a-template>. Disable issues, projects, and wiki by default. If the repo already exists (HTTP 422 already-exists), short-circuit with an `Assignment already accepted` message rather than touching the existing repo.
+1. Add `<username>` as a `maintain` collaborator on the new repo via `PUT /repos/{owner}/{repo}/collaborators/{username}`, per <https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#add-a-repository-collaborator>. The PUT is upsert: a single call covers both the initial add and the downgrade from the creator-default `admin` to `maintain`.
 1. Create a `.classroom50.yml` file in the student's repo on the template's default branch containing requisite metadata as key-value pairs, per <https://docs.github.com/en/rest/repos/contents?apiVersion=2026-03-10#create-or-update-file-contents>:
     * classroom
     * assignment
@@ -143,15 +143,15 @@ gh student accept {org} {classroom} {assignment}
 
 ### Invite classmate (or TA) to a repo ([gh-student/](gh-student/), [gh-teacher/](gh-teacher/))
 
-Uses the API to invite a classmate (or teaching assistant) to `{org}/{repo}`.
+Uses the API to invite a classmate (or teaching assistant) to `<org>/<repo>`.
 
 ```
-gh student invite {org}/{repo} {username}
-gh teacher invite {org}/{repo} {username}                 # default: push
-gh teacher invite -p maintain {org}/{repo} {username}     # other permissions
+gh student invite <org>/<repo> <username>
+gh teacher invite <org>/<repo> <username>                 # default: push
+gh teacher invite -p maintain <org>/<repo> <username>     # other permissions
 ```
 
-1. Invite `{username}` to `{repo}`, per <https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#add-a-repository-collaborator>. Default permission is `push`; `gh teacher invite` accepts `-p / --permission` with one of `pull`, `triage`, `push`, `maintain`, `admin`. Re-running with a different `-p` updates the existing collaborator's permission in place.
+1. Invite `<username>` to `<repo>`, per <https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#add-a-repository-collaborator>. Default permission is `push`; `gh teacher invite` accepts `-p / --permission` with one of `pull`, `triage`, `push`, `maintain`, `admin`. Re-running with a different `-p` updates the existing collaborator's permission in place.
     * Is this necessary? Should students just use the GitHub.com GUI or the Classroom 50 GUI for such?
 
 ### Remove user from org or repo ([gh-teacher/](gh-teacher/))
@@ -159,13 +159,13 @@ gh teacher invite -p maintain {org}/{repo} {username}     # other permissions
 Uses the API to remove a user from an organization or from a specific repository.
 
 ```
-gh teacher remove {org} {username}           # remove from organization
-gh teacher remove {org}/{repo} {username}    # remove from repository
+gh teacher remove <org> <username>           # remove from organization
+gh teacher remove <org>/<repo> <username>    # remove from repository
 ```
 
 1. For org targets, `DELETE /orgs/{org}/memberships/{username}`, per <https://docs.github.com/en/rest/orgs/members?apiVersion=2026-03-10#remove-organization-membership-for-a-user>. Revokes access to every repository in the org, removes the user from all teams, and cancels any pending invitation in one call.
 1. For repo targets, `DELETE /repos/{owner}/{repo}/collaborators/{username}`, per <https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#remove-a-repository-collaborator>.
-1. Both forms are idempotent: a `204` response prints "removed `{username}`", and a `404` (user is not a member or collaborator) prints a clear message and exits 0 so re-runs are safe.
+1. Both forms are idempotent: a `204` response prints "removed `<username>`", and a `404` (user is not a member or collaborator) prints a clear message and exits 0 so re-runs are safe.
 
 ### Submit an assignment ([gh-student/](gh-student/))
 
@@ -185,11 +185,11 @@ Also relies on a GitHub Action (see [workflows/](../workflows/)) to create a ful
 ### Download students' submissions ([gh-teacher/](gh-teacher/))
 
 ```
-gh teacher download {org} {classroom} {assignment}              # clones into {classroom}-{assignment}_submissions_<timestamp>/
-gh teacher download -d {dir} {org} {classroom} {assignment}     # clones into {dir}/ (literal, no timestamp)
-gh teacher download -v {org} {classroom} {assignment}           # streams raw git output per repo
+gh teacher download <org> <classroom> <assignment>              # clones into <classroom>-<assignment>_submissions_<timestamp>/
+gh teacher download -d <dir> <org> <classroom> <assignment>     # clones into <dir>/ (literal, no timestamp)
+gh teacher download -v <org> <classroom> <assignment>           # streams raw git output per repo
 ```
 
-1. Page through `GET /orgs/{org}/repos`, per <https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#list-organization-repositories>, collecting every repo whose name starts with `{classroom}-{assignment}-` (the `gh student accept` convention of `{classroom}-{assignment}-{username}`). The `{classroom}` and `{assignment}` arguments are lowercased before matching so teachers can pass any case; the prefix match itself is against the lowercase names that `gh student accept` creates.
-1. For each match, shell out to `gh repo clone {org}/{name} {dir}/{name}` so authentication flows through the current `gh` session — no separate git credential setup needed for private classroom repos. Default `{dir}` is `{classroom}-{assignment}_submissions_YYYY_MM_DD_T_HH_MM_SS` (24-hour local time) so each run produces a fresh folder and prior downloads are preserved without manual cleanup; pass `-d` to override (the value is taken literally, no timestamp appended). Pass `--quiet` / `-q` to suppress the per-repo summary and forward `--quiet` to git; pass `--verbose` / `-v` to stream raw git output instead of the concise `Cloning <name>... Done` summary.
+1. Page through `GET /orgs/{org}/repos`, per <https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#list-organization-repositories>, collecting every repo whose name starts with `<classroom>-<assignment>-` (the `gh student accept` convention of `<classroom>-<assignment>-<username>`). The `<classroom>` and `<assignment>` arguments are lowercased before matching so teachers can pass any case; the prefix match itself is against the lowercase names that `gh student accept` creates.
+1. For each match, shell out to `gh repo clone <org>/<name> <dir>/<name>` so authentication flows through the current `gh` session — no separate git credential setup needed for private classroom repos. Default `<dir>` is `<classroom>-<assignment>_submissions_YYYY_MM_DD_T_HH_MM_SS` (24-hour local time) so each run produces a fresh folder and prior downloads are preserved without manual cleanup; pass `-d` to override (the value is taken literally, no timestamp appended). Pass `--quiet` / `-q` to suppress the per-repo summary and forward `--quiet` to git; pass `--verbose` / `-v` to stream raw git output instead of the concise `Cloning <name>... Done` summary.
 1. Skip targets that already exist on disk so re-runs with `-d` pick up new submissions without aborting on the ones already cloned. Failures carry git's actionable diagnostic (e.g. `fatal: ...`) rather than just an exit code, and a non-zero exit code surfaces if any clone failed after the rest still run.
