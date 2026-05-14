@@ -23,8 +23,17 @@ const CreateAssignmentPage = () => {
               <h1 className="text-xl pt-8 pb-10 font-bold">Create Assignment</h1>
             </div>
           </div>
-          <CreateAssignmentForm />
-          <AutogradingTestsPane />
+          <div className="flex flex-col">
+            <div className="mb-8">
+              <CreateAssignmentForm />
+            </div>
+            <AutogradingTestsPane />
+            <div className="divider" />
+            <div className="flex justify-end gap-2">
+              <button className="btn">Cancel</button>
+              <button className="btn btn-primary">Create Assignment</button>
+            </div>
+          </div>
         </DrawerContent>
         <DrawerSidebar selected='assignments' />
       </Drawer>
