@@ -2,6 +2,14 @@
 
 A `gh` CLI extension targeted at instructors. Written in Go using [`go-gh`](https://github.com/cli/go-gh) and [`cobra`](https://github.com/spf13/cobra).
 
+End-user documentation lives in the wiki — install, walkthrough, and full command reference:
+
+- [Installation](https://github.com/foundation50/classroom50/wiki/Installation)
+- [Teacher Guide](https://github.com/foundation50/classroom50/wiki/Teacher-Guide)
+- [`gh teacher` command reference](https://github.com/foundation50/classroom50/wiki/gh-teacher)
+
+**Document new features on the wiki** (source: [`wiki/`](../../wiki/)), not in this README. This file is for contributors building and testing the extension locally.
+
 ## Local development
 
 First-time setup:
@@ -18,7 +26,7 @@ go build .
 gh extension install .
 ```
 
-After that, `gh teacher` is registered (see [Commands](#commands)). Re-run `go build .` after code changes; `gh extension install .` only needs to run once.
+Re-run `go build .` after code changes; `gh extension install .` only needs to run once.
 
 To debug REST calls, set `GH_DEBUG=api` (honored by `go-gh`) to log every request and response.
 
@@ -36,7 +44,7 @@ Run all CI checks locally before pushing:
 golangci-lint fmt && go mod tidy && golangci-lint run && go build ./... && go test ./...
 ```
 
-If that exits 0, CI will pass. `golangci-lint fmt` applies both `gofmt` and `goimports` (configured in [`.golangci.yml`](.golangci.yml)) so import grouping stays consistent across files. The same checks run in [`gh-teacher-ci.yml`](../../.github/workflows/gh-teacher-ci.yml).
+If that exits 0, CI will pass. `golangci-lint fmt` applies both `gofmt` and `goimports` (configured in [`.golangci.yaml`](.golangci.yaml)) so import grouping stays consistent across files. The same checks run in [`gh-teacher-ci.yaml`](../../.github/workflows/gh-teacher-ci.yaml).
 
 VSCode users: install the [Go extension](https://marketplace.visualstudio.com/items?itemName=golang.Go) and add this to `.vscode/settings.json` for format-and-lint on save:
 
@@ -47,21 +55,6 @@ VSCode users: install the [Go extension](https://marketplace.visualstudio.com/it
   "go.formatTool": "gofmt"
 }
 ```
-
-## Commands
-
-| Command                                  | Description                                                       |
-| ---------------------------------------- | ----------------------------------------------------------------- |
-| `gh teacher whoami`                      | Print the authenticated GitHub user.                              |
-| `gh teacher login`                       | Log in to GitHub via `gh auth login`, requesting the `admin:org` scope (required for org invites) on top of the gh defaults. Pass `-s` to add other scopes. Other commands trigger this same login flow automatically when no token is configured for `github.com`. |
-| `gh teacher logout`                      | Log out of GitHub via `gh auth logout`. |
-| `gh teacher invite <org> <user>`         | Invite user to an org (use `--admin` for the org admin role). Common API failures (missing scope, not an admin, org not found, already a member, pending invite) surface as actionable messages instead of raw HTTP errors. |
-| `gh teacher invite <org>/<repo> <user>`  | Invite user to a specific repository. Default permission is `push`; override with `-p {pull,triage,push,maintain,admin}`. Re-running with a different `-p` updates the existing collaborator. |
-| `gh teacher remove <org> <user>`         | Remove user from an org. Revokes access to every repo in the org, removes them from all teams, and cancels any pending invitation. Idempotent: a 404 (already gone) is treated as success. |
-| `gh teacher remove <org>/<repo> <user>`  | Remove user from a specific repository. Idempotent (404 treated as success). |
-| `gh teacher download <org> <classroom> <assignment>` | Clone every repo in `<org>` whose name starts with `<classroom>-<assignment>-` (the `gh student accept` convention of `<classroom>-<assignment>-<username>`). Same `<org> <classroom> <assignment>` shape as `gh student accept`. Default destination is `<classroom>-<assignment>_submissions_<YYYY_MM_DD_T_HH_MM_SS>/` (24-hour local time) so each run produces a fresh folder; override with `-d/--dir` (taken literally, no timestamp). Per-repo output is concise (`Cloning <name>... Done`); existing target dirs are skipped so re-runs with `-d` pick up new submissions. |
-
-Run `gh teacher <command> --help` for available flags. Commands that emit informational output accept `--quiet` / `-q` to suppress it; pass `--verbose` / `-v` to see per-step operational details (e.g. raw `git` output during `download`). Errors always go to stderr with a non-zero exit code.
 
 ## Layout
 
