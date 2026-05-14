@@ -1,0 +1,12 @@
+- [Home](Home)
+- [Installation](Installation)
+- **Walkthroughs**
+  - [Teacher Guide](Teacher-Guide)
+  - [Student Guide](Student-Guide)
+- **Command reference**
+  - [gh teacher](gh-teacher)
+  - [gh student](gh-student)
+- **Reference**
+  - [Assignment Templates](Assignment-Templates)
+  - [Reusable Workflows](Reusable-Workflows)
+  - [Troubleshooting](Troubleshooting)
