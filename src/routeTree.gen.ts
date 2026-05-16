@@ -13,6 +13,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as ClassesRouteImport } from './routes/classes'
 import { Route as AssignmentsRouteImport } from './routes/assignments'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as OrgClassesIndexRouteImport } from './routes/$org/classes/index'
 import { Route as OrgClassroomStudentsIndexRouteImport } from './routes/$org/$classroom/students/index'
 import { Route as OrgClassroomAssignmentsIndexRouteImport } from './routes/$org/$classroom/assignments/index'
 import { Route as OrgClassroomAssignmentsNewIndexRouteImport } from './routes/$org/$classroom/assignments/new/index'
@@ -37,6 +38,11 @@ const AssignmentsRoute = AssignmentsRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OrgClassesIndexRoute = OrgClassesIndexRouteImport.update({
+  id: '/$org/classes/',
+  path: '/$org/classes/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OrgClassroomStudentsIndexRoute =
@@ -75,6 +81,7 @@ export interface FileRoutesByFullPath {
   '/assignments': typeof AssignmentsRoute
   '/classes': typeof ClassesRoute
   '/login': typeof LoginRoute
+  '/$org/classes/': typeof OrgClassesIndexRoute
   '/$org/$classroom/assignments/': typeof OrgClassroomAssignmentsIndexRoute
   '/$org/$classroom/students/': typeof OrgClassroomStudentsIndexRoute
   '/$org/$classroom/assignments/new/': typeof OrgClassroomAssignmentsNewIndexRoute
@@ -86,6 +93,7 @@ export interface FileRoutesByTo {
   '/assignments': typeof AssignmentsRoute
   '/classes': typeof ClassesRoute
   '/login': typeof LoginRoute
+  '/$org/classes': typeof OrgClassesIndexRoute
   '/$org/$classroom/assignments': typeof OrgClassroomAssignmentsIndexRoute
   '/$org/$classroom/students': typeof OrgClassroomStudentsIndexRoute
   '/$org/$classroom/assignments/new': typeof OrgClassroomAssignmentsNewIndexRoute
@@ -98,6 +106,7 @@ export interface FileRoutesById {
   '/assignments': typeof AssignmentsRoute
   '/classes': typeof ClassesRoute
   '/login': typeof LoginRoute
+  '/$org/classes/': typeof OrgClassesIndexRoute
   '/$org/$classroom/assignments/': typeof OrgClassroomAssignmentsIndexRoute
   '/$org/$classroom/students/': typeof OrgClassroomStudentsIndexRoute
   '/$org/$classroom/assignments/new/': typeof OrgClassroomAssignmentsNewIndexRoute
@@ -111,6 +120,7 @@ export interface FileRouteTypes {
     | '/assignments'
     | '/classes'
     | '/login'
+    | '/$org/classes/'
     | '/$org/$classroom/assignments/'
     | '/$org/$classroom/students/'
     | '/$org/$classroom/assignments/new/'
@@ -122,6 +132,7 @@ export interface FileRouteTypes {
     | '/assignments'
     | '/classes'
     | '/login'
+    | '/$org/classes'
     | '/$org/$classroom/assignments'
     | '/$org/$classroom/students'
     | '/$org/$classroom/assignments/new'
@@ -133,6 +144,7 @@ export interface FileRouteTypes {
     | '/assignments'
     | '/classes'
     | '/login'
+    | '/$org/classes/'
     | '/$org/$classroom/assignments/'
     | '/$org/$classroom/students/'
     | '/$org/$classroom/assignments/new/'
@@ -145,6 +157,7 @@ export interface RootRouteChildren {
   AssignmentsRoute: typeof AssignmentsRoute
   ClassesRoute: typeof ClassesRoute
   LoginRoute: typeof LoginRoute
+  OrgClassesIndexRoute: typeof OrgClassesIndexRoute
   OrgClassroomAssignmentsIndexRoute: typeof OrgClassroomAssignmentsIndexRoute
   OrgClassroomStudentsIndexRoute: typeof OrgClassroomStudentsIndexRoute
   OrgClassroomAssignmentsNewIndexRoute: typeof OrgClassroomAssignmentsNewIndexRoute
@@ -180,6 +193,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/$org/classes/': {
+      id: '/$org/classes/'
+      path: '/$org/classes'
+      fullPath: '/$org/classes/'
+      preLoaderRoute: typeof OrgClassesIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/$org/$classroom/students/': {
@@ -225,6 +245,7 @@ const rootRouteChildren: RootRouteChildren = {
   AssignmentsRoute: AssignmentsRoute,
   ClassesRoute: ClassesRoute,
   LoginRoute: LoginRoute,
+  OrgClassesIndexRoute: OrgClassesIndexRoute,
   OrgClassroomAssignmentsIndexRoute: OrgClassroomAssignmentsIndexRoute,
   OrgClassroomStudentsIndexRoute: OrgClassroomStudentsIndexRoute,
   OrgClassroomAssignmentsNewIndexRoute: OrgClassroomAssignmentsNewIndexRoute,
