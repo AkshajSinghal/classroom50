@@ -50,9 +50,29 @@ gh teacher rotate-collect-token <org>
 
 **Plan check.** `init` warns when the org is not on Team or Enterprise Cloud (required for Pages from a private repo). The warning is advisory; you can still proceed.
 
-After `init` completes, the CLI prints the future Pages URL (`https://<org>.github.io/classroom50/`) and suggests `gh teacher classroom add` (not yet implemented in this release — see the command reference for current commands).
+After `init` completes, the CLI prints the future Pages URL (`https://<org>.github.io/classroom50/`) and suggests `gh teacher classroom add` as the next step.
 
-## 4. Invite students to the org
+## 4. Add a classroom
+
+Each classroom is a directory at the root of `<org>/classroom50` holding four files (`classroom.json`, `assignments.json`, `students.csv`, `scores.json`). Scaffold one with:
+
+```sh
+gh teacher classroom add <org> <short-name> --name "<full name>" --term <term>
+```
+
+For example:
+
+```sh
+gh teacher classroom add cs50-fall-2026 cs-principles --name "CS Principles" --term Spring-2026
+```
+
+The `<short-name>` must match `^[a-z0-9][a-z0-9-]{1,38}$` (2-39 chars, lowercase letters/digits/hyphens, starting with a letter or digit) because it flows into student repo names like `<short-name>-<assignment>-<username>`. `--name` and `--term` are optional but recommended — they're written into `classroom.json` and surface in the published Pages site (forthcoming) and in `gh teacher download` summaries.
+
+The command commits all four files in a single Tree commit on the default branch. If `<org>/classroom50` doesn't exist yet, it prints `run gh teacher init <org> first` and exits non-zero. If the `<short-name>` directory already exists, it refuses to overwrite rather than clobbering an in-progress classroom — modify it via `gh teacher roster add` and `gh teacher assignment add` (forthcoming) instead.
+
+Run this command once per classroom you teach in the org. You can have several classrooms side by side in the same `classroom50` repo.
+
+## 5. Invite students to the org
 
 For each student:
 
@@ -81,7 +101,7 @@ gh teacher invite -p maintain <org>/<repo> <username>     # other permissions
 
 Permission options for `-p`: `pull`, `triage`, `push`, `maintain`, `admin`. Re-running with a different `-p` updates the existing collaborator's permission in place.
 
-## 5. Remove students or TAs when needed
+## 6. Remove students or TAs when needed
 
 ```sh
 gh teacher remove <org> <username>           # remove from organization
@@ -90,7 +110,7 @@ gh teacher remove <org>/<repo> <username>    # remove from one repo
 
 The org form revokes access to every repository in the org, removes the user from all teams, and cancels any pending invitation in one call. Both forms are idempotent — a 404 (user is not a member or collaborator) prints a clear message and exits 0 so re-runs are safe.
 
-## 6. Download submissions
+## 7. Download submissions
 
 After students have run `gh student submit`, pull every student's latest submission for an assignment with:
 
