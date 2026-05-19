@@ -24,7 +24,35 @@ This shells out to `gh auth login -s admin:org` and opens a browser to authorize
 
 If you skip this step and run another command first (e.g. `gh teacher invite`), it will detect the missing scope and run `gh teacher login` for you before continuing.
 
-## 3. Invite students to the org
+## 3. Bootstrap the classroom50 config repo
+
+Run once per teaching org to create `<org>/classroom50` — the private config repo that will hold classroom metadata, published assignment manifests, and collected scores:
+
+```sh
+CLASSROOM50_COLLECT_TOKEN=ghp_xxx gh teacher init <org>
+```
+
+Or omit the env var and the command prompts for the token interactively:
+
+```sh
+gh teacher init <org>
+```
+
+`init` is idempotent: re-running picks up where a prior run left off (it does not overwrite teacher edits to the skeleton).
+
+**Collect token.** Supply a fine-grained PAT with **Contents: read** on org repos whose names match `<classroom>-*`. Store it only via the `CLASSROOM50_COLLECT_TOKEN` environment variable or a hidden stdin prompt — there is no `--collect-token` flag (command-line PATs leak via shell history and process listings). Use an org-owned service account, not a personal teacher account; pass `--service-account-confirm` to silence the reminder. Rotate before expiry (PATs are typically 90 days) with:
+
+```sh
+gh teacher rotate-collect-token <org>
+```
+
+**What `init` sets up:** private `classroom50` repo with `auto_init`, embedded workflows (`publish-pages.yml`, placeholder `collect-scores.yml`), GitHub Pages (workflow build), branch protection on the default branch, workflow `GITHUB_TOKEN` permissions (409 tolerated when the org enforces a stricter policy — skeleton workflows declare their own workflow-level `permissions:` blocks), and the repo-level `CLASSROOM50_COLLECT_TOKEN` Actions secret.
+
+**Plan check.** `init` warns when the org is not on Team or Enterprise Cloud (required for Pages from a private repo). The warning is advisory; you can still proceed.
+
+After `init` completes, the CLI prints the future Pages URL (`https://<org>.github.io/classroom50/`) and suggests `gh teacher classroom add` (not yet implemented in this release — see the command reference for current commands).
+
+## 4. Invite students to the org
 
 For each student:
 
@@ -53,7 +81,7 @@ gh teacher invite -p maintain <org>/<repo> <username>     # other permissions
 
 Permission options for `-p`: `pull`, `triage`, `push`, `maintain`, `admin`. Re-running with a different `-p` updates the existing collaborator's permission in place.
 
-## 4. Remove students or TAs when needed
+## 5. Remove students or TAs when needed
 
 ```sh
 gh teacher remove <org> <username>           # remove from organization
@@ -62,7 +90,7 @@ gh teacher remove <org>/<repo> <username>    # remove from one repo
 
 The org form revokes access to every repository in the org, removes the user from all teams, and cancels any pending invitation in one call. Both forms are idempotent — a 404 (user is not a member or collaborator) prints a clear message and exits 0 so re-runs are safe.
 
-## 5. Download submissions
+## 6. Download submissions
 
 After students have run `gh student submit`, pull every student's latest submission for an assignment with:
 

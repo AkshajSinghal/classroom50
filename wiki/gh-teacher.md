@@ -16,6 +16,52 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | `gh teacher remove <org> <user>` | Remove user from an org. Revokes access to every repo in the org, removes them from all teams, and cancels any pending invitation. Idempotent. |
 | `gh teacher remove <org>/<repo> <user>` | Remove user from a single repo. Idempotent. |
 | `gh teacher download <org> <classroom> <assignment>` | Clone every repo in `<org>` whose name starts with `<classroom>-<assignment>-`. Default destination is `<classroom>-<assignment>_submissions_<YYYY_MM_DD_T_HH_MM_SS>/`; override with `-d`. |
+| `gh teacher init <org>` | Bootstrap `<org>/classroom50` (config repo, Pages, branch protection, collect-token secret). Idempotent. |
+| `gh teacher rotate-collect-token <org>` | Replace the `CLASSROOM50_COLLECT_TOKEN` repo secret on an existing config repo. |
+
+## `gh teacher init`
+
+One-shot bootstrap for the per-org `classroom50` config repo. See the [Teacher Guide](Teacher-Guide) for when to run it in your workflow.
+
+```sh
+CLASSROOM50_COLLECT_TOKEN=ghp_xxx gh teacher init <org>
+gh teacher init <org>                              # interactive token prompt
+gh teacher init <org> --service-account-confirm    # silence service-account reminder
+```
+
+Performs these steps in order:
+
+1. **Org plan check** — `GET /orgs/{org}`; warns when the org is not on Team or Enterprise Cloud (Pages from a private repo). Advisory only.
+2. **Create or fetch repo** — `POST /orgs/{org}/repos` with `auto_init: true` for `classroom50`. On 422 (name taken), falls back to `GET /repos/{org}/classroom50`. The default branch from the response flows through to later steps (org policy can rename `main`).
+3. **Skeleton drop** — single Tree commit of embedded files (`.github/workflows/`, `.github/scripts/`, `README.md`). Re-runs detect `.github/workflows/publish-pages.yml` and skip without overwriting teacher edits. `publish-pages.yml` is templated with the org's actual default branch at commit time.
+4. **Enable Pages** — `POST .../pages` with `build_type: workflow`; 409 = already enabled.
+5. **Branch protection** — no force pushes or branch deletion on the default branch.
+6. **Workflow permissions** — raises default `GITHUB_TOKEN` to `write`. HTTP 409 (org-enforced policy) is tolerated; skeleton workflows declare workflow-level `permissions:` blocks.
+7. **Collect token** — reads `CLASSROOM50_COLLECT_TOKEN` from env (trimmed), piped stdin, or hidden TTY prompt; libsodium sealbox-encrypts and uploads as a repo-level Actions secret.
+
+**Collect token requirements:** fine-grained PAT with `Contents: read` on org repos matching `<classroom>-*`. No CLI flag for the value. Prefer an org-owned service account.
+
+**Skeleton shipped:**
+
+| Path | Status |
+| --- | --- |
+| `.github/workflows/publish-pages.yml` | Working allow-list Pages publisher |
+| `.github/workflows/collect-scores.yml` | Placeholder (`workflow_dispatch` + nightly cron) |
+| `.github/scripts/collect_scores.py` | Placeholder (exits 0 until implemented) |
+| `README.md` | Describes the config repo layout |
+
+Score collection is **pull-based**: the collect workflow (once implemented) polls student repos for `autograde.json` on submit-tag releases and writes `scores.json`. No cross-repo write PAT or `repository_dispatch` from student repos.
+
+## `gh teacher rotate-collect-token`
+
+Re-runs only step 7 of `init` — replaces the `CLASSROOM50_COLLECT_TOKEN` secret in place. Use when the PAT nears expiry, staff change, or after a suspected compromise.
+
+```sh
+CLASSROOM50_COLLECT_TOKEN=ghp_xxx gh teacher rotate-collect-token <org>
+gh teacher rotate-collect-token <org>
+```
+
+Fails with a clear message if `<org>/classroom50` does not exist (`run gh teacher init <org> first`). Accepts the same token input paths and `--service-account-confirm` flag as `init`.
 
 ## `gh teacher invite`
 
