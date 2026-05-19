@@ -5,7 +5,7 @@ Tools for running a GitHub-backed classroom: a teacher CLI, a student CLI, reusa
 ## Where to start
 
 - **New here?** Read [Installation](Installation) — install Go, `gh`, and the two CLI extensions in a few commands.
-- **Teaching a class?** Walk through the [Teacher Guide](Teacher-Guide): set up the org, run `gh teacher init`, invite students, download submissions.
+- **Teaching a class?** Walk through the [Teacher Guide](Teacher-Guide): set up the org, run `gh teacher init`, add a classroom, invite students, download submissions.
 - **Taking a class?** Walk through the [Student Guide](Student-Guide): accept an assignment, submit your work.
 - **Looking up a flag?** Skim the per-command references for [`gh teacher`](gh-teacher) and [`gh student`](gh-student).
 - **Building an assignment template?** See [Assignment Templates](Assignment-Templates).
@@ -15,7 +15,7 @@ Tools for running a GitHub-backed classroom: a teacher CLI, a student CLI, reusa
 
 `gh teacher` and `gh student` are [`gh` CLI extensions](https://docs.github.com/en/github-cli/github-cli/creating-github-cli-extensions) that wrap the GitHub REST API and `git` to automate the classroom lifecycle:
 
-- A teacher bootstraps a per-org `classroom50` config repo (`gh teacher init`), invites students to a GitHub org, and downloads their submissions in bulk.
+- A teacher bootstraps a per-org `classroom50` config repo (`gh teacher init`), scaffolds one or more classrooms inside it (`gh teacher classroom add`), invites students to a GitHub org, and downloads their submissions in bulk.
 - A student accepts an assignment (which provisions a private repo from a template) and submits work as commits.
 
 There is no separate server. All state lives in GitHub: org membership, per-student private repos, and a small `.classroom50.yml` metadata file inside each student repo.

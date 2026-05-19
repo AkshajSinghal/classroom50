@@ -18,6 +18,7 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | `gh teacher download <org> <classroom> <assignment>` | Clone every repo in `<org>` whose name starts with `<classroom>-<assignment>-`. Default destination is `<classroom>-<assignment>_submissions_<YYYY_MM_DD_T_HH_MM_SS>/`; override with `-d`. |
 | `gh teacher init <org>` | Bootstrap `<org>/classroom50` (config repo, Pages, branch protection, collect-token secret). Idempotent. |
 | `gh teacher rotate-collect-token <org>` | Replace the `CLASSROOM50_COLLECT_TOKEN` repo secret on an existing config repo. |
+| `gh teacher classroom add <org> <short-name>` | Add a new classroom directory to `<org>/classroom50`. Optional flags: `--name "<display name>"`, `--term <e.g. Spring-2026>`. Refuses to overwrite an existing classroom. |
 
 ## `gh teacher init`
 
@@ -62,6 +63,44 @@ gh teacher rotate-collect-token <org>
 ```
 
 Fails with a clear message if `<org>/classroom50` does not exist (`run gh teacher init <org> first`). Accepts the same token input paths and `--service-account-confirm` flag as `init`.
+
+## `gh teacher classroom add`
+
+Create a new classroom directory at the root of `<org>/classroom50` and scaffold its four canonical files in a single commit:
+
+```sh
+gh teacher classroom add <org> <short-name> --name "<full name>" --term <term>
+gh teacher classroom add cs50-fall-2026 cs-principles --name "CS Principles" --term Spring-2026
+gh teacher classroom add cs50-fall-2026 intro-java
+```
+
+**Short-name rules** (must match `^[a-z0-9][a-z0-9-]{1,38}$`):
+
+- 2-39 characters total
+- lowercase letters, digits, or hyphens
+- must start with a letter or digit (not a hyphen)
+
+The short-name flows into student repo names like `<short-name>-<assignment>-<username>` (the convention `gh student accept` and `gh teacher download` rely on), so it has to stay within GitHub's repo-name constraints.
+
+**Flags:**
+
+- `--name <full name>` — display name written into `classroom.json` (e.g. `"CS Principles"`). Optional but recommended.
+- `--term <term>` — term identifier written into `classroom.json` (e.g. `Spring-2026`). Optional.
+
+**What it scaffolds**, all in one Tree commit on the default branch:
+
+| Path | Schema sentinel | Contents |
+| --- | --- | --- |
+| `<short-name>/classroom.json` | `classroom50/classroom/v1` | `name`, `short_name`, `term`, `org` |
+| `<short-name>/assignments.json` | `classroom50/assignments/v1` | Empty `assignments: []` array — populated by `gh teacher assignment add` (forthcoming). |
+| `<short-name>/students.csv` | n/a | Header row `username,first_name,last_name,section,user_id`. The trailing `user_id` is a hidden column populated by `gh teacher roster add/import` — do not hand-edit it. |
+| `<short-name>/scores.json` | `classroom50/scores/v1` | Schema sentinel only — score entries are written by the `collect-scores.yml` workflow. |
+
+**Errors:**
+
+- `<org>/classroom50` does not exist → prints `run gh teacher init <org> first` and exits non-zero.
+- `<short-name>` directory already exists in the config repo → refuses to overwrite. Use `gh teacher roster add` or `gh teacher assignment add` (forthcoming) to modify an existing classroom.
+- Short-name fails the slug regex → prints the exact rule with the offending input.
 
 ## `gh teacher invite`
 
