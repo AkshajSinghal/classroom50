@@ -1,11 +1,13 @@
-import { GITHUB_OAUTH_WORKER_BASE } from './constants'
-import type { GithubDeviceCodeResponse, GithubTokenResponse } from './types'
+import { GITHUB_OAUTH_WORKER_BASE } from "./constants"
+import type { GithubDeviceCodeResponse, GithubTokenResponse } from "./types"
 
 function redirectUri() {
   return window.location.origin + window.location.pathname
 }
 
-function assertOAuthSuccess(data: GithubTokenResponse): asserts data is GithubTokenResponse & {
+function assertOAuthSuccess(
+  data: GithubTokenResponse,
+): asserts data is GithubTokenResponse & {
   access_token: string
 } {
   if (data.error) {
@@ -18,18 +20,30 @@ function assertOAuthSuccess(data: GithubTokenResponse): asserts data is GithubTo
 }
 
 async function readJsonResponse<T>(res: Response): Promise<T> {
-  const data = (await res.json()) as T
+  const text = await res.text()
+
+  let data: unknown = null
+
+  try {
+    data = text ? JSON.parse(text) : null
+  } catch (_err) {
+    if (!res.ok) {
+      throw new Error(`HTTP: ${res.status}: ${text || res.statusText}`)
+    }
+
+    throw new Error(`Expected JSON but received: ${text.slice(0, 200)}`)
+  }
 
   if (!res.ok) {
     const maybeOAuthError = data as Partial<GithubTokenResponse>
     throw new Error(
       maybeOAuthError.error_description ||
         maybeOAuthError.error ||
-        `HTTP ${res.status}`
+        `HTTP ${res.status}`,
     )
   }
 
-  return data
+  return data as T
 }
 
 export async function exchangeWebCode(input: {
@@ -38,17 +52,17 @@ export async function exchangeWebCode(input: {
   verifier: string
 }) {
   const res = await fetch(`${GITHUB_OAUTH_WORKER_BASE}/web/token`, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json'
+      Accept: "application/json",
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
       client_id: input.clientId,
       code: input.code,
       redirect_uri: redirectUri(),
-      code_verifier: input.verifier
-    })
+      code_verifier: input.verifier,
+    }),
   })
 
   const data = await readJsonResponse<GithubTokenResponse>(res)
@@ -61,15 +75,15 @@ export async function requestDeviceCode(input: {
   scope: string
 }) {
   const res = await fetch(`${GITHUB_OAUTH_WORKER_BASE}/device/code`, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json'
+      Accept: "application/json",
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
       client_id: input.clientId,
-      scope: input.scope
-    })
+      scope: input.scope,
+    }),
   })
 
   const data = await readJsonResponse<GithubDeviceCodeResponse>(res)
@@ -84,7 +98,7 @@ export async function requestDeviceCode(input: {
     !data.verification_uri ||
     !data.expires_in
   ) {
-    throw new Error('Incomplete device code response')
+    throw new Error("Incomplete device code response")
   }
 
   return data
@@ -96,17 +110,17 @@ export async function pollDeviceToken(input: {
   signal?: AbortSignal
 }) {
   const res = await fetch(`${GITHUB_OAUTH_WORKER_BASE}/device/token`, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json'
+      Accept: "application/json",
+      "Content-Type": "application/json",
     },
     signal: input.signal,
     body: JSON.stringify({
       client_id: input.clientId,
       device_code: input.deviceCode,
-      grant_type: 'urn:ietf:params:oauth:grant-type:device_code'
-    })
+      grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+    }),
   })
 
   return readJsonResponse<GithubTokenResponse>(res)
@@ -124,7 +138,7 @@ export function buildGithubAuthorizeUrl(input: {
     scope: input.scope,
     state: input.state,
     code_challenge: input.challenge,
-    code_challenge_method: 'S256'
+    code_challenge_method: "S256",
   })
 
   return `https://github.com/login/oauth/authorize?${params.toString()}`

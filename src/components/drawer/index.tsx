@@ -1,16 +1,31 @@
-import { GraduationCap, BookText, Trash, UsersRound, UserRound, HardDriveUpload } from 'lucide-react'
-import { Link } from '@tanstack/react-router'
+import {
+  GraduationCap,
+  BookText,
+  Trash,
+  UsersRound,
+  UserRound,
+  HardDriveUpload,
+} from "lucide-react"
+import { Link } from "@tanstack/react-router"
+import { useGithubAuth } from "../../auth/useGithubAuth"
+import duck from "@/assets/duck.png"
 
-const Drawer = ({ children }) => <div className="drawer lg:drawer-open">{children}</div>
+const Drawer = ({ children }) => (
+  <div className="drawer lg:drawer-open">{children}</div>
+)
 
-export const DrawerContent = ({ children, className }) => <div className={`${className} drawer-content`}>{children}</div>
+export const DrawerContent = ({ children, className }) => (
+  <div className={`${className} drawer-content`}>{children}</div>
+)
 export const DrawerToggle = () => <div className="drawer-toggle"></div>
 
 export const DrawerSidebar = ({ children, selected, page }) => {
   return (
     <div className="drawer-side bg-[#212a3a] text-white">
       <div className="flex flex-col min-h-full w-60 min-w-30 [&>div]:px-6">
-        {page === 'classes' ? <SidebarContentClasses /> : (
+        {page === "classes" ? (
+          <SidebarContentClasses />
+        ) : (
           <SidebarContent selected={selected} />
         )}
       </div>
@@ -29,7 +44,9 @@ export const TeacherLogo = () => {
 export const AllClasses = () => {
   return (
     <div className="py-4 text-sm">
-      <Link to="/cs50/classes" className="text-center">‹ All Classes</Link>
+      <Link to="/cs50/classes" className="text-center">
+        ‹ All Classes
+      </Link>
     </div>
   )
 }
@@ -47,14 +64,16 @@ export const TeacherSidebarMenu = ({ selected }) => {
   return (
     <div className="py-4">
       <ul className="[&>a>li]:py-2 [&>a>li>span]:pl-2">
-        <Link to='/cs50/cs50-2026/assignments'>
-          <li className={`flex ${selected === 'assignments' && 'bg-[#323b49]'}`}>
+        <Link to="/cs50/cs50-2026/assignments">
+          <li
+            className={`flex ${selected === "assignments" && "bg-[#323b49]"}`}
+          >
             <BookText />
             <span>Assignments</span>
           </li>
         </Link>
-        <Link to='/cs50/cs50-2026/students'>
-          <li className={`flex ${selected === 'students' && 'bg-[#323b49]'}`}>
+        <Link to="/cs50/cs50-2026/students">
+          <li className={`flex ${selected === "students" && "bg-[#323b49]"}`}>
             <UsersRound />
             <span>Students</span>
           </li>
@@ -64,19 +83,31 @@ export const TeacherSidebarMenu = ({ selected }) => {
   )
 }
 
+// keep first name as-is, truncate all others with a period
+const truncateName = (name: string) => {
+  if (!name) return ""
+
+  const truncatedName = name
+    .split(" ")
+    .map((n, i) => (i === 0 ? n : n.slice(0, 1) + "."))
+    .join(" ")
+
+  return truncatedName
+}
+
 export const SidebarFooter = () => {
+  const { user } = useGithubAuth()
+  const avatar_img = user?.avatar_url || duck
+  const name = truncateName(user?.name || "") || "User"
+
   return (
-    <div className="mt-auto border-t-1 border-[#444] py-4">
+    <div className="mt-auto border-t border-[#444] py-4">
       <div className="flex justify-start gap-4">
         <div className="avatar avatar-placeholder">
-          <div className="bg-base-200 text-primary rounded-full w-12">
-            <span className="text-black">SR</span>
-          </div>
+          <img src={avatar_img} className="w-12 rounded-full" />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="font-medium text-base-content text-white">
-            Sally R.
-          </div>
+          <div className="font-medium text-white">{name}</div>
 
           <div>
             <span className="text-[#aaa]">Teacher</span>
@@ -87,7 +118,7 @@ export const SidebarFooter = () => {
   )
 }
 
-export const SidebarContent = ({ selected, children }) => {
+export const SidebarContent = ({ selected }: { selected: boolean }) => {
   return (
     <>
       <TeacherLogo />
@@ -99,11 +130,11 @@ export const SidebarContent = ({ selected, children }) => {
   )
 }
 
-export const MyClasses = ({ children }) => {
+export const MyClasses = () => {
   return (
     <div className="py-4">
       <ul className="[&>a>li]:py-2 [&>a>li>span]:pl-2">
-        <Link to='/cs50/cs50-2026/students'>
+        <Link to="/cs50/cs50-2026/students">
           <li className="flex bg-[#323b49]">
             <BookText />
             <span>My Classes</span>
@@ -114,7 +145,7 @@ export const MyClasses = ({ children }) => {
   )
 }
 
-export const SidebarContentClasses = ({ children }) => {
+export const SidebarContentClasses = () => {
   return (
     <>
       <TeacherLogo />
