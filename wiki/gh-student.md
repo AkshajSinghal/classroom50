@@ -31,15 +31,21 @@ Under the hood:
    - **Schema mismatch** (e.g. `assignments.json` advertises a v2 shape but this `gh-student` only handles v1) → tells the student to update `gh-student`.
    - **Missing slug** → "ask your instructor to run `gh teacher assignment add <org> <classroom> <assignment>`".
    - **`mode: group`** → "group assignments are not yet supported (deferred to v0.3)". Group mode is reserved for a future release; the teacher CLI rejects `--mode group` symmetrically.
-3. **Create the assignment repo from the resolved template.** `POST /repos/{template.owner}/{template.repo}/generate` ([docs](https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#create-a-repository-using-a-template)) creates `<classroom>-<assignment>-<username>` (lowercased) under `<org>`. The template may live in another org — a **404 on this call** surfaces "template `<owner>/<repo>` is not accessible to you — ask your instructor to make it public or grant your account access". A 422 with the GitHub "already exists" message short-circuits to `Assignment already accepted: <org>/<repo>` and leaves the existing repo untouched.
-4. **Disable issues, projects, and wiki** on the new repo via `PATCH /repos/{owner}/{repo}` so the assignment surface is just code + history.
-5. **Add `<username>` as a `maintain` collaborator** via `PUT /repos/{owner}/{repo}/collaborators/{username}` ([docs](https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#add-a-repository-collaborator)). The PUT is upsert; a single call covers both the initial add and the downgrade from the creator-default `admin` to `maintain`.
-6. **Drop `.classroom50.yml` and `.github/workflows/autograde.yml` in a single Tree commit** on the templated branch. The metadata records four blocks:
+3. **Fetch the autograder workflow from Pages** (`https://<org>.github.io/classroom50/<classroom>/autograders/<entry.autograder>.yml`). The autograder identifier comes from the `assignments.json` entry's `autograder` field (defaults to `default` when absent); the publish-pages allow-list (Teacher Guide §1) makes the YAML readable without auth. Errors surfaced loudly:
+   - **404** → "autograder `<name>` not published yet — ask your instructor to confirm `<classroom>/autograders/<name>.yml` exists in the config repo and that `publish-pages.yml` has run".
+   - **Malformed YAML** → "autograder `<name>` is malformed YAML — ask your instructor to check the file in the config repo".
+   - **Empty body** → "Pages deployment may still be in flight; retry in a minute" (the Pages cache occasionally serves a stub right after a fresh deploy).
+
+   Fetching *before* creating the assignment repo is deliberate: a failure here surfaces without leaving a half-baked repo on the teacher's org.
+4. **Create the assignment repo from the resolved template.** `POST /repos/{template.owner}/{template.repo}/generate` ([docs](https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#create-a-repository-using-a-template)) creates `<classroom>-<assignment>-<username>` (lowercased) under `<org>`. The template may live in another org — a **404 on this call** surfaces "template `<owner>/<repo>` is not accessible to you — ask your instructor to make it public or grant your account access". A 422 with the GitHub "already exists" message short-circuits to `Assignment already accepted: <org>/<repo>` and leaves the existing repo untouched.
+5. **Disable issues, projects, and wiki** on the new repo via `PATCH /repos/{owner}/{repo}` so the assignment surface is just code + history.
+6. **Add `<username>` as a `maintain` collaborator** via `PUT /repos/{owner}/{repo}/collaborators/{username}` ([docs](https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#add-a-repository-collaborator)). The PUT is upsert; a single call covers both the initial add and the downgrade from the creator-default `admin` to `maintain`.
+7. **Drop `.classroom50.yml` and `.github/workflows/autograde.yml` in a single Tree commit** on the templated branch. The workflow body is the YAML fetched in step 3 — source-of-truth is the config repo, not the student CLI. The metadata records four blocks:
    - `classroom` / `assignment` — identity.
    - `source.{owner,repo,branch}` — the template repo (resolved from the assignments.json entry).
-   - `config.{owner,repo,branch,path}` — the per-org config repo (`<org>/classroom50`) and the classroom directory path. The autograde workflow reads this at run time to find the published `assignments.json`.
-   - `autograde.version` — mirrors the `# classroom50-autograde-version: <semver>` sentinel comment at the top of the dropped workflow. The workflow's load job uses it to detect drift between a local copy and the canonical version (the drift-detection job lands with v0.2 step 5; the recorded version lands now so old `gh-student` versions don't surprise the workflow when it ships).
-7. Print the `git clone` command, with a warning if the student is currently inside a git repo (to avoid an accidental nested clone).
+   - `config.{owner,repo,branch,path}` — the per-org config repo (`<org>/classroom50`) and the classroom directory path. `gh student submit` reads this on every submit to re-fetch the autograder.
+   - `autograde.{source,fetched_at,version}` — diagnostics: `source` records the resolved ref (e.g. `autograders/default.yml`); `fetched_at` is the UTC timestamp of the fetch; `version` mirrors the `# classroom50-autograde-version:` sentinel in the fetched YAML (empty when the teacher stripped the comment).
+8. Print the `git clone` command, with a warning if the student is currently inside a git repo (to avoid an accidental nested clone).
 
 Re-running on an already-accepted assignment short-circuits with `Assignment already accepted: <org>/<repo>` and leaves the existing repo (and any work in it) alone.
 
@@ -61,13 +67,14 @@ Run from inside a cloned assignment repo. Snapshots the current working tree, pu
 
 Under the hood:
 
-1. **Read `.classroom50.yml`** from the local clone for `source.owner`, `source.repo`, and `source.branch`.
+1. **Read `.classroom50.yml`** from the local clone for `source.owner`, `source.repo`, `source.branch`, `config.owner`, `classroom`, and `assignment`. The remote URL is the fallback for `config.owner` if `.classroom50.yml` predates v0.2 accept.
 2. **Copy submittable files** (tracked + untracked-not-ignored) into a temp worktree so the submission isn't polluted by build artifacts or unrelated state.
 3. **Fetch instructor `.gitignore` and `.github/`** (both optional) from `source.owner/source.repo@source.branch` via `GET /repos/{owner}/{repo}/contents/{path}` ([docs](https://docs.github.com/en/rest/repos/contents?apiVersion=2026-03-10#get-repository-content)) so any teacher-side updates flow through on the next submit.
-4. **Refresh the autograde workflow** by overwriting `.github/workflows/autograde.yml` with the version-substituted copy embedded in `gh-student`. The workflow YAML stays in lockstep with the CLI version sentinel regardless of what the template ships. The recorded `autograde.version` in `.classroom50.yml` is re-rendered to match.
-5. **Push the submission to `main`.** `git clone --bare` the remote, stage the temp worktree, commit (with the user's GitHub login + noreply email, scoped via `git -c user.name=... -c user.email=...`), push as a fast-forward. Submissions overlay as commits — no force-push, prior commits stay reachable for review.
-6. **Push a `submit/<UTC-timestamp>` tag** at the just-pushed SHA. The tag fires the autograde workflow (which triggers on `submit/*` tags), giving each submission an immutable history entry plus its own Release. The tag is pushed *after* the `main` push so the workflow never runs against a non-existent commit.
-7. **Print three URLs** for tracking the submission:
+4. **Re-read the assignment's autograder reference from Pages** (`https://<org>.github.io/classroom50/<classroom>/assignments.json`). A teacher's autograder-reference change in `assignments.json` propagates here — submit always uses the autograder the teacher means *right now*, not the one accept locked in.
+5. **Re-fetch the autograder workflow body** (`https://<org>.github.io/classroom50/<classroom>/autograders/<name>.yml`) and overwrite `.github/workflows/autograde.yml`. The fetched body is the single source of truth; whatever the template's `.github/` fetch in step 3 brought along is replaced. The `# classroom50-autograde-version:` sentinel from the fetched YAML is recorded in `.classroom50.yml`'s `autograde.version` for diagnostics, along with `autograde.fetched_at` (UTC) and the resolved `autograde.source`. (404 / malformed-YAML / empty-body errors are surfaced the same way as on accept — see §3 above.)
+6. **Push the submission to `main`.** `git clone --bare` the remote, stage the temp worktree, commit (with the user's GitHub login + noreply email, scoped via `git -c user.name=... -c user.email=...`), push as a fast-forward. Submissions overlay as commits — no force-push, prior commits stay reachable for review.
+7. **Push a `submit/<UTC-timestamp>` tag** at the just-pushed SHA. The tag fires the autograde workflow (which triggers on `submit/*` tags), giving each submission an immutable history entry plus its own Release. The tag is pushed *after* the `main` push so the workflow never runs against a non-existent commit.
+8. **Print three URLs** for tracking the submission:
    - the submit tag (`.../tree/submit%2F...`),
    - the Actions tab (`.../actions`, where the autograde workflow run shows up),
    - the eventual release (`.../releases/tag/submit%2F...`, 404 until the workflow finishes).
