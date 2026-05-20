@@ -1,9 +1,9 @@
-import { DEFAULT_GITHUB_SCOPE } from './constants'
-import { useGithubAuth } from './useGithubAuth'
-import { GitHubAuthedPanel } from './GitHubAuthedPanel'
-import { GitHubDevicePrompt } from './GitHubDevicePrompt'
+import { DEFAULT_GITHUB_SCOPE } from "./constants"
+import { useGithubAuth } from "./useGithubAuth"
+import { GitHubAuthedPanel } from "./GitHubAuthedPanel"
+import { GitHubDevicePrompt } from "./GitHubDevicePrompt"
 
-function GitHubMark({ className = 'size-7' }: { className?: string }) {
+function GitHubMark({ className = "size-7" }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 98 96" fill="currentColor">
       <path
@@ -38,7 +38,7 @@ export function GitHubAuthCard() {
         </header>
 
         <div className="card-body">
-          {auth.screen === 'authed' ? (
+          {auth.screen === "authed" ? (
             <GitHubAuthedPanel
               user={auth.githubUserQuery.data}
               isLoadingUser={auth.githubUserQuery.isLoading}
@@ -46,9 +46,9 @@ export function GitHubAuthCard() {
               tokenScope={auth.tokenScope}
               onSignOut={auth.signOut}
             />
-          ) : auth.screen === 'exchanging' ? (
+          ) : auth.screen === "exchanging" ? (
             <LoadingScreen label="Exchanging code for access token..." />
-          ) : auth.screen === 'device-success' ? (
+          ) : auth.screen === "device-success" ? (
             <div className="flex flex-col items-center gap-4 py-10 text-center">
               <div className="flex size-16 items-center justify-center rounded-full bg-success text-3xl font-bold text-success-content">
                 ✓
@@ -62,7 +62,7 @@ export function GitHubAuthCard() {
                 </p>
               </div>
             </div>
-          ) : auth.screen === 'device-prompt' && auth.device ? (
+          ) : auth.screen === "device-prompt" && auth.device ? (
             <GitHubDevicePrompt
               device={auth.device}
               status={auth.deviceStatus}
@@ -94,7 +94,7 @@ export function GitHubAuthCard() {
 
                 <input
                   className="input input-bordered font-mono"
-                  value={auth.clientID}
+                  value={auth.clientId}
                   placeholder="0v23li..."
                   autoComplete="off"
                   spellCheck={false}
@@ -103,7 +103,7 @@ export function GitHubAuthCard() {
 
                 <div className="label items-start">
                   <span className="label-text-alt min-w-0 w-full whitespace-normal break-words leading-relaxed opacity-60">
-                    Create one at{' '}
+                    Create one at{" "}
                     <a
                       className="link link-info break-words"
                       href="https://github.com/settings/developers"
@@ -112,10 +112,10 @@ export function GitHubAuthCard() {
                     >
                       github.com/settings/developers ↗
                     </a>
-                    . For Web Flow, set callback URL to{' '}
+                    . For Web Flow, set callback URL to{" "}
                     <code className="break-all rounded bg-base-300 px-1 py-0.5">
-                      {typeof window === 'undefined'
-                        ? '/'
+                      {typeof window === "undefined"
+                        ? "/"
                         : window.location.origin + window.location.pathname}
                     </code>
                     .

@@ -1,14 +1,14 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { DEFAULT_GITHUB_SCOPE } from './constants'
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { DEFAULT_GITHUB_SCOPE } from "./constants"
 import {
   buildGithubAuthorizeUrl,
   exchangeWebCode,
   pollDeviceToken,
-  requestDeviceCode
-} from './github-oauth-api'
-import { fetchGithubUser } from './github-user-api'
-import { deriveChallenge, generateVerifier, randomBase64Url } from './pkce'
+  requestDeviceCode,
+} from "./github-oauth-api"
+import { fetchGithubUser } from "./github-user-api"
+import { deriveChallenge, generateVerifier, randomBase64Url } from "./pkce"
 import {
   clearGithubToken,
   consumeOAuthSession,
@@ -17,18 +17,18 @@ import {
   getStoredGithubToken,
   persistGithubClientId,
   persistGithubToken,
-  saveOAuthSession
-} from './storage'
-import type { DeviceAuthState, GithubAuthScreen } from '.types'
+  saveOAuthSession,
+} from "./storage"
+import type { DeviceAuthState, GithubAuthScreen } from ".types"
 
 function formatError(err: unknown) {
   const message = err instanceof Error ? err.message : String(err)
 
   if (
-    message.toLowerCase().includes('failed to fetch') ||
-    message.toLowerCase().includes('networkerror')
+    message.toLowerCase().includes("failed to fetch") ||
+    message.toLowerCase().includes("networkerror")
   ) {
-    return 'Network error reaching the Cloudflare Worker proxy; it may be down or unreachable.'
+    return "Network error reaching the Cloudflare Worker proxy; it may be down or unreachable."
   }
 
   return message
@@ -39,12 +39,12 @@ function sleep(ms: number, signal: AbortSignal) {
     const timer = window.setTimeout(resolve, ms)
 
     signal.addEventListener(
-      'abort',
+      "abort",
       () => {
         window.clearTimeout(timer)
         resolve()
       },
-      { once: true }
+      { once: true },
     )
   })
 }
@@ -53,29 +53,29 @@ export function useGithubAuth() {
   const queryClient = useQueryClient()
   const abortRef = useRef<AbortController | null>(null)
 
-  const [screen, setScreen] = useState<GithubAuthScreen>('config')
-  const [clientId, setClientId] = useState('')
+  const [screen, setScreen] = useState<GithubAuthScreen>("config")
+  const [clientId, setClientId] = useState("")
   const [scope, setScope] = useState(DEFAULT_GITHUB_SCOPE)
   const [token, setToken] = useState<string | null>(null)
-  const [tokenScope, setTokenScope] = useState('')
+  const [tokenScope, setTokenScope] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [device, setDevice] = useState<DeviceAuthState | null>(null)
   const [now, setNow] = useState(() => Date.now())
 
   const githubUserQuery = useQuery({
-    queryKey: ['github', 'user', token],
+    queryKey: ["github", "user", token],
     queryFn: () => fetchGithubUser(token!),
     enabled: Boolean(token),
-    staleTime: 60_000,
-    retry: 1
+    staleTime: 60 * 60 * 1000,
+    retry: 1,
   })
 
   const exchangeCodeMutation = useMutation({
-    mutationFn: exchangeWebCode
+    mutationFn: exchangeWebCode,
   })
 
   const requestDeviceCodeMutation = useMutation({
-    mutationFn: requestDeviceCode
+    mutationFn: requestDeviceCode,
   })
 
   useEffect(() => {
@@ -88,12 +88,12 @@ export function useGithubAuth() {
 
     if (storedToken) {
       setToken(storedToken)
-      setScreen('authed')
+      setScreen("authed")
     }
   }, [])
 
   useEffect(() => {
-    if (screen !== 'device-prompt') return
+    if (screen !== "device-prompt") return
 
     const timer = window.setInterval(() => {
       setNow(Date.now())
@@ -104,12 +104,12 @@ export function useGithubAuth() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    const code = params.get('code')
-    const returnedState = params.get('state')
+    const code = params.get("code")
+    const returnedState = params.get("state")
 
     if (!code) return
 
-    window.history.replaceState({}, '', window.location.pathname)
+    window.history.replaceState({}, "", window.location.pathname)
 
     const {
       verifier,
@@ -119,14 +119,16 @@ export function useGithubAuth() {
     } = consumeOAuthSession()
 
     if (!returnedState || returnedState !== expectedState) {
-      setError('State mismatch -- possible CSRF. Please try signing in again.')
-      setScreen('config')
+      setError("State mismatch -- possible CSRF. Please try signing in again.")
+      setScreen("config")
       return
     }
 
     if (!verifier || !callbackClientId) {
-      setError('Missing PKCE verifier or client ID. Please try signing in again.')
-      setScreen('config')
+      setError(
+        "Missing PKCE verifier or client ID. Please try signing in again.",
+      )
+      setScreen("config")
       return
     }
 
@@ -136,27 +138,27 @@ export function useGithubAuth() {
     setScope(restoredScope)
     persistGithubClientId(callbackClientId)
 
-    setScreen('exchanging')
+    setScreen("exchanging")
     setError(null)
 
     exchangeCodeMutation.mutate(
       {
         clientId: callbackClientId,
         code,
-        verifier
+        verifier,
       },
       {
         onSuccess: (data) => {
-          persistGithubToken(data.access_token, data.scope || '')
+          persistGithubToken(data.access_token, data.scope || "")
           setToken(data.access_token)
-          setTokenScope(data.scope || '')
-          setScreen('authed')
+          setTokenScope(data.scope || "")
+          setScreen("authed")
         },
         onError: (err) => {
           setError(formatError(err))
-          setScreen('config')
-        }
-      }
+          setScreen("config")
+        },
+      },
     )
   }, [])
 
@@ -165,7 +167,7 @@ export function useGithubAuth() {
     const trimmedScope = scope.trim() || DEFAULT_GITHUB_SCOPE
 
     if (!trimmedClientId) {
-      setError('OAuth App Client ID is required.')
+      setError("OAuth App Client ID is required.")
       return null
     }
 
@@ -176,7 +178,7 @@ export function useGithubAuth() {
 
     return {
       clientId: trimmedClientId,
-      scope: trimmedScope
+      scope: trimmedScope,
     }
   }, [clientId, scope])
 
@@ -184,7 +186,7 @@ export function useGithubAuth() {
     const config = validateConfig()
     if (!config) return
 
-    setScreen('exchanging')
+    setScreen("exchanging")
 
     const verifier = generateVerifier()
     const challenge = await deriveChallenge(verifier)
@@ -194,14 +196,14 @@ export function useGithubAuth() {
       verifier,
       state: oauthState,
       clientId: config.clientId,
-      scope: config.scope
+      scope: config.scope,
     })
 
     window.location.href = buildGithubAuthorizeUrl({
       clientId: config.clientId,
       scope: config.scope,
       state: oauthState,
-      challenge
+      challenge,
     })
   }, [validateConfig])
 
@@ -210,7 +212,7 @@ export function useGithubAuth() {
     abortRef.current = null
     setError(message)
     setDevice(null)
-    setScreen('config')
+    setScreen("config")
   }, [])
 
   const startDevicePolling = useCallback(
@@ -230,18 +232,18 @@ export function useGithubAuth() {
 
       while (!controller.signal.aborted) {
         if (Date.now() > input.expiresAt) {
-          failDeviceFlow('Device code expired. Please try again.')
+          failDeviceFlow("Device code expired. Please try again.")
           return
         }
 
-        setDevice((current) => 
+        setDevice((current) =>
           current
             ? {
-              ...current,
-              intervalSeconds,
-              nextPollAt: Date.now() + intervalSeconds * 1000
-            }
-            : current
+                ...current,
+                intervalSeconds,
+                nextPollAt: Date.now() + intervalSeconds * 1000,
+              }
+            : current,
         )
 
         await sleep(intervalSeconds * 1000, controller.signal)
@@ -253,10 +255,10 @@ export function useGithubAuth() {
         setDevice((current) =>
           current
             ? {
-              ...current,
-              attempts
-            }
-            : current
+                ...current,
+                attempts,
+              }
+            : current,
         )
 
         let data
@@ -265,7 +267,7 @@ export function useGithubAuth() {
           data = await pollDeviceToken({
             clientId: input.clientId,
             deviceCode: input.deviceCode,
-            signal: controller.signal
+            signal: controller.signal,
           })
         } catch (err) {
           if (controller.signal.aborted) return
@@ -273,20 +275,20 @@ export function useGithubAuth() {
           return
         }
 
-        if (data.error === 'authorization_pending') continue
+        if (data.error === "authorization_pending") continue
 
-        if (data.error === 'slow_down') {
+        if (data.error === "slow_down") {
           intervalSeconds += 5
           continue
         }
 
-        if (data.error === 'access_denied') {
-          failDeviceFlow('You declined the authorization request.')
+        if (data.error === "access_denied") {
+          failDeviceFlow("You declined the authorization request.")
           return
         }
 
-        if (data.error === 'expired_token') {
-          failDeviceFlow('Device code expired. Please try again.')
+        if (data.error === "expired_token") {
+          failDeviceFlow("Device code expired. Please try again.")
           return
         }
 
@@ -296,29 +298,31 @@ export function useGithubAuth() {
         }
 
         if (!data.access_token) {
-          failDeviceFlow('Token endpoint returned no access_token and no error.')
+          failDeviceFlow(
+            "Token endpoint returned no access_token and no error.",
+          )
           return
         }
 
-        persistGithubToken(data.access_token, data.scope || '')
+        persistGithubToken(data.access_token, data.scope || "")
         setToken(data.access_token)
-        setTokenScope(data.scope || '')
+        setTokenScope(data.scope || "")
         setDevice(null)
-        setScreen('device-success')
+        setScreen("device-success")
 
         queryClient.prefetchQuery({
-          queryKey: ['github', 'user', data.access_token],
-          queryFn: () => fetchGithubUser(data.access_token!)
+          queryKey: ["github", "user", data.access_token],
+          queryFn: () => fetchGithubUser(data.access_token!),
         })
 
         window.setTimeout(() => {
-          setScreen('authed')
+          setScreen("authed")
         }, 3000)
 
         return
       }
     },
-    [failDeviceFlow, queryClient]
+    [failDeviceFlow, queryClient],
   )
 
   const startDeviceFlow = useCallback(async () => {
@@ -340,27 +344,27 @@ export function useGithubAuth() {
           intervalSeconds,
           attempts: 0,
           nextPollAt: Date.now() + intervalSeconds * 1000,
-          progress: 0
+          progress: 0,
         })
 
-        setScreen('device-prompt')
+        setScreen("device-prompt")
 
         void startDevicePolling({
           clientId: config.clientId,
           deviceCode: data.device_code!,
           expiresAt,
-          initialIntervalSeconds: intervalSeconds
+          initialIntervalSeconds: intervalSeconds,
         })
       },
       onError: (err) => {
         failDeviceFlow(formatError(err))
-      }
+      },
     })
   }, [
     failDeviceFlow,
     requestDeviceCodeMutation,
     startDevicePolling,
-    validateConfig
+    validateConfig,
   ])
 
   const cancelDeviceFlow = useCallback(() => {
@@ -368,17 +372,17 @@ export function useGithubAuth() {
     abortRef.current = null
     setDevice(null)
     setError(null)
-    setScreen('config')
+    setScreen("config")
   }, [])
 
   const markDeviceCodeCopied = useCallback(() => {
     setDevice((current) =>
       current && current.progress < 1
         ? {
-          ...current,
-          progress: 1
-        }
-        : current
+            ...current,
+            progress: 1,
+          }
+        : current,
     )
   }, [])
 
@@ -386,10 +390,10 @@ export function useGithubAuth() {
     setDevice((current) =>
       current && current.progress < 2
         ? {
-          ...current,
-          progress: 2
-        }
-        : current
+            ...current,
+            progress: 2,
+          }
+        : current,
     )
   }, [])
 
@@ -397,11 +401,11 @@ export function useGithubAuth() {
     abortRef.current?.abort()
     clearGithubToken()
     setToken(null)
-    setTokenScope('')
+    setTokenScope("")
     setDevice(null)
     setError(null)
-    setScreen('config')
-    queryClient.removeQueries({ queryKey: ['github'] })
+    setScreen("config")
+    queryClient.removeQueries({ queryKey: ["github"] })
   }, [queryClient])
 
   const deviceStatus = useMemo(() => {
@@ -409,21 +413,21 @@ export function useGithubAuth() {
 
     const remainingSeconds = Math.max(
       0,
-      Math.floor((device.expiresAt - now) / 1000)
+      Math.floor((device.expiresAt - now) / 1000),
     )
 
     const nextPollSeconds = Math.max(
       0,
-      Math.ceil((device.nextPollAt - now) / 1000)
+      Math.ceil((device.nextPollAt - now) / 1000),
     )
 
     const minutes = Math.floor(remainingSeconds / 60)
-    const seconds = String(remainingSeconds % 60).padStart(2, '0')
+    const seconds = String(remainingSeconds % 60).padStart(2, "0")
 
     return {
       attempts: device.attempts,
       nextPollSeconds,
-      expiresDisplay: `${minutes}:${seconds}`
+      expiresDisplay: `${minutes}:${seconds}`,
     }
   }, [device, now])
 
@@ -439,13 +443,14 @@ export function useGithubAuth() {
     device,
     deviceStatus,
     githubUserQuery,
-    isStartingWebFlow: screen === 'exchanging',
+    user: githubUserQuery.data || null,
+    isStartingWebFlow: screen === "exchanging",
     isRequestingDeviceCode: requestDeviceCodeMutation.isPending,
     startWebFlow,
     startDeviceFlow,
     cancelDeviceFlow,
     markDeviceCodeCopied,
     markVerificationOpened,
-    signOut
+    signOut,
   }
 }
