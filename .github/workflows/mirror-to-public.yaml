@@ -1,5 +1,35 @@
 name: Mirror to public repo
 
+# Syncs the development repo to foundation50/classroom50 on every
+# push to `v1`. This workflow file is excluded from the sync itself
+# (see the rsync `--exclude` list below), so it stays dev-only and
+# this comment block is the right place to document setup.
+#
+# What gets synced:
+#   - Tracked files are pushed to the public repo's `main` branch.
+#     The exclude list drops `wiki/`, this workflow file, and the
+#     dev-only `plans/` notes.
+#   - `wiki/` is pushed to `foundation50/classroom50.wiki.git` —
+#     one commit per sync, replacing the previous wiki contents.
+#
+# The public repo is downstream-only: direct edits there (including
+# wiki edits via the GitHub UI) are overwritten on the next sync.
+#
+# One-time setup:
+#   1. Create a PAT with `contents: write` on
+#      `foundation50/classroom50`. Fine-grained PATs also need
+#      `wiki` access; classic PATs need the `repo` scope.
+#   2. Add it as repo secret `MIRROR_PAT` at
+#      Settings → Secrets and variables → Actions.
+#   3. On `foundation50/classroom50`, enable the wiki
+#      (Settings → Features → Wikis) and create at least one page
+#      via the GitHub UI. GitHub doesn't initialize the wiki repo
+#      until the first page exists, and the wiki sync step will
+#      fail until then.
+#
+# Every merge to `v1` then runs the mirror automatically. Manual
+# runs are available from the Actions tab via workflow_dispatch.
+
 on:
   push:
     branches: [v1]
@@ -62,14 +92,17 @@ jobs:
           fi
 
           # Wipe tracked content (preserve .git), then copy current source tree in.
-          # wiki/ is excluded here -- it goes to the wiki repo in the next step.
-          # The sync workflow itself is excluded so the public repo doesn't try to
-          # run it.
+          # Excluded paths:
+          #   - wiki/ goes to the wiki repo in the next step.
+          #   - This workflow file stays dev-only so the public repo doesn't try to run it.
+          #   - plans/ holds internal planning notes that reference dev-only resources
+          #     (e.g. PR URLs against this repo); keep them out of the public mirror.
           find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
           rsync -a \
             --exclude='.git/' \
             --exclude='wiki/' \
             --exclude='.github/workflows/mirror-to-public.yaml' \
+            --exclude='plans/' \
             "$GITHUB_WORKSPACE"/ ./
 
           if [ -z "$(git status --porcelain)" ]; then
