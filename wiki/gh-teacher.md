@@ -22,7 +22,7 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | `gh teacher roster add <org> <classroom> <username>` | Append or upsert a student in `students.csv`; resolves `github_id`, sends an org invite if needed. Optional flags: `--first-name`, `--last-name`, `--email`, `--section`. |
 | `gh teacher roster remove <org> <classroom> <username>` | Remove a row from `students.csv`. Does NOT touch org membership. Idempotent. |
 | `gh teacher roster import <org> <classroom> <path-to-csv>` | Bulk upsert from a local CSV (`username,first_name,last_name,email,section` header; trailing `github_id` accepted but ignored). One Tree commit; auto-invites new students. |
-| `gh teacher assignment add <org> <classroom> <slug>` | Register or upsert an assignment in `assignments.json`. Required flags: `--name`, `--template`. Optional: `--description`, `--due` (ISO-8601), `--mode` (only `individual` currently supported), `--tests` (path to a JSON tests file validated before write). |
+| `gh teacher assignment add <org> <classroom> <slug>` | Register or upsert an assignment in `assignments.json`. Required flags: `--name`, `--template`. Optional: `--description`, `--due` (ISO-8601), `--mode` (only `individual` currently supported), `--autograder <name>` (default `default`; the referenced `<classroom>/autograders/<name>.yml` must exist), `--tests` (path to a JSON tests file validated before write). |
 | `gh teacher assignment remove <org> <classroom> <slug>` | Drop an assignment entry from `assignments.json`. Does NOT touch existing student repos. Idempotent. |
 | `gh teacher assignment list <org> <classroom>` | Print every assignment slug registered in `assignments.json`, one per line on stdout. Pass `--json` for the full entries array, `-q` to suppress the stderr summary. Read-only. |
 
@@ -101,6 +101,7 @@ The short-name flows into student repo names like `<short-name>-<assignment>-<us
 | `<short-name>/assignments.json` | `classroom50/assignments/v1` | Empty `assignments: []` array — populated by `gh teacher assignment add`. |
 | `<short-name>/students.csv` | n/a | Header row `username,first_name,last_name,email,section,github_id`. The `email` column is optional per row (values may be empty). The trailing `github_id` is a hidden column populated by `gh teacher roster add/import` — do not hand-edit it. |
 | `<short-name>/scores.json` | `classroom50/scores/v1` | Schema sentinel only — score entries are written by the `collect-scores.yml` workflow. |
+| `<short-name>/autograders/default.yml` | n/a | Thin wrapper around the reusable `foundation50/classroom50/.github/workflows/autograde-library.yml`. Carries the `# classroom50-autograde-version:` sentinel and the submit-tag trigger. Hand-editable — replace the `uses:` block to write your own pipeline, or drop sibling `<name>.yml` files for per-assignment graders and reference them by name from `assignments.json`'s `autograder` field. |
 
 **Errors:**
 
@@ -169,9 +170,9 @@ Writes flow through the same optimistic-update-with-rebase loop the roster comma
 ### `gh teacher assignment add`
 
 ```sh
-gh teacher assignment add <org> <classroom> <slug> --name "<name>" --template <owner>/<repo>[@branch] [--description <text>] [--due <ISO-8601>] [--mode individual] [--tests <path>]
+gh teacher assignment add <org> <classroom> <slug> --name "<name>" --template <owner>/<repo>[@branch] [--description <text>] [--due <ISO-8601>] [--mode individual] [--autograder <name>] [--tests <path>]
 gh teacher assignment add cs50-fall-2026 cs-principles hello --name "Hello" --template cs50/hello-template --due 2026-09-15T23:59:00-04:00 --tests ./hello-tests.json
-gh teacher assignment add cs50-fall-2026 cs-principles intro --name "Intro" --template cs50/intro-template@main
+gh teacher assignment add cs50-fall-2026 cs-principles intro --name "Intro" --template cs50/intro-template@main --autograder io-suite
 ```
 
 Register or upsert one assignment. Idempotent on re-run: the same `slug` replaces the existing entry in place (position-preserving), a new `slug` appends.
@@ -188,6 +189,7 @@ Register or upsert one assignment. Idempotent on re-run: the same `slug` replace
 - `--description <text>` — short description written into the entry (omitted from the file when empty).
 - `--due <ISO-8601>` — due date in RFC 3339 form, e.g. `2026-09-15T23:59:00-04:00`. The timezone is required. Stored verbatim, so a teacher's choice of offset round-trips through the file.
 - `--mode individual` — `individual` is the only currently-supported value; `group` is planned for a future release and produces an explicit error today.
+- `--autograder <name>` — which autograder workflow this assignment opts into. Default is `default` (scaffolded by `gh teacher classroom add`); pass a different name to reference `<classroom>/autograders/<name>.yml` instead. The referenced file must exist in the config repo at write time — a typo'd name is rejected before the assignment lands. Students fetch the named workflow from Pages on accept and refresh it on every submit, so teacher edits to the source workflow propagate without any per-student-repo maintenance.
 - `--tests <path-to-tests.json>` — local JSON file whose top-level value is a JSON array of test entries (schema below). The array replaces any previous tests for that slug.
 
 **Tests schema (v0.2).** Each entry:
@@ -215,6 +217,7 @@ A schema violation aborts the command before any commit lands. No partial-write 
 - `<classroom>/assignments.json` missing → `run gh teacher classroom add <org> <classroom> first, or restore the file if it was deleted`.
 - Template repo 404 (private, in another org, or doesn't exist) → `template <owner>/<repo> is not visible to your account — either make it public, or copy it into your org and reference the copy`.
 - Template repo exists but `is_template: false` → message naming the Settings toggle to flip.
+- `--autograder <name>` references a file that doesn't exist in the config repo at write time → `autograder "<name>" does not exist at <org>/classroom50/<classroom>/autograders/<name>.yml — create it (or pass --autograder <existing-name>) before registering this assignment`.
 - Tests file violates the autograding-tests schema → cites the offending `tests[N]` entry by index (and test-name when present).
 - Repeated rebase failures (5 attempts with exponential backoff) → `lost the rebase race` with a retry hint.
 

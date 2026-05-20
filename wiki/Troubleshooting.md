@@ -51,6 +51,17 @@ Three things to check, in order:
 
 `gh student submit` reads template metadata from `.classroom50.yml` at the repo root. If it's missing, you're likely running submit from outside the cloned assignment repo, or from a clone that wasn't created by `gh student accept` (which is what writes that file). `cd` into the directory the `git clone` command created and try again.
 
+## "autograder `<name>` not published yet" on `gh student accept` or `gh student submit`
+
+The assignment's `assignments.json` references an autograder workflow whose YAML isn't on the Pages site. Two common causes:
+
+1. **The file doesn't exist.** Ask your instructor to confirm `<classroom>/autograders/<name>.yml` exists in the `classroom50` config repo. By default, `gh teacher classroom add` scaffolds `default.yml`; if the assignment was registered with `--autograder <other>`, the corresponding file has to be created by hand.
+2. **`publish-pages.yml` hasn't run yet.** Even when the file exists in the config repo, the Pages site needs the publish workflow to deploy. A fresh classroom dir requires one Pages deployment to surface the autograders; ask your instructor to wait a minute and try again.
+
+## "autograder `<name>` is malformed YAML" on `gh student accept` or `gh student submit`
+
+The instructor's autograder workflow has a YAML syntax error. `gh student` validates the fetched YAML before writing it into your repo, so a broken file never lands. Ask the instructor to check `<classroom>/autograders/<name>.yml` in the config repo and re-run after they fix it.
+
 ## Submit pushed a commit but the teacher doesn't see new work
 
 `gh student submit` pushes to the assignment repo's `main` branch (hardcoded for now). If your template uses `master` or `develop`, the first submit creates a new `main` branch alongside it. Make sure the assignment repo's default branch on GitHub is the one you (and the teacher's download flow) expect.

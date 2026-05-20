@@ -54,7 +54,15 @@ After `init` completes, the CLI prints the future Pages URL (`https://<org>.gith
 
 ## 4. Add a classroom
 
-Each classroom is a directory at the root of `<org>/classroom50` holding four files (`classroom.json`, `assignments.json`, `students.csv`, `scores.json`). Scaffold one with:
+Each classroom is a directory at the root of `<org>/classroom50` holding five paths:
+
+- `classroom.json` — public name / term / org metadata.
+- `assignments.json` — assignment manifest (published via Pages, fetched by `gh student accept`).
+- `students.csv` — private roster.
+- `scores.json` — private collected scores.
+- `autograders/default.yml` — the default per-classroom autograder workflow, scaffolded as a thin wrapper around the reusable `foundation50/classroom50/.github/workflows/autograde-library.yml`. Students fetch it from Pages on accept and refresh it on every submit. Hand-edit it (or drop sibling `<name>.yml` files for bespoke graders) — `gh student accept`/`submit` always read the current Pages version, so teacher edits propagate without per-student-repo maintenance.
+
+Scaffold one with:
 
 ```sh
 gh teacher classroom add <org> <short-name> --name "<full name>" --term <term>
@@ -68,7 +76,7 @@ gh teacher classroom add cs50-fall-2026 cs-principles --name "CS Principles" --t
 
 The `<short-name>` must match `^[a-z0-9][a-z0-9-]{1,38}$` (2-39 chars, lowercase letters/digits/hyphens, starting with a letter or digit) because it flows into student repo names like `<short-name>-<assignment>-<username>`. `--name` and `--term` are optional but recommended — they're written into `classroom.json` and surface in the published Pages site (forthcoming) and in `gh teacher download` summaries.
 
-The command commits all four files in a single Tree commit on the default branch. If `<org>/classroom50` doesn't exist yet, it prints `run gh teacher init <org> first` and exits non-zero. If the `<short-name>` directory already exists, it refuses to overwrite rather than clobbering an in-progress classroom — modify it via `gh teacher roster add` (step 6) and `gh teacher assignment add` (step 7) instead.
+The command commits all five paths in a single Tree commit on the default branch. If `<org>/classroom50` doesn't exist yet, it prints `run gh teacher init <org> first` and exits non-zero. If the `<short-name>` directory already exists, it refuses to overwrite rather than clobbering an in-progress classroom — modify it via `gh teacher roster add` (step 6) and `gh teacher assignment add` (step 7) instead.
 
 Run this command once per classroom you teach in the org. You can have several classrooms side by side in the same `classroom50` repo.
 
@@ -137,7 +145,7 @@ All three subcommands write through an optimistic-update-with-rebase loop (a sma
 Each classroom keeps an `assignments.json` file inside `<org>/classroom50/<classroom>/`. Each entry pairs a slug (used in student repo names like `<classroom>-<slug>-<username>`) with a template repo, an optional due date, and optional autograding tests. Register one with:
 
 ```sh
-gh teacher assignment add <org> <classroom> <slug> --name "<name>" --template <owner>/<repo>[@branch] [--description <text>] [--due <ISO-8601>] [--tests <path-to-tests.json>]
+gh teacher assignment add <org> <classroom> <slug> --name "<name>" --template <owner>/<repo>[@branch] [--description <text>] [--due <ISO-8601>] [--autograder <name>] [--tests <path-to-tests.json>]
 gh teacher assignment add cs50-fall-2026 cs-principles hello --name "Hello" --template cs50/hello-template --due 2026-09-15T23:59:00-04:00 --tests ./hello-tests.json
 ```
 
@@ -148,6 +156,7 @@ gh teacher assignment add cs50-fall-2026 cs-principles hello --name "Hello" --te
 - `--description <text>` — short description written into the entry.
 - `--due <ISO-8601>` — RFC 3339 timestamp with a timezone offset, e.g. `2026-09-15T23:59:00-04:00`. Stored verbatim so the timezone round-trips.
 - `--mode individual` — the only currently-supported value; `--mode group` is planned for a future release and produces an explicit error today.
+- `--autograder <name>` — which autograder workflow this assignment opts into. Defaults to `default` (the workflow `gh teacher classroom add` scaffolded under `<classroom>/autograders/default.yml`). To opt in to a per-language or bespoke grader, drop a sibling `<classroom>/autograders/<name>.yml` in the config repo first, then pass `--autograder <name>` — the CLI verifies the file exists at write time and rejects a typo before the assignment lands. Students fetch the named workflow from Pages on accept and refresh it on every submit; the source-of-truth is the config repo, so editing `<classroom>/autograders/<name>.yml` updates every student's next submission with no per-repo maintenance.
 - `--tests <path-to-tests.json>` — local JSON file whose top-level value is a JSON array of test entries. The array merges into the assignment's `tests` field, replacing any previous tests for that slug. The CLI validates every entry against the autograding-tests schema (`test-name`, `test-type` ∈ `{input_output, run_command}`, `command`, `timeout`, `max-score`, plus per-test-type field rules) before writing — a schema violation aborts the command without producing a partial-state commit.
 
 Re-running with the same slug replaces the entry in place (idempotent). New slugs append. Every entry on disk carries a `tests` field, even an empty one: an assignment with no tests still serializes `"tests": []` (not absent, not null), so the autograde workflow can read it without nil guards.
