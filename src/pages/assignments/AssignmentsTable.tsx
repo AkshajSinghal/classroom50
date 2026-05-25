@@ -36,7 +36,7 @@ const AssignmentsTable = ({ assignments, students = [] }) => {
                 </span>
               </td>
               <td>
-                {/* need to grab # of submissions and # of total students here */}
+                {/* TODO: need to grab # of submissions and # of total students here */}
                 {assignment.submissions || 0} / {students.length}{" "}
                 <progress
                   className="progress progress-info w-56"

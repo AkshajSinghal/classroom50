@@ -1,4 +1,6 @@
 import { queryOptions } from "@tanstack/react-query"
+import Papa from "papaparse"
+
 import type { GitHubClient } from "./client"
 import type { GitHubOrgMembership, GitHubRepo, GitHubUser } from "./types"
 
@@ -18,6 +20,9 @@ export const githubKeys = {
 
   jsonFile: (owner: string, repo: string, path: string, ref?: string) =>
     [...githubKeys.all, "json-file", owner, repo, path, ref ?? null] as const,
+
+  csvFile: (owner: string, repo: string, path: string, ref?: string) =>
+    [...githubKeys.all, "csv-file", owner, repo, path, ref ?? null] as const,
 }
 
 export function viewerQuery(client: GitHubClient) {
@@ -109,6 +114,40 @@ export function jsonFileQuery<T>(
       )
 
       return JSON.parse(raw) as T
+    },
+    enabled: Boolean(owner && repo && typeof path === "string"),
+    staleTime: 10 * 60 * 1000,
+  })
+}
+
+export function csvFileQuery<T>(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+  path: string,
+  ref?: string,
+) {
+  return queryOptions({
+    queryKey: githubKeys.csvFile(owner, repo, path, ref),
+    queryFn: async ({ signal }) => {
+      const raw = await client.requestRaw(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+          repo,
+        )}/contents/${path
+          .split("/")
+          .map(encodeURIComponent)
+          .join("/")}${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`,
+        { signal },
+      )
+
+      const csvParse = Papa.parse<T>(raw, {
+        header: true,
+        skipEmptyLines: true,
+        transformHeader: (header) => header.trim(),
+        transform: (value) => value.trim(),
+      })
+
+      return csvParse.data
     },
     enabled: Boolean(owner && repo && typeof path === "string"),
     staleTime: 10 * 60 * 1000,

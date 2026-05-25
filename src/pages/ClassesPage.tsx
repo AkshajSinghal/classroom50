@@ -5,6 +5,7 @@ import GitHub from "@/assets/github.svg?react"
 
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetClasses from "@/hooks/useGetClasses"
+import useGetStudents from "@/hooks/useGetStudents"
 
 import Drawer, {
   DrawerContent,
@@ -12,39 +13,13 @@ import Drawer, {
   DrawerToggle,
 } from "@/components/drawer"
 
-const classes = [
-  {
-    active: true,
-    term: "Spring 2026",
-    title: "AP CS Principles",
-    students: 28,
-    org: "my-classroom-org",
-  },
-  {
-    active: true,
-    term: "Spring 2026",
-    title: "Intro Java",
-    students: 32,
-    org: "my-classroom-org",
-  },
-  {
-    active: false,
-    term: "Fall 2025",
-    title: "Game Development",
-    students: 18,
-    org: "my-classroom-org",
-  },
-  {
-    active: false,
-    term: "Fall 2025",
-    title: "Web Development",
-    students: 24,
-    org: "my-classroom-org",
-  },
-]
-
 const ClassCard = ({ cl, org }: { cl: any; org: string }) => {
   const { data: classData } = useGetClassroomAssignments(org, cl.path)
+  const { students } = useGetStudents(org, cl.path)
+
+  useEffect(() => {
+    console.log("students", students)
+  }, [students])
 
   useEffect(() => {
     console.log("class", cl)
@@ -65,9 +40,7 @@ const ClassCard = ({ cl, org }: { cl: any; org: string }) => {
         <h1 className="text-xl">{cl.title || "Unknown Class Name"}</h1>
         <div className="flex gap-2">
           <UsersRound />
-          {typeof cl.students === "number"
-            ? `${cl.students} Students`
-            : `Invalid Student Count`}
+          {students ? `${students.length} Students` : "No Students"}
         </div>
         <div className="flex gap-2">
           <GitHub className="size-4 opacity-25" />
