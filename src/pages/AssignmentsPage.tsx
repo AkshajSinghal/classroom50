@@ -1,15 +1,18 @@
-import { GraduationCap, BookText, Trash, UsersRound, UserRound, HardDriveUpload } from 'lucide-react'
-import { Link } from '@tanstack/react-router'
-import GitHub from '@/assets/github.svg?react'
+import { Link, useParams } from "@tanstack/react-router"
 
-import AddByGithubUsername from '@/pages/students/AddByGithubUsername'
-import AssignmentsTable from '@/pages/assignments/AssignmentsTable'
-import Breadcrumb from '@/components/breadcrumb'
-import Drawer, { DrawerContent, DrawerSidebar, DrawerToggle } from '@/components/drawer'
-import EnrolledStudents from '@/pages/students/EnrolledStudents'
-import UploadRoster from '@/pages/students/UploadRoster'
+import AssignmentsTable from "@/pages/assignments/AssignmentsTable"
+import Breadcrumb from "@/components/breadcrumb"
+import Drawer, {
+  DrawerContent,
+  DrawerSidebar,
+  DrawerToggle,
+} from "@/components/drawer"
+import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 
 const AssignmentsPage = () => {
+  const { org, classroom } = useParams({ strict: false })
+  const { data: classData } = useGetClassroomAssignments(org, classroom)
+
   return (
     <div className="min-h-screen">
       <Drawer>
@@ -22,14 +25,14 @@ const AssignmentsPage = () => {
               <h3 className="pb-10">Spring 2026 • 28 Students</h3>
             </div>
             <div className="pt-10">
-              <Link to='/cs50/cs50-2026/assignments/new'>
+              <Link to="/cs50/cs50-2026/assignments/new">
                 <button className="btn btn-primary">+ Assignment</button>
               </Link>
             </div>
           </div>
-          <AssignmentsTable />
+          <AssignmentsTable assignments={classData?.assignments} />
         </DrawerContent>
-        <DrawerSidebar selected='assignments' />
+        <DrawerSidebar selected="assignments" />
       </Drawer>
     </div>
   )
