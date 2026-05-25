@@ -1,6 +1,7 @@
+import { Link } from "@tanstack/react-router"
 import { UserRound, UsersRound } from "lucide-react"
 
-const AssignmentsTable = ({ assignments, students = [] }) => {
+const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
   return (
     <div className="overflow-x-auto rounded-box border border-base-content/5 bg-base-100">
       <div className="table">
@@ -48,7 +49,13 @@ const AssignmentsTable = ({ assignments, students = [] }) => {
                   max="100"
                 ></progress>
               </td>
-              <th className="text-[#233da0]">View &gt;</th>
+              <th className="text-[#233da0]">
+                <Link
+                  to={`/${org}/${classroom}/assignments/${assignment.slug}/submissions`}
+                >
+                  View &gt;
+                </Link>
+              </th>
             </tr>
           ))}
         </tbody>
