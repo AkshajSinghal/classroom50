@@ -8,10 +8,14 @@ import Drawer, {
   DrawerToggle,
 } from "@/components/drawer"
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
+import useGetStudents from "@/hooks/useGetStudents"
+import useGetClassroom from "@/hooks/useGetClassroom"
 
 const AssignmentsPage = () => {
   const { org, classroom } = useParams({ strict: false })
   const { data: classData } = useGetClassroomAssignments(org, classroom)
+  const { students } = useGetStudents(org, classroom)
+  const { data: classroomData } = useGetClassroom(org, classroom)
 
   return (
     <div className="min-h-screen">
@@ -21,8 +25,13 @@ const AssignmentsPage = () => {
           <Breadcrumb />
           <div className="flex justify-between">
             <div>
-              <h1 className="text-lg pt-8 pb-2 font-bold">AP CS Principles</h1>
-              <h3 className="pb-10">Spring 2026 • 28 Students</h3>
+              <h1 className="text-lg pt-8 pb-2 font-bold">
+                {classroomData?.name}
+              </h1>
+              <h3 className="pb-10">
+                {classroomData?.term || "Unknown Term"} • {students.length}{" "}
+                Students
+              </h3>
             </div>
             <div className="pt-10">
               <Link to="/cs50/cs50-2026/assignments/new">
@@ -30,7 +39,11 @@ const AssignmentsPage = () => {
               </Link>
             </div>
           </div>
-          <AssignmentsTable assignments={classData?.assignments} />
+          <AssignmentsTable
+            org={org}
+            classroom={classroom}
+            assignments={classData?.assignments}
+          />
         </DrawerContent>
         <DrawerSidebar selected="assignments" />
       </Drawer>

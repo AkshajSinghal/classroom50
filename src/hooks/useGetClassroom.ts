@@ -9,9 +9,16 @@ type ClassroomData = {
   term: string
   org: string
 }
-const useGetClassroom = (org: string, repo: string, file: string) => {
+const useGetClassroom = (org: string, classroom: string) => {
   const client = useGitHubClient()
-  return useQuery(jsonFileQuery<ClassroomData>(client, org, repo, file))
+  return useQuery(
+    jsonFileQuery<ClassroomData>(
+      client,
+      org,
+      "classroom50",
+      `${classroom}/classroom.json`,
+    ),
+  )
 }
 
 export default useGetClassroom

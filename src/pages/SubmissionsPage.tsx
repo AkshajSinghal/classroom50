@@ -1,16 +1,27 @@
-import { ArrowDownWideNarrow, GraduationCap, BookText, HardDriveDownload, Trash, UsersRound, UserRound } from 'lucide-react'
-import { Link } from '@tanstack/react-router'
-import GitHub from '@/assets/github.svg?react'
+import { ArrowDownWideNarrow, HardDriveDownload } from "lucide-react"
+import { useParams } from "@tanstack/react-router"
 
-import AddByGithubUsername from '@/pages/students/AddByGithubUsername'
-import AssignmentsTable from '@/pages/assignments/AssignmentsTable'
-import Breadcrumb from '@/components/breadcrumb'
-import Drawer, { DrawerContent, DrawerSidebar, DrawerToggle } from '@/components/drawer'
-import EnrolledStudents from '@/pages/students/EnrolledStudents'
-import SubmissionsTable from '@/pages/submissions/SubmissionsTable'
-import UploadRoster from '@/pages/students/UploadRoster'
+import Breadcrumb from "@/components/breadcrumb"
+import Drawer, {
+  DrawerContent,
+  DrawerSidebar,
+  DrawerToggle,
+} from "@/components/drawer"
+import SubmissionsTable from "@/pages/submissions/SubmissionsTable"
+import useGetScores from "@/hooks/useGetScores"
+import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
+import useGetStudents from "@/hooks/useGetStudents"
 
-const SubmissionsPage = ({ children }) => {
+const SubmissionsPage = () => {
+  const { org, classroom, assignment } = useParams({ strict: false })
+  const { data: scoresData } = useGetScores(org, classroom)
+  const { data: assignmentData } = useGetClassroomAssignments(org, classroom)
+  const { students } = useGetStudents(org, classroom)
+
+  const assignmentInfo =
+    assignmentData?.assignments.find((a) => a.slug === assignment) || {}
+  const scoresInfo = scoresData?.submissions?.[assignment] || []
+
   return (
     <div className="min-h-screen">
       <Drawer>
@@ -19,43 +30,58 @@ const SubmissionsPage = ({ children }) => {
           <Breadcrumb submissions />
           <div className="flex justify-between">
             <div>
-              <h1 className="text-lg pt-8 pb-2 font-bold">Loops Assignment</h1>
+              <h1 className="text-lg pt-8 pb-2 font-bold">
+                {assignmentInfo.name}
+              </h1>
               <div className="flex pb-10">
-                <label>8 of 28 submitted</label>
+                <label>
+                  {scoresInfo.length} of {students.length} submitted
+                </label>
                 <label className="px-2"> • </label>
                 <ArrowDownWideNarrow />
                 <label>Sorted by most recent</label>
               </div>
             </div>
             <div className="pt-10">
-              <button className="btn btn-outline"><HardDriveDownload /> Download Scores (CSV)</button>
+              <button className="btn btn-outline">
+                <HardDriveDownload /> Download Scores (CSV)
+              </button>
             </div>
           </div>
           <div className="grid grid-cols-12 gap-4 mb-6">
             <div className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
               <div className="card-body">
-                <label className="uppercase">Submitted</label> 
+                <label className="uppercase">Submitted</label>
                 <div className="flex items-end gap-1">
-                  <h2 className="text-xl font-bold">8</h2>
-                  /
-                  <h4>28</h4>
+                  <h2 className="text-xl font-bold">{scoresInfo.length}</h2>/
+                  <h4>{students.length}</h4>
                 </div>
               </div>
             </div>
             <div className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
               <div className="card-body">
-                <label className="uppercase">Class Average</label> 
+                <label className="uppercase">Class Average</label>
                 <div className="flex items-end gap-1">
-                  <h2 className="text-xl font-bold">8</h2>
-                  /
-                  <h4>28</h4>
+                  <h2 className="text-xl font-bold">
+                    {scoresInfo?.reduce(
+                      (a, c) => Number(a) + Number(c["score"]),
+                      0,
+                    ) / students.length || 1}
+                  </h2>
+                  /<h4>{scoresInfo?.[0]?.["max-score"]}</h4>
                 </div>
               </div>
             </div>
           </div>
-          <SubmissionsTable />
+          <SubmissionsTable
+            org={org}
+            classroom={classroom}
+            assignment={assignment}
+            scores={scoresInfo}
+            students={students}
+          />
         </DrawerContent>
-        <DrawerSidebar selected='assignments' />
+        <DrawerSidebar selected="assignments" />
       </Drawer>
     </div>
   )
