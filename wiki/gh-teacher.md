@@ -19,6 +19,7 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | `gh teacher init <org>` | Bootstrap `<org>/classroom50` (config repo, Pages, branch protection, collect-token secret). Idempotent. |
 | `gh teacher rotate-collect-token <org>` | Replace the `CLASSROOM50_COLLECT_TOKEN` repo secret on an existing config repo. |
 | `gh teacher classroom add <org> <short-name>` | Add a new classroom directory to `<org>/classroom50`. Optional flags: `--name "<display name>"`, `--term <e.g. Spring-2026>`. Refuses to overwrite an existing classroom. |
+| `gh teacher classroom migrate --source <id-or-org> --target <org>` | Import an existing GitHub Classroom into `<target>/classroom50`. Discovers the source classroom (numeric ID or org login), copies each starter repo into the target org as a fresh template, and commits a populated `<short-name>/` directory in one Tree commit. Optional: `--short-name`, `--term`, `--template-suffix`, `--include-archived`, `--dry-run`. Roster and scores are NOT migrated. |
 | `gh teacher roster add <org> <classroom> <username>` | Append or upsert a student in `students.csv`; resolves `github_id`, sends an org invite if needed. Optional flags: `--first-name`, `--last-name`, `--email`, `--section`. |
 | `gh teacher roster remove <org> <classroom> <username>` | Remove a row from `students.csv`. Does NOT touch org membership. Idempotent. |
 | `gh teacher roster import <org> <classroom> <path-to-csv>` | Bulk upsert from a local CSV (`username,first_name,last_name,email,section` header; trailing `github_id` accepted but ignored). One Tree commit; auto-invites new students. |
@@ -121,6 +122,66 @@ Per-assignment autograders (an `autograder.py` entrypoint + any sibling fixtures
 - Short-name fails the slug regex → prints the exact rule with the offending input.
 
 The command commits all four paths in a single Tree commit on the default branch.
+
+## `gh teacher classroom migrate`
+
+Import an existing GitHub Classroom into your `<target>/classroom50` config repo. For each assignment, the command copies the source starter repo into the target org as a fresh template (with `is_template: true`), then commits the matching `<short-name>/` directory — `classroom.json` / `assignments.json` / `students.csv` / `scores.json` — in a single Tree commit.
+
+```sh
+gh teacher classroom migrate --source <id-or-org> --target <org>
+gh teacher classroom migrate --source 95884 --target cs50-fall-2026 --dry-run
+gh teacher classroom migrate --source classroom50test --target cs50-fall-2026
+gh teacher classroom migrate --source 95884 --target cs50-fall-2026 \
+    --short-name cs-principles --term Spring-2026
+```
+
+**Why this exists.** GitHub Classroom is 1:1 with orgs — the org IS the classroom container. Classroom 50 hosts multiple classrooms per org under one `classroom50` config repo. To migrate N legacy classrooms into one target org, run this command N times, once per source classroom.
+
+**What it does** (in order):
+
+1. **Discovery** — resolves `--source`, derives a short-name from the classroom name, fetches every assignment detail (including `starter_code_repository`) from the GitHub Classroom REST API.
+2. **Pre-flight** — refuses if the target `<short-name>/` directory already exists in `<target>/classroom50` before any template repos are created.
+3. **Template copy** — for each assignment: verify the source repo is a template → probe the target name for collision → `POST /repos/.../generate` → `PATCH .../is_template:true` → wait for the new branch ref to stabilize.
+4. **Config commit** — single Tree commit on `<target>/classroom50` writing the four-file scaffold with the migrated entries.
+
+**Flags:**
+
+- `--source <id-or-org>` (required) — numeric GitHub Classroom ID (e.g. `95884`) or the source org's login (e.g. `classroom50test`).
+- `--target <org>` (required) — destination org where the `classroom50` config repo lives. Run `gh teacher init <target>` first if it doesn't exist yet. `--target` is *unrelated to the source classroom's org* — Classroom 50 lets you migrate several legacy classrooms into one target org as siblings under the same `classroom50` repo.
+- `--short-name <name>` — override the auto-derived classroom directory name. By default the source classroom's name is slugified (lowercase, non-alnum → `-`, collapsed, trimmed, truncated to 39 chars) and validated against `^[a-z0-9][a-z0-9-]{1,38}$`. Pass `--short-name` explicitly if the derived value fails validation.
+- `--term <text>` — set `classroom.json.term` (e.g. `Spring-2026`).
+- `--template-suffix <suffix>` — appended to every target template repo name. Use to escape collisions: `--template-suffix migrated` renames the target template from `<slug>` to `<slug>-migrated`.
+- `--include-archived` — include archived classrooms when resolving `--source` by org name (ignored when `--source` is a numeric ID — archived classrooms always resolve by ID, with a stderr warning).
+- `--dry-run` — run discovery and print the plan without any API writes against source or target. Useful for previewing what would migrate before committing to anything.
+
+**Source resolution:**
+
+- **Numeric** (`--source 95884`) → `GET /classrooms/95884` directly. Archived classrooms resolve with a stderr warning (`archived in GitHub Classroom — proceeding`). The `--include-archived` flag is irrelevant here.
+- **Org login** (`--source classroom50test`) → list every classroom your token can administer, fetch each one's detail to recover `organization.login`, filter case-insensitively. The Classroom listing endpoint doesn't carry `organization` so the per-row detail fetch is unavoidable. Errors when zero matches (with a hint about `--include-archived`) or when multiple classrooms in the same org match (enumerates candidates with IDs and asks for `--source <id>`).
+
+**Target template repo naming.** Each migrated assignment becomes `<target>/<slug>` in the target org. Use `--template-suffix <s>` to rename to `<slug>-<s>` when a name collides with an existing repo. If the colliding repo is *already* a template (e.g. you re-ran migrate), the existing template is reused without re-generating; if it's a regular repo, migrate skips that assignment with an actionable error pointing at `--template-suffix`.
+
+**`migrated_from` provenance.** Every migrated `classroom.json` and `assignments.json` entry carries an optional `migrated_from` block recording the legacy classroom/assignment IDs, source starter-repo path, GitHub Classroom invite link, and migration timestamp. Hand-authored classrooms (from `gh teacher classroom add` / `gh teacher assignment add`) never carry this block — it's exclusively a provenance marker for migrated content.
+
+**`mode: "group"` preserved.** Group assignments from the source are recorded losslessly in `assignments.json` (preserving teacher intent across the migration), but `gh teacher assignment add --mode group` and `gh student accept` still reject group entries at their own seams until group-mode support lands. Once it does, no re-migration is needed.
+
+**What's NOT migrated** (covered by separate workflows):
+
+- **Roster** — `students.csv` is left empty. Re-onboard students for the new term with `gh teacher roster add` / `gh teacher roster import`. (This is a deliberate "fresh start" — most teachers want a clean roster for the new term anyway.)
+- **Scores / grades** — `scores.json` is left empty.
+- **Accepted-assignment student repos** — student work isn't cloned. The new term starts fresh; old submissions stay on the legacy org if you need them.
+- **Autograding test config** — GitHub Classroom's `.github/classroom/autograding.json` schema doesn't translate to our `autograder.py` model. Author grading code separately under `<classroom>/autograders/<slug>/` or set a classroom default with `gh teacher autograder set-default`.
+
+**Failure model.** Per-assignment failures are best-effort: a source repo that isn't a template, a target collision with a non-template repo, or a failed generate/PATCH call skips that single entry with a stderr reason. The commit still lands with the entries that succeeded; exit code is non-zero so partial completion is visible. Re-running reuses any templates that already exist (collision = template path).
+
+**Errors:**
+
+- `<target>/classroom50` missing → `run gh teacher init <target> first`.
+- Target classroom dir already exists → `pick a different --short-name or delete the dir`. The pre-flight probe fires *before* any template repos get created, so no orphan repos are left behind in the target org.
+- `--source <id>` 404 → `classroom is not accessible — confirm you are a GitHub Classroom admin`.
+- `--source <org>` resolves to zero classrooms → `no classrooms found in org "<source>"`. If `--include-archived` wasn't passed, the error includes a hint about it.
+- `--source <org>` resolves to multiple classrooms (rare — Classroom is 1:1 with orgs) → lists candidates with IDs and asks for `--source <id>`.
+- Derived short-name fails the slug regex → asks for `--short-name <name>` explicitly with the offending input.
 
 ## `gh teacher roster`
 

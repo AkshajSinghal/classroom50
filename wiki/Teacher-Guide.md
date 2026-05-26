@@ -56,6 +56,8 @@ After `init` completes, the CLI prints the future Pages URL (`https://<org>.gith
 
 ## 4. Add a classroom
 
+> **Migrating from GitHub Classroom?** If you already run a course on the legacy product, replace steps 4 and 7 with `gh teacher classroom migrate --source <id-or-org> --target <org>` — it discovers the source classroom, copies each starter repo into your target org as a fresh template, and commits a populated `<short-name>/` directory in one Tree commit. The roster and scores are not migrated; onboard students for the new term via step 6 below. See [`gh teacher classroom migrate`](gh-teacher#gh-teacher-classroom-migrate) for the full reference; pass `--dry-run` first to preview without writing.
+
 Each classroom is a directory at the root of `<org>/classroom50` holding four files:
 
 - `classroom.json` — public name / term / org metadata.
