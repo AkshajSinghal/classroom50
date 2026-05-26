@@ -142,6 +142,13 @@ The CLIs call the GitHub REST API through [`go-gh`](https://github.com/cli/go-gh
 | GET | [`https://api.github.com/repos/{owner}/{repo}/releases`](https://docs.github.com/en/rest/releases/releases#list-releases) | List recent releases (fallback when latest isn't a `submit/*` tag) |
 | GET | [`https://api.github.com/orgs/{org}/repos`](https://docs.github.com/en/rest/repos/repos#list-organization-repositories) | Page through org repos for `--by-pattern` download mode |
 | GET | [`https://api.github.com/repos/{owner}/{repo}/releases/assets/{asset_id}`](https://docs.github.com/en/rest/releases/assets#get-a-release-asset) | Download a `result.json` release asset (`Accept: application/octet-stream`) |
+| GET | [`https://api.github.com/classrooms`](https://docs.github.com/en/rest/classroom/classroom#list-classrooms) | List GitHub Classroom classrooms the user administers (org-name `--source` resolution for `migrate`) |
+| GET | [`https://api.github.com/classrooms/{classroom_id}`](https://docs.github.com/en/rest/classroom/classroom#get-a-classroom) | Get a single GitHub Classroom by ID (numeric `--source` for `migrate`) |
+| GET | [`https://api.github.com/classrooms/{classroom_id}/assignments`](https://docs.github.com/en/rest/classroom/classroom#list-assignments-for-a-classroom) | List a source classroom's assignments (`migrate` discovery) |
+| GET | [`https://api.github.com/assignments/{assignment_id}`](https://docs.github.com/en/rest/classroom/classroom#get-an-assignment) | Fetch a source assignment's `starter_code_repository` + deadline (`migrate` discovery) |
+| POST | [`https://api.github.com/repos/{template_owner}/{template_repo}/generate`](https://docs.github.com/en/rest/repos/repos#create-a-repository-using-a-template) | Copy each source starter repo into the target org as a fresh template (`migrate` template copy) |
+| PATCH | [`https://api.github.com/repos/{owner}/{repo}`](https://docs.github.com/en/rest/repos/repos#update-a-repository) | Set `is_template: true` on the newly-generated target repo (`migrate` template copy) |
+| GET | [`https://api.github.com/repos/{owner}/{repo}/branches/{branch}`](https://docs.github.com/en/rest/branches/branches#get-a-branch) | Wait for the freshly-generated target repo's branch ref to stabilize (`migrate` template copy) |
 
 ### `gh student` CLI
 
