@@ -69,3 +69,9 @@ export type GitHubUser = {
   html_url: string
   name: string | null
 }
+
+export type GitHubFileListing = {
+  type: string
+  name: string
+  path: string
+}
