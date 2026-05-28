@@ -1,13 +1,3 @@
-import { useMutation } from "@tanstack/react-query"
-
-import {
-  createClassroomFilesWithConflictRetry,
-  type CreateClassroomInput,
-  type CreateClassroomResult,
-} from "@/hooks/github/mutations"
-import { useGitHubClient } from "@/context/github/GitHubProvider"
-import { GitHubAPIError } from "@/hooks/github/errors"
-
 import AutogradingTestsPane from "@/pages/assignments/AutogradingTestsPane"
 import Breadcrumb from "@/components/breadcrumb"
 import CreateAssignmentForm from "@/pages/assignments/CreateAssignmentForm"
@@ -18,35 +8,6 @@ import Drawer, {
 } from "@/components/drawer"
 
 const CreateAssignmentPage = () => {
-  const client = useGitHubClient()
-  const createClassroomMutation = useMutation<
-    CreateClassroomResult,
-    GitHubAPIError,
-    CreateClassroomInput
-  >({
-    mutationFn: (input) => createClassroomFilesWithConflictRetry(client, input),
-    onError: (err) => {
-      if (err instanceof GitHubAPIError) {
-        switch (err.status) {
-          case 409:
-            // conflict
-            break
-          case 404:
-            // not found
-            break
-          case 422:
-            // validation
-            break
-          default:
-            // unspecified
-            break
-        }
-      } else {
-        console.error("non-GitHub API error:", err)
-      }
-    },
-  })
-
   return (
     <div className="min-h-screen">
       <Drawer>
