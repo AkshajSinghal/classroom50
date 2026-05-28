@@ -59,10 +59,6 @@ const ClassesPage = () => {
   const { org } = useParams({ strict: false })
   const { data: classesData } = useGetClasses(org)
 
-  useEffect(() => {
-    console.log("classes data", classesData)
-  }, [classesData])
-
   return (
     <div className="min-h-screen">
       <Drawer>
@@ -76,7 +72,13 @@ const ClassesPage = () => {
               </div>
             </div>
             <div className="pt-10">
-              <button className="btn btn-primary">+ New Class</button>
+              <Link
+                type="button"
+                to={`/${org}/classes/new`}
+                className="btn btn-primary"
+              >
+                + New Class
+              </Link>
             </div>
           </div>
           <div className="grid grid-cols-12 gap-4 mb-6">
