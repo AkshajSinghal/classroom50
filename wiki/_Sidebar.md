@@ -1,5 +1,6 @@
 - [Home](Home)
 - [Installation](Installation)
+- [Web Interface (Preview)](Web-Interface)
 - **Walkthroughs**
   - [Teacher Guide](Teacher-Guide)
   - [Student Guide](Student-Guide)
