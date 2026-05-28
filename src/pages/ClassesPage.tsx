@@ -1,4 +1,3 @@
-import { useEffect } from "react"
 import { useParams, Link } from "@tanstack/react-router"
 import { BookText, UsersRound } from "lucide-react"
 import GitHub from "@/assets/github.svg?react"
@@ -12,21 +11,26 @@ import Drawer, {
   DrawerSidebar,
   DrawerToggle,
 } from "@/components/drawer"
+import type { GitHubFileListing } from "@/hooks/github/types"
+import useGetClassroom from "@/hooks/useGetClassroom"
 
-const ClassCard = ({ cl, org }: { cl: any; org: string }) => {
+const ClassCard = ({ cl, org }: { cl: GitHubFileListing; org: string }) => {
   const { data: classData } = useGetClassroomAssignments(org, cl.path)
+  const { data: classroomData } = useGetClassroom(org, cl.path)
   const { students } = useGetStudents(org, cl.path)
 
   return (
     <div className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
       <div className="card-body gap-4">
         <label
-          className={`badge badge-soft ${cl.active ? "badge-success" : "badge-primary"}`}
+          className={`badge badge-soft ${classroomData?.active ? "badge-success" : "badge-primary"}`}
         >
-          {cl.term || "No Term Specified"}
+          {classroomData?.term || "No Term Specified"}
         </label>
         <h1 className="text-xl">
-          {cl.name || cl.short_name || "Unknown Class Name"}
+          {classroomData?.name ||
+            classroomData?.short_name ||
+            "Unknown Class Name"}
         </h1>
         <div className="flex gap-2">
           <UsersRound />

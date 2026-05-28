@@ -38,7 +38,8 @@ export const githubKeys = {
 export function viewerQuery(client: GitHubClient) {
   return queryOptions({
     queryKey: githubKeys.viewer(),
-    queryFn: ({ signal }) => client.request<GitHubUser>("/user", { signal }),
+    queryFn: ({ signal }) =>
+      client.request<GitHubUser>("/user", { method: "GET", signal }),
     staleTime: 10 * 60 * 1000,
   })
 }
@@ -49,7 +50,7 @@ export function orgMembershipQuery(client: GitHubClient, org: string) {
     queryFn: ({ signal }) =>
       client.request<GitHubOrgMembership>(
         `/user/memberships/orgs/${encodeURIComponent(org)}`,
-        { signal },
+        { method: "GET", signal },
       ),
     enabled: Boolean(org),
     staleTime: 5 * 60 * 1000,
@@ -68,7 +69,7 @@ export function branchRefQuery(client: GitHubClient, org: string) {
     queryFn: ({ signal }) =>
       client.request<GitHubBranchRef>(
         `/repos/${org}/classroom50/git/ref/heads/main`,
-        { signal },
+        { method: "GET", signal },
       ),
     enabled: Boolean(org),
     staleTime: 60 * 1000,
@@ -95,7 +96,7 @@ export function commitQuery(
     queryFn: ({ signal }) =>
       client.request<GitHubCommitRef>(
         `/repos/${org}/classroom50/git/commits/${branchSha}`,
-        { signal },
+        { method: "GET", signal },
       ),
     enabled: Boolean(org && branchSha),
     staleTime: 60 * 1000,
@@ -109,7 +110,7 @@ export function repoQuery(client: GitHubClient, owner: string, repo: string) {
     queryFn: ({ signal }) =>
       client.request<GitHubRepo>(
         `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
-        { signal },
+        { method: "GET", signal },
       ),
     enabled: Boolean(owner && repo),
     staleTime: 5 * 60 * 1000,
@@ -142,7 +143,7 @@ export function rawFileQuery(
           .split("/")
           .map(encodeURIComponent)
           .join("/")}${suffix}`,
-        { signal },
+        { method: "GET", signal },
       ),
     enabled: Boolean(owner && repo && typeof path === "string"),
     staleTime: 10 * 60 * 1000,
@@ -166,7 +167,7 @@ export function jsonFileQuery<T>(
           .split("/")
           .map(encodeURIComponent)
           .join("/")}${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`,
-        { signal },
+        { method: "GET", signal },
       )
 
       return JSON.parse(raw) as T
@@ -193,14 +194,14 @@ export function csvFileQuery<T>(
           .split("/")
           .map(encodeURIComponent)
           .join("/")}${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`,
-        { signal },
+        { method: "GET", signal },
       )
 
       const csvParse = Papa.parse<T>(raw, {
         header: true,
         skipEmptyLines: true,
-        transformHeader: (header) => header.trim(),
-        transform: (value) => value.trim(),
+        transformHeader: (header: string) => header.trim(),
+        transform: (value: string) => value.trim(),
       })
 
       return csvParse.data
