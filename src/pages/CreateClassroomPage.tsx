@@ -70,11 +70,6 @@ const CreateClassroomPage = () => {
                 }
               />
             </div>
-            <div className="divider" />
-            <div className="flex justify-end gap-2">
-              <button className="btn">Cancel</button>
-              <button className="btn btn-primary">Create Classroom</button>
-            </div>
           </div>
         </DrawerContent>
         <DrawerSidebar selected="classes" page="classes" />

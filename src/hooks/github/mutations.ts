@@ -5,7 +5,12 @@ import type {
   GitHubMoveBranch,
 } from "./types"
 import { GitHubAPIError } from "./errors"
-import { getBranchRef, getCommit } from "./queries"
+import {
+  getAssignmentsFile,
+  getBranchRef,
+  getCommit,
+  type AssignmentsFile,
+} from "./queries"
 
 const ASSIGNMENTS_TEMPLATE = {
   schema: "classroom50/assignments/v1",
@@ -154,6 +159,20 @@ export async function createClassroomFiles(
   }
 }
 
+export async function withGitConflictRetry<T>(
+  fn: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await fn()
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.status === 409) {
+      return fn()
+    }
+
+    throw err
+  }
+}
+
 export type CreateClassroomInput = {
   org: string
   name: string
@@ -162,14 +181,150 @@ export type CreateClassroomInput = {
 export async function createClassroomFilesWithConflictRetry(
   client: GitHubClient,
   input: CreateClassroomInput,
-): Promise<CreateClassroomResult> {
-  try {
-    return await createClassroomFiles(client, input)
-  } catch (err) {
-    if (err instanceof GitHubAPIError && err.status === 409) {
-      return createClassroomFiles(client, input)
-    }
+) {
+  return withGitConflictRetry(() => createClassroomFiles(client, input))
+}
 
-    throw err
+export type GitTreeEntry = {
+  path: string
+  mode: "100644"
+  type: "blob"
+  content: string
+}
+export type CreateGitTreeInput = {
+  org: string
+  base_tree: string
+  tree: GitTreeEntry[]
+}
+export function createGitTree(client: GitHubClient, input: CreateGitTreeInput) {
+  const { org, base_tree, tree } = input
+
+  return client.request<GitHubCreateTree>(
+    `/repos/${org}/classroom50/git/trees`,
+    {
+      method: "POST",
+      body: {
+        base_tree,
+        tree,
+      },
+    },
+  )
+}
+
+export type CreateGitCommitInput = {
+  org: string
+  message: string
+  tree_sha: string
+  parents: [string]
+}
+export function createGitCommit(
+  client: GitHubClient,
+  input: CreateGitCommitInput,
+) {
+  const { org, message, tree_sha, parents } = input
+
+  return client.request<GitHubCreateCommit>(
+    `/repos/${org}/classroom50/git/commits`,
+    {
+      method: "POST",
+      body: {
+        message,
+        tree: tree_sha,
+        parents,
+      },
+    },
+  )
+}
+
+export type CreateAssignmentResult = CreateClassroomResult
+export async function createAssignment(
+  client: GitHubClient,
+  input: CreateAssignmentInput,
+): Promise<CreateAssignmentResult> {
+  const ref = await getBranchRef(client, input.org)
+  const commit = await getCommit(client, input.org, ref.object.sha)
+
+  const assignmentsFilePath = `${input.classroom}/assignments.json`
+  const currentAssignments = await getAssignmentsFile(client, {
+    org: input.org,
+    path: assignmentsFilePath,
+    ref: "main",
+  })
+
+  const assignmentBody = {
+    slug: input.slug,
+    name: input.name,
+    description: input.description,
+    template: {
+      owner: input.org,
+      repo: input.template_repo,
+      branch: "main",
+    },
+    mode: input.mode,
+    autograder: "",
+    runtime: {
+      container: {
+        image: "",
+        user: "",
+      },
+    },
   }
+
+  if (
+    currentAssignments.assignments.some(
+      (assignment) => assignment.slug === assignmentBody.slug,
+    )
+  ) {
+    throw new Error(`Assignment already exists: ${assignmentBody.slug}`)
+  }
+
+  const nextAssignments: AssignmentsFile = {
+    ...currentAssignments,
+    assignments: [...currentAssignments.assignments, assignmentBody],
+  }
+
+  const tree = await createGitTree(client, {
+    ...input,
+    base_tree: commit.tree.sha,
+    tree: [
+      {
+        path: assignmentsFilePath,
+        mode: "100644",
+        type: "blob",
+        content: JSON.stringify(nextAssignments, null, 2) + "\n",
+      },
+    ],
+  })
+  const newCommit = await createGitCommit(client, {
+    org: input.org,
+    message: `Create assignment: ${input.classroom}/${assignmentBody.slug}`,
+    tree_sha: tree.sha,
+    parents: [ref.object.sha],
+  })
+  const updatedRef = await updateRef(client, input.org, newCommit.sha)
+
+  return {
+    previousCommitSha: ref.object.sha,
+    baseTreeSha: commit.tree.sha,
+    newTreeSha: tree.sha,
+    newCommitSha: newCommit.sha,
+    updatedRef,
+  }
+}
+
+export type CreateAssignmentInput = {
+  name: string
+  description: string
+  template_repo: string
+  due_date: string
+  mode: string
+  slug: string
+  classroom: string
+  org: string
+}
+export async function createAssignmentWithConflictRetry(
+  client: GitHubClient,
+  input: CreateAssignmentInput,
+) {
+  return withGitConflictRetry(() => createAssignment(client, input))
 }

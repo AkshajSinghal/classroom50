@@ -10,7 +10,7 @@ type CreateClassroomFormProps = {
   onSubmit: (values: CreateClassroomFormValues) => void | Promise<void>
 }
 
-function slugify(value: string) {
+export function slugify(value: string) {
   return value
     .trim()
     .toLowerCase()
@@ -78,7 +78,7 @@ const CreateClassroomForm = ({
                 name={field.name}
                 type="text"
                 className="input w-full mb-4"
-                placeholder="e.g., Mario"
+                placeholder="e.g., AP CS Principles"
                 value={field.state.value}
                 onBlur={field.handleBlur}
                 onChange={(e) => field.handleChange(e.target.value)}
@@ -105,7 +105,7 @@ const CreateClassroomForm = ({
                 name={field.name}
                 type="text"
                 className="input w-full mb-4"
-                placeholder="e.g., mario"
+                placeholder="e.g., ap-cs-principles"
                 value={field.state.value}
                 onBlur={field.handleBlur}
                 onChange={(e) => field.handleChange(e.target.value)}
