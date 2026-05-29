@@ -15,7 +15,6 @@ import type { GitHubFileListing } from "@/hooks/github/types"
 import useGetClassroom from "@/hooks/useGetClassroom"
 
 const ClassCard = ({ cl, org }: { cl: GitHubFileListing; org: string }) => {
-  const { data: classData } = useGetClassroomAssignments(org, cl.path)
   const { data: classroomData } = useGetClassroom(org, cl.path)
   const { students } = useGetStudents(org, cl.path)
 
@@ -40,20 +39,14 @@ const ClassCard = ({ cl, org }: { cl: GitHubFileListing; org: string }) => {
           <GitHub className="size-4 opacity-25" />
           <pre>{org}</pre>
         </div>
-        {classData?.assignments.length ? (
-          <Link
-            type="button"
-            to={`/${org}/${cl.path}/assignments`}
-            className="btn btn-outline btn-primary w-full"
-          >
-            <BookText />
-            View Assignments
-          </Link>
-        ) : (
-          <button type="button" className="btn btn-disabled w-full">
-            No Assignments
-          </button>
-        )}
+        <Link
+          type="button"
+          to={`/${org}/${cl.path}/assignments`}
+          className="btn btn-outline btn-primary w-full"
+        >
+          <BookText />
+          View Assignments
+        </Link>
       </div>
     </div>
   )
