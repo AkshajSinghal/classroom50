@@ -261,6 +261,7 @@ export async function createAssignment(
       branch: "main",
     },
     mode: input.mode,
+    max_group_size: input.max_group_size,
     autograder: "",
     runtime: {
       container: {
@@ -321,6 +322,7 @@ export type CreateAssignmentInput = {
   slug: string
   classroom: string
   org: string
+  max_group_size: number
 }
 export async function createAssignmentWithConflictRetry(
   client: GitHubClient,
@@ -328,3 +330,9 @@ export async function createAssignmentWithConflictRetry(
 ) {
   return withGitConflictRetry(() => createAssignment(client, input))
 }
+
+export type CreateOrgInput = {
+  name: string
+  slug: string
+}
+export async function createOrg(client: GitHubClient, input: CreateOrgInput) {}
