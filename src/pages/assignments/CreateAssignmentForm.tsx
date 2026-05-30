@@ -8,6 +8,7 @@ export type CreateAssignmentFormValues = {
   mode: "group" | "individual"
   template_repo: string
   due_date: string
+  max_group_size: number
 }
 
 type CreateAssignmentFormProps = {
@@ -26,6 +27,7 @@ const CreateAssignmentForm = ({
       mode: defaultValues?.mode ?? "individual",
       template_repo: defaultValues?.template_repo ?? "",
       due_date: defaultValues?.due_date ?? new Date().toString(),
+      max_group_size: defaultValues?.max_group_size ?? 2,
     } satisfies CreateAssignmentFormValues,
     validators: {
       onSubmit: ({ value }) => {
@@ -34,6 +36,9 @@ const CreateAssignmentForm = ({
         > = {}
         if (!value.name.trim()) {
           errors.name = "Assignment name is required."
+        }
+        if (!Number(value.max_group_size)) {
+          errors.max_group_size = "Max group size must be a valid number."
         }
 
         return Object.keys(errors).length > 0 ? { fields: errors } : undefined
@@ -46,9 +51,11 @@ const CreateAssignmentForm = ({
         mode: value.mode,
         template_repo: value.template_repo.trim(),
         due_date: value.due_date.trim(),
+        max_group_size: value.max_group_size,
       })
     },
   })
+
   return (
     <form
       onSubmit={(e) => {
@@ -191,7 +198,53 @@ const CreateAssignmentForm = ({
               )}
             </form.Field>
           </div>
+
+          <form.Subscribe selector={(state) => state.values.mode}>
+            {(modeValue) =>
+              modeValue === "group" && (
+                <div>
+                  <form.Field name="max_group_size">
+                    {(field) => (
+                      <>
+                        <div>
+                          <label className="label font-bold mb-2">
+                            Max Group Size
+                          </label>
+                        </div>
+                        <input
+                          id={field.name}
+                          name={field.name}
+                          type="number"
+                          className="input validator"
+                          placeholder="#"
+                          min="1"
+                          max="100"
+                          title="Must be a valid number between 1 and 100"
+                          onBlur={field.handleBlur}
+                          onChange={(e) =>
+                            field.handleChange(e.target.valueAsNumber)
+                          }
+                        />
+                      </>
+                    )}
+                  </form.Field>
+                </div>
+              )
+            }
+          </form.Subscribe>
         </div>
+
+        <form.Subscribe selector={(state) => [state.errors, state.errorMap]}>
+          {([errors, errorMap]) => (
+            <div>
+              {errors.map((err) => (
+                <p className="text-error" key={err}>
+                  {err}
+                </p>
+              ))}
+            </div>
+          )}
+        </form.Subscribe>
       </div>
       <AutogradingTestsPane />
       <div className="divider" />
@@ -205,7 +258,7 @@ const CreateAssignmentForm = ({
               className="btn btn-primary"
               disabled={!canSubmit || isSubmitting}
             >
-              {isSubmitting ? "Creating..." : "Create Classroom"}
+              {isSubmitting ? "Creating..." : "Create Assignment"}
             </button>
           )}
         </form.Subscribe>

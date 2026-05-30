@@ -1,7 +1,6 @@
 import { useMutation } from "@tanstack/react-query"
-import { useParams } from "@tanstack/react-router"
+import { useNavigate, useParams } from "@tanstack/react-router"
 
-import AutogradingTestsPane from "@/pages/assignments/AutogradingTestsPane"
 import Breadcrumb from "@/components/breadcrumb"
 import CreateAssignmentForm from "@/pages/assignments/CreateAssignmentForm"
 import Drawer, {
@@ -20,6 +19,7 @@ import { slugify } from "./classes/CreateClassroomForm"
 
 const CreateAssignmentPage = () => {
   const client = useGitHubClient()
+  const navigate = useNavigate()
   const { org, classroom } = useParams({ strict: false })
   const createClassroomMutation = useMutation<
     CreateAssignmentResult,
@@ -47,6 +47,7 @@ const CreateAssignmentPage = () => {
         console.error("non-GitHub API error:", err)
       }
     },
+    onSuccess: () => navigate({ to: `/${org}/${classroom}/assignments` }),
   })
   return (
     <div className="min-h-screen">
@@ -68,10 +69,12 @@ const CreateAssignmentPage = () => {
                   createClassroomMutation.mutateAsync({
                     name: values.name,
                     slug: slugify(values.name),
+                    mode: values.mode,
                     org,
                     template_repo: values.template_repo,
                     description: values.description,
                     due_date: values.due_date,
+                    max_group_size: values.max_group_size,
                     classroom,
                   })
                 }

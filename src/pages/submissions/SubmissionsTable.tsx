@@ -54,7 +54,12 @@ const SubmissionsTable = ({ scores, students }) => {
                     {score}/{rest["max-score"]}
                   </label>
                 </td>
-                <td>{datetime}</td>
+                <td>
+                  {new Date(datetime).toLocaleString(undefined, {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  })}
+                </td>
                 <td>
                   <div className="flex gap-4">
                     <div className="flex gap-2">

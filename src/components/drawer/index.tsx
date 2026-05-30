@@ -4,6 +4,7 @@ import { useGithubAuth } from "../../auth/useGithubAuth"
 import duck from "@/assets/duck.png"
 import { useCourseTeacherAccess } from "../../hooks/useCourseTeacherAccess"
 import useGetClassroom from "@/hooks/useGetClassroom"
+import type { Classroom } from "@/types/classroom"
 
 const Drawer = ({ children }) => (
   <div className="drawer lg:drawer-open">{children}</div>
@@ -14,7 +15,7 @@ export const DrawerContent = ({ children, className }) => (
 )
 export const DrawerToggle = () => <div className="drawer-toggle"></div>
 
-export const DrawerSidebar = ({ selected, page = "" }) => {
+export const DrawerSidebar = ({ selected = "", page = "" }) => {
   return (
     <div className="drawer-side bg-[#212a3a] text-white">
       <div className="flex flex-col min-h-full w-60 min-w-30 [&>div]:px-6">
@@ -28,15 +29,15 @@ export const DrawerSidebar = ({ selected, page = "" }) => {
   )
 }
 
-export const TeacherLogo = () => {
+export const ClassroomLogo = () => {
   return (
     <div className="flex p-6 text-lg text-white font-bold border-b-1 border-[#444]">
-      <GraduationCap className="size-8 text-[#accefb] mr-2" /> Teacher
+      <GraduationCap className="size-8 text-[#accefb] mr-2" /> Classroom 50
     </div>
   )
 }
 
-export const AllClasses = ({ org }) => {
+export const AllClasses = ({ org }: { org: string }) => {
   return (
     <div className="py-4 text-sm">
       <Link to={`/${org}/classes`} className="text-center">
@@ -46,20 +47,26 @@ export const AllClasses = ({ org }) => {
   )
 }
 
-export const SidebarClassInfo = ({ classInfo }) => {
+export const SidebarClassInfo = ({ classInfo }: { classInfo?: Classroom }) => {
   return (
     <div className="py-2">
       <h3 className="font-bold">
         {classInfo?.name || classInfo?.short_name || "Untitled Course"}
       </h3>
-      <p className="text-gray-500 text-sm">
-        {classInfo?.term || "Unspecified Term"}
-      </p>
+      <p className="text-gray-500 text-sm">{classInfo?.term ?? ""}</p>
     </div>
   )
 }
 
-export const TeacherSidebarMenu = ({ org, classroom, selected }) => {
+export const TeacherSidebarMenu = ({
+  org,
+  classroom,
+  selected,
+}: {
+  org: string
+  classroom: string
+  selected: string
+}) => {
   return (
     <div className="py-4">
       <ul className="[&>a>li]:py-2 [&>a>li>span]:pl-2">
@@ -123,13 +130,13 @@ export const SidebarFooter = () => {
   )
 }
 
-export const SidebarContent = ({ selected }: { selected: boolean }) => {
+export const SidebarContent = ({ selected }: { selected: string }) => {
   const { org, classroom } = useParams({ strict: false })
   const { data: classData } = useGetClassroom(org, classroom)
 
   return (
     <>
-      <TeacherLogo />
+      <ClassroomLogo />
       <AllClasses org={org} />
       <SidebarClassInfo classInfo={classData} />
       <TeacherSidebarMenu selected={selected} org={org} classroom={classroom} />
@@ -156,7 +163,7 @@ export const MyClasses = () => {
 export const SidebarContentClasses = () => {
   return (
     <>
-      <TeacherLogo />
+      <ClassroomLogo />
       <MyClasses />
       <SidebarFooter />
     </>
