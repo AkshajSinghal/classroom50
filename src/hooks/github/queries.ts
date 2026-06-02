@@ -7,14 +7,18 @@ import type {
   GitHubCommitRef,
   GitHubOrgMembership,
   GitHubRepo,
+  GitHubTeam,
   GitHubUser,
 } from "./types"
 import type { Assignment } from "@/types/classroom"
+import { GitHubAPIError } from "./errors"
+import { createTeam } from "./mutations"
 
 export const githubKeys = {
   all: ["github"] as const,
 
   viewer: () => [...githubKeys.all, "viewer"] as const,
+  user: (username: string) => [...githubKeys.all, "user", username],
 
   orgMembership: (org: string) =>
     [...githubKeys.all, "org-membership", org] as const,
@@ -41,6 +45,18 @@ export function viewerQuery(client: GitHubClient) {
     queryKey: githubKeys.viewer(),
     queryFn: ({ signal }) =>
       client.request<GitHubUser>("/user", { method: "GET", signal }),
+    staleTime: 10 * 60 * 1000,
+  })
+}
+
+export function getUser(client: GitHubClient, username: string) {
+  return queryOptions({
+    queryKey: githubKeys.user(username),
+    queryFn: ({ signal }) =>
+      client.request<GitHubUser>(`/users/${username}`, {
+        method: "GET",
+        signal,
+      }),
     staleTime: 10 * 60 * 1000,
   })
 }
@@ -275,4 +291,44 @@ export async function getOrgMembers(
   }
 
   return members
+}
+
+export async function getTeam(
+  client: GitHubClient,
+  org: string,
+  classroom: string,
+) {
+  const teamSlug = `classroom-${classroom}`
+
+  try {
+    return await client.request<GitHubTeam>(`/orgs/${org}/teams/${teamSlug}`)
+  } catch (error) {
+    if (error instanceof GitHubAPIError && error.status === 404) {
+      return null
+    }
+
+    throw error
+  }
+}
+
+export async function ensureTeam(
+  client: GitHubClient,
+  org: string,
+  classroom: string,
+): Promise<GitHubTeam> {
+  const existingTeam = await getTeam(client, org, classroom)
+
+  if (existingTeam) return existingTeam
+
+  try {
+    return await createTeam(client, { org, name: `classroom50-${classroom}` })
+  } catch (error) {
+    if (error instanceof GitHubAPIError && error.status === 422) {
+      const team = await getTeam(client, org, classroom)
+
+      if (team) return team
+    }
+
+    throw error
+  }
 }

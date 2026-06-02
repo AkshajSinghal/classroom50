@@ -3,7 +3,7 @@ import {
   type GitHubCreateTree,
   type GitHubCreateCommit,
   type GitHubMoveBranch,
-  GitHubTeam,
+  type GitHubTeam,
 } from "./types"
 import { GitHubAPIError } from "./errors"
 import {
