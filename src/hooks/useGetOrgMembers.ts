@@ -10,7 +10,7 @@ const useGetOrgMembers = (org: string) => {
     staleTime: 10 * 60 * 1000,
   })
 
-  return members
+  return { members }
 }
 
 export default useGetOrgMembers

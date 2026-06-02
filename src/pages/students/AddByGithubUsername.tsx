@@ -3,6 +3,9 @@ import GitHub from "@/assets/github.svg?react"
 import { useForm } from "@tanstack/react-form"
 import useGetOrgMembers from "@/hooks/useGetOrgMembers"
 import { useMutation } from "@tanstack/react-query"
+import useGetTeam from "@/hooks/useGetTeam"
+import { useEffect } from "react"
+import useEnsureTeam from "@/hooks/useEnsureTeam"
 
 type AddByGithubUsernameProps = {
   className?: string
@@ -13,12 +16,30 @@ type AddStudentFormValues = {
   name: string
   username: string
 }
+/**
+ * 1) maintain a cache of existing org members to cross-reference
+ * 2) ensure the team for the classroom exists
+ * 3) perform a lookup on the user by their username (required)
+ * 4) if they are a valid user and in the org, simply add to CSV roster (including ID)
+ * 5) if they are a valid user and not in org, send org invite and add to roster
+ * 6) if they are not a valid user, display as much with an error
+ */
 const AddByGithubUsername = ({
   className = "",
   org,
   classroom,
 }: AddByGithubUsernameProps) => {
-  const { data: members } = useGetOrgMembers(org)
+  const { members } = useGetOrgMembers(org)
+  const { team } = useEnsureTeam(org, classroom)
+
+  useEffect(() => {
+    console.log("team", team)
+  }, [team])
+
+  useEffect(() => {
+    console.log("members", members)
+  }, [members])
+
   const addStudentMutation = useMutation({})
   const form = useForm({
     defaultValues: {
@@ -86,7 +107,7 @@ const AddByGithubUsername = ({
             {([canSubmit, isSubmitting]) => (
               <button
                 type="submit"
-                disabled={!canSubmit || isSubmitting}
+                disabled={!canSubmit || isSubmitting || !team}
                 className="btn btn-primary w-full bg-[#4e80ee]"
               >
                 {!isSubmitting ? "+ Add Student" : "Submitting..."}

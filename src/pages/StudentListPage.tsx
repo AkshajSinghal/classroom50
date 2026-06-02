@@ -28,7 +28,11 @@ const StudentListPage = () => {
           </h3>
           <div className="grid grid-cols-12 gap-2">
             <div className="col-span-5 px-4">
-              <AddByGithubUsername className="mb-8" />
+              <AddByGithubUsername
+                org={org}
+                classroom={classroom}
+                className="mb-8"
+              />
               <UploadRoster />
             </div>
             <div className="col-span-7 px-4">
