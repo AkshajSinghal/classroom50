@@ -64,6 +64,7 @@ export type GitHubUser = {
   avatar_url: string
   html_url: string
   name: string | null
+  email: string | null
 }
 
 export type GitHubFileListing = {

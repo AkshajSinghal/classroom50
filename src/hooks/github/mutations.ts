@@ -8,11 +8,14 @@ import {
 import { GitHubAPIError } from "./errors"
 import {
   getAssignmentsFile,
+  getRawFile,
   getBranchRef,
   getCommit,
   type AssignmentsFile,
+  getUser,
 } from "./queries"
 import type { AssignmentTest } from "@/types/classroom"
+import Papa from "papaparse"
 
 const ASSIGNMENTS_TEMPLATE = {
   schema: "classroom50/assignments/v1",
@@ -419,4 +422,199 @@ export function inviteUserToOrgTeam(
       ...body,
     },
   })
+}
+
+export type AddStudentToClassroomResult = CreateClassroomResult & {
+  student: StudentCsvRow
+}
+
+const STUDENT_CSV_FIELDS = [
+  "username",
+  "first_name",
+  "last_name",
+  "email",
+  "section",
+  "github_id",
+] as const
+type StudentCsvField = (typeof STUDENT_CSV_FIELDS)[number]
+
+export type StudentCsvRow = Record<StudentCsvField, string>
+
+function normalizeStudentRow(
+  row: Partial<Record<StudentCsvField, unknown>>,
+): StudentCsvRow {
+  return {
+    username: String(row.username ?? "").trim(),
+    first_name: String(row.first_name ?? "").trim(),
+    last_name: String(row.last_name ?? "").trim(),
+    email: String(row.email ?? "").trim(),
+    section: String(row.section ?? "").trim(),
+    github_id: String(row.github_id ?? "").trim(),
+  }
+}
+
+function splitGitHubDisplayName(name: string | null) {
+  if (!name?.trim()) {
+    return { first_name: "", last_name: "" }
+  }
+
+  const parts = name.trim().split(/\s+/)
+  const first_name = parts[0] ?? ""
+  const last_name = parts.slice(1).join(" ")
+
+  return { first_name, last_name }
+}
+
+function parseStudentsCsv(csv: string): StudentCsvRow[] {
+  const parsed = Papa.parse<Record<string, string>>(csv, {
+    header: true,
+    delimiter: ",",
+    skipEmptyLines: "greedy",
+    transformHeader: (header) => header.trim(),
+  })
+
+  const fatalErrors = parsed.errors.filter(
+    (error) => error.type !== "Delimiter",
+  )
+
+  if (fatalErrors.length > 0) {
+    throw new Error(
+      `Could not parse students.csv: ${parsed.errors
+        .map((error) => error.message)
+        .join("; ")}`,
+    )
+  }
+
+  return parsed.data
+    .map((row) => normalizeStudentRow(row))
+    .filter((row) => row.username || row.github_id)
+}
+
+function stringifyStudentsCsv(rows: StudentCsvRow[]) {
+  const normalizedRows = rows
+    .map((row) => normalizeStudentRow(row))
+    .filter((row) => row.username || row.github_id)
+
+  return (
+    Papa.unparse(normalizedRows, {
+      columns: [...STUDENT_CSV_FIELDS],
+      delimiter: ",",
+      header: true,
+      newline: "\n",
+    }) + "\n"
+  )
+}
+
+export async function addStudentToClassroom(
+  client: GitHubClient,
+  input: AddStudentToClassroomInput,
+): Promise<AddStudentToClassroomResult> {
+  const normalizedUsername = input.username.trim()
+
+  if (!normalizedUsername) {
+    throw new Error("GitHub username is required")
+  }
+
+  const ref = await getBranchRef(client, input.org)
+  const commit = await getCommit(client, input.org, ref.object.sha)
+
+  const studentsFilePath = `${input.classroom}/students.csv`
+
+  const currentCsv = await getRawFile(client, {
+    org: input.org,
+    path: studentsFilePath,
+    ref: ref.object.sha,
+  })
+
+  const githubUser = await getUser(client, normalizedUsername)
+  const currentStudents = parseStudentsCsv(currentCsv)
+
+  const alreadyExists = currentStudents.some(
+    (student) =>
+      student.username.toLowerCase() === githubUser.login.toLowerCase() ||
+      student.github_id === String(githubUser.id),
+  )
+
+  if (alreadyExists) {
+    throw new Error(`Student already exists: ${githubUser.login}`)
+  }
+
+  const nameParts = splitGitHubDisplayName(githubUser.name)
+
+  const student: StudentCsvRow = {
+    username: githubUser.login,
+    first_name: input.first_name?.trim() ?? nameParts.first_name,
+    last_name: input.last_name?.trim() ?? nameParts.last_name,
+    email: input.email?.trim() ?? githubUser.email ?? "",
+    section: input.section?.trim() ?? "",
+    github_id: String(githubUser.id),
+  }
+
+  const nextStudents = [...currentStudents, student]
+  const nextCsv = stringifyStudentsCsv(nextStudents)
+
+  const tree = await createGitTree(client, {
+    org: input.org,
+    base_tree: commit.tree.sha,
+    tree: [
+      {
+        path: studentsFilePath,
+        mode: "100644",
+        type: "blob",
+        content: nextCsv,
+      },
+    ],
+  })
+
+  const newCommit = await createGitCommit(client, {
+    org: input.org,
+    message: `Add student: ${input.classroom}/${student.username}`,
+    tree_sha: tree.sha,
+    parents: [ref.object.sha],
+  })
+
+  const updatedRef = await updateRef(client, input.org, newCommit.sha)
+
+  return {
+    previousCommitSha: ref.object.sha,
+    baseTreeSha: commit.tree.sha,
+    newTreeSha: tree.sha,
+    newCommitSha: newCommit.sha,
+    updatedRef,
+    student,
+  }
+}
+
+export async function addStudentToClassroomWithConflictRetry(
+  client: GitHubClient,
+  input: AddStudentToClassroomInput,
+) {
+  return withGitConflictRetry(() => addStudentToClassroom(client, input))
+}
+
+type AddStudentToClassroomInput = {
+  org: string
+  classroom: string
+  username: string
+
+  first_name?: string
+  last_name?: string
+  email?: string
+  section?: string
+}
+export async function enrollStudentInClassroom(
+  client: GitHubClient,
+  input: AddStudentToClassroomInput,
+) {
+  const { org, classroom } = input
+  const result = await addStudentToClassroomWithConflictRetry(client, input)
+
+  await addUserToTeam(client, {
+    org,
+    teamSlug: `classroom50-${classroom}`,
+    username: result.student.username,
+    role: "member",
+  })
+
+  return result
 }
