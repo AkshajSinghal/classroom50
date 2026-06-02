@@ -50,6 +50,10 @@ export function viewerQuery(client: GitHubClient) {
 }
 
 export function getUser(client: GitHubClient, username: string) {
+  return client.request<GitHubUser>(`/users/${username}`)
+}
+
+export function getUserQuery(client: GitHubClient, username: string) {
   return queryOptions({
     queryKey: githubKeys.user(username),
     queryFn: ({ signal }) =>
@@ -264,6 +268,27 @@ export async function getAssignmentsFile(
   const json = decodeBase64Utf8(file.content)
 
   return JSON.parse(json) as AssignmentsFile
+}
+
+export async function getRawFile(
+  client: GitHubClient,
+  input: GetAssignmentsFileInput,
+): Promise<string> {
+  const { org, path, ref } = input
+
+  const file = await client.request<{
+    type: "file"
+    encoding: "base64"
+    content: string
+  }>(
+    `/repos/${org}/classroom50/contents/${path}?ref=${encodeURIComponent(ref)}`,
+  )
+
+  if (file.type !== "file") {
+    throw new Error(`${path} is not a file`)
+  }
+
+  return decodeBase64Utf8(file.content)
 }
 
 export function listOrgMembers(client: GitHubClient, org: string, page = 1) {

@@ -2,10 +2,16 @@ import { UserRound } from "lucide-react"
 import GitHub from "@/assets/github.svg?react"
 import { useForm } from "@tanstack/react-form"
 import useGetOrgMembers from "@/hooks/useGetOrgMembers"
-import { useMutation } from "@tanstack/react-query"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import useGetTeam from "@/hooks/useGetTeam"
 import { useEffect } from "react"
 import useEnsureTeam from "@/hooks/useEnsureTeam"
+import { githubKeys } from "@/hooks/github/queries"
+import {
+  addStudentToClassroom,
+  enrollStudentInClassroom,
+} from "@/hooks/github/mutations"
+import { useGitHubClient } from "@/context/github/GitHubProvider"
 
 type AddByGithubUsernameProps = {
   className?: string
@@ -31,6 +37,8 @@ const AddByGithubUsername = ({
 }: AddByGithubUsernameProps) => {
   const { members } = useGetOrgMembers(org)
   const { team } = useEnsureTeam(org, classroom)
+  const queryClient = useQueryClient()
+  const githubClient = useGitHubClient()
 
   useEffect(() => {
     console.log("team", team)
@@ -40,7 +48,16 @@ const AddByGithubUsername = ({
     console.log("members", members)
   }, [members])
 
-  const addStudentMutation = useMutation({})
+  const addStudentMutation = useMutation({
+    mutationFn: ({ username }) =>
+      enrollStudentInClassroom(githubClient, { org, classroom, username }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: githubKeys.csvFile(org, classroom, "students.csv"),
+      })
+    },
+  })
+
   const form = useForm({
     defaultValues: {
       name: "",
@@ -63,7 +80,13 @@ const AddByGithubUsername = ({
 
   return (
     <div className={`card card-border w-96 bg-base-100 shadow-sm ${className}`}>
-      <form>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          form.handleSubmit()
+        }}
+      >
         <div className="card-body">
           <p className="font-bold mb-2">Add by GitHub Username</p>
 
