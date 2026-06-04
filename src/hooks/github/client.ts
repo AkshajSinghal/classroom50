@@ -86,7 +86,18 @@ export function createGitHubClient(args: {
   return {
     async request<T>(path, options) {
       const res = await requestInternal(path, options)
-      return (await res.json()) as T
+
+      if (res.status === 204 || res.status === 205) {
+        return undefined as T
+      }
+
+      const text = await res.text()
+
+      if (!text.trim()) {
+        return undefined as T
+      }
+
+      return JSON.parse(text) as T
     },
 
     async requestRaw(path, options) {

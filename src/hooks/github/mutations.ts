@@ -15,8 +15,8 @@ import {
   getCommit,
   type AssignmentsFile,
   getUser,
-  getBranchRefRepo,
   getCommitByRepo,
+  waitForBranchRefRepo,
 } from "./queries"
 import type { Assignment, AssignmentTest } from "@/types/classroom"
 import Papa from "papaparse"
@@ -1249,7 +1249,7 @@ async function addMaintainCollaborator(params: {
   await client.request(`/repos/${owner}/${repo}/collaborators/${username}`, {
     method: "PUT",
     body: {
-      permissions: "maintain",
+      permission: "maintain",
     },
   })
 }
@@ -1295,8 +1295,10 @@ export async function acceptAssignment(params: {
   const user = await getAuthenticatedUser(client)
   const username = user.login
 
+  console.log("accepting pending org invite...")
   await acceptPendingOrgInvite(client, org)
 
+  console.log("fetching assignment from pages...")
   const assignment = await fetchAssignmentFromPages(
     org,
     classroom,
@@ -1307,6 +1309,7 @@ export async function acceptAssignment(params: {
   const sourceRepo = assignment.template.repo
   const sourceBranch = assignment.template.branch ?? "main"
 
+  console.log("resolving autograder workflow...")
   const autogradeYaml = await resolveAutograderWorkflow(
     org,
     classroom,
@@ -1316,6 +1319,7 @@ export async function acceptAssignment(params: {
   const studentRepoName =
     `${classroom}-${assignment.slug}-${username}`.toLowerCase()
 
+  console.log("creating repo from template...")
   const generated = await createRepoFromTemplate({
     client,
     templateOwner: sourceOwner,
@@ -1338,8 +1342,10 @@ export async function acceptAssignment(params: {
 
   const repo = generated as GitHubRepo
 
+  console.log("patching repo surface...")
   await patchRepoSurface(client, org, repo.name)
 
+  console.log("adding maintain collaborator...")
   await addMaintainCollaborator({
     client,
     owner: org,
@@ -1349,7 +1355,10 @@ export async function acceptAssignment(params: {
 
   const targetBranch = repo.default_branch || sourceBranch
 
-  const ref = await getBranchRefRepo(client, org, repo.name, targetBranch)
+  console.log("getting branch ref...")
+  const ref = await waitForBranchRefRepo(client, org, repo.name, targetBranch)
+
+  console.log("get commit by repo...")
   const currentCommit = await getCommitByRepo(
     client,
     org,
@@ -1357,6 +1366,7 @@ export async function acceptAssignment(params: {
     ref.object.sha,
   )
 
+  console.log("creating classroom50 yaml...")
   const metadataYaml = createClassroom50Yaml({
     classroom,
     assignment: assignment.slug,
@@ -1365,6 +1375,18 @@ export async function acceptAssignment(params: {
     sourceBranch,
   })
 
+  console.log("creating assignment tree...", {
+    owner: org,
+    repo: repo.name,
+    repoFullName: repo.full_name,
+    repoDefaultBranch: repo.default_branch,
+    targetBranch,
+    refSha: ref.object.sha,
+    currentCommit,
+    baseTreeSha: currentCommit.tree?.sha,
+    metadataYaml,
+    autogradeYamlPreview: autogradeYaml.slice(0, 200),
+  })
   const tree = await createTreeForAssignment({
     client,
     owner: org,
@@ -1374,6 +1396,7 @@ export async function acceptAssignment(params: {
     autogradeYaml,
   })
 
+  console.log("creating commit for assignment...")
   const commit = await createCommitForAssignment({
     client,
     owner: org,
@@ -1383,6 +1406,7 @@ export async function acceptAssignment(params: {
     parentSha: ref.object.sha,
   })
 
+  console.log("updating ref for repo...")
   await updateRefForRepo({
     client,
     owner: org,
