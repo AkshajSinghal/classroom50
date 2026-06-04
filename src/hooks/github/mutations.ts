@@ -4,6 +4,8 @@ import {
   type GitHubCreateCommit,
   type GitHubMoveBranch,
   type GitHubTeam,
+  type GitHubRepo,
+  type GitHubUser,
 } from "./types"
 import { GitHubAPIError } from "./errors"
 import {
@@ -13,10 +15,11 @@ import {
   getCommit,
   type AssignmentsFile,
   getUser,
+  getBranchRefRepo,
+  getCommitByRepo,
 } from "./queries"
-import type { AssignmentTest } from "@/types/classroom"
+import type { Assignment, AssignmentTest } from "@/types/classroom"
 import Papa from "papaparse"
-import type { argv0 } from "process"
 
 const ASSIGNMENTS_TEMPLATE = {
   schema: "classroom50/assignments/v1",
@@ -103,6 +106,42 @@ export function createTree(
   )
 }
 
+type GitHubTree = {
+  sha: string
+}
+export function createTreeForAssignment(params: {
+  client: GitHubClient
+  owner: string
+  repo: string
+  baseTreeSha: string
+  metadataYaml: string
+  autogradeYaml: string
+}) {
+  const { client, owner, repo, baseTreeSha, metadataYaml, autogradeYaml } =
+    params
+
+  return client.request<GitHubTree>(`/repos/${owner}/${repo}/git/trees`, {
+    method: "POST",
+    body: {
+      base_tree: baseTreeSha,
+      tree: [
+        {
+          path: ".classroom50.yaml",
+          mode: "100644",
+          type: "blob",
+          content: metadataYaml,
+        },
+        {
+          path: ".github/workflows/autograde.yaml",
+          mode: "100644",
+          type: "blob",
+          content: autogradeYaml,
+        },
+      ],
+    },
+  })
+}
+
 export function createCommit(
   client: GitHubClient,
   input: CreateClassroomInput & { parents: [string]; tree_sha: string },
@@ -121,6 +160,29 @@ export function createCommit(
   )
 }
 
+export function createCommitForAssignment(params: {
+  client: GitHubClient
+  owner: string
+  repo: string
+  message: string
+  treeSha: string
+  parentSha: string
+}) {
+  const { client, owner, repo, message, treeSha, parentSha } = params
+
+  return client.request<GitHubCreateCommit>(
+    `/repos/${owner}/${repo}/git/commits`,
+    {
+      method: "POST",
+      body: {
+        message,
+        tree: treeSha,
+        parents: [parentSha],
+      },
+    },
+  )
+}
+
 export function updateRef(client: GitHubClient, org: string, sha: string) {
   return client.request<GitHubMoveBranch>(
     `/repos/${org}/classroom50/git/refs/heads/main`,
@@ -128,6 +190,35 @@ export function updateRef(client: GitHubClient, org: string, sha: string) {
       method: "PATCH",
       body: {
         sha,
+        force: false,
+      },
+    },
+  )
+}
+
+type GitHubRef = {
+  ref: string
+  object: {
+    sha: string
+    type: string
+    url: string
+  }
+}
+export function updateRefForRepo(params: {
+  client: GitHubClient
+  owner: string
+  repo: string
+  branch: string
+  commitSha: string
+}) {
+  const { client, owner, repo, branch, commitSha } = params
+
+  return client.request<GitHubRef>(
+    `/repos/${owner}/${repo}/git/refs/heads/${branch}`,
+    {
+      method: "PATCH",
+      body: {
+        sha: commitSha,
         force: false,
       },
     },
@@ -927,5 +1018,382 @@ export async function bulkEnrollStudentsInClassroom(
   return {
     ...addResult,
     teamResults,
+  }
+}
+
+export async function acceptPendingOrgInvite(
+  client: GitHubClient,
+  org: string,
+) {
+  try {
+    await client.request(`/user/memberships/orgs/${org}`, {
+      method: "PATCH",
+      body: {
+        state: "active",
+      },
+    })
+  } catch {
+    // ignore
+  }
+}
+
+async function fetchJson<T>(url: string): Promise<T> {
+  const response = await fetch(url)
+
+  if (response.status === 404) {
+    throw new Error(
+      "The classroom may not exist yet, or publish-pages.yaml may not have run. Ask your instructor to confirm the Pages site has been deployed.",
+    )
+  }
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch ${url}: ${response.status}`)
+  }
+
+  return response.json() as Promise<T>
+}
+
+function pagesAssignmentUrl(org: string, classroom: string) {
+  return `https://${org}.github.io/classroom50/${classroom}/assignments.json`
+}
+
+type AssignmentsJson =
+  | Assignment[]
+  | {
+      version?: 1
+      assignments: Assignment[]
+    }
+function extractAssignments(json: AssignmentsJson): Assignment[] {
+  if (Array.isArray(json)) return json
+
+  if (json.version !== undefined && json.version !== 1) {
+    throw new Error(
+      `This classroom uses assignments.json v${json.version}, but this client only supports v1. Please update classroom50.`,
+    )
+  }
+
+  if (!Array.isArray(json.assignments)) {
+    throw new Error(
+      "assignments.json has an invalid v1 shape. Ask your instructor to check classroom50 configuration.",
+    )
+  }
+
+  return json.assignments
+}
+
+export async function fetchAssignmentFromPages(
+  org: string,
+  classroom: string,
+  assignmentSlug: string,
+): Promise<Assignment> {
+  const json = await fetchJson<AssignmentsJson>(
+    pagesAssignmentUrl(org, classroom),
+  )
+
+  const assignments = extractAssignments(json)
+  console.log("assignments", assignments)
+  const assignment = assignments.find((entry) => entry.slug === assignmentSlug)
+
+  if (!assignment) {
+    throw new Error(
+      `Assignment ${assignmentSlug} was not found. Ask your instructor to run "gh teacher assignment add ${org} ${classroom} ${assignmentSlug}.`,
+    )
+  }
+
+  if (assignment.mode === "group") {
+    throw new Error("Group assignments are not yet supported.")
+  }
+
+  if (!assignment.template?.owner || !assignment.template?.repo) {
+    throw new Error(
+      `Assignment "${assignmentSlug}" is missing template.owner or template.repo.`,
+    )
+  }
+
+  return assignment
+}
+
+async function fetchTextWithFriendlyErrors(
+  url: string,
+  label: string,
+): Promise<string> {
+  const response = await fetch(url)
+
+  if (response.status === 404) {
+    throw new Error(
+      `${label} is not published yet. Ask your instructor to confirm the file exists in the config repo and that publish-pages.yaml has been run.`,
+    )
+  }
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch ${label}: ${response.status}`)
+  }
+
+  const text = await response.text()
+
+  if (!text.trim()) {
+    throw new Error(
+      "Pages deployment may still be in flight. Retry in a minute.",
+    )
+  }
+
+  return text
+}
+
+function pagesAutograderUrl(org: string, classroom: string, name: string) {
+  return `https://${org}.github.io/classroom50/${classroom}/autograders/${name}/yaml`
+}
+
+const DEFAULT_AUTOGRADER_WORKFLOW = `name: Autograde
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  autograde:
+    uses: cs50/classroom50/.github/workflows/autograde.yml@main
+`
+export async function resolveAutograderWorkflow(
+  org: string,
+  classroom: string,
+  autograder?: string,
+): Promise<string> {
+  if (!autograder || autograder === "default") {
+    return DEFAULT_AUTOGRADER_WORKFLOW
+  }
+
+  const workflow = await fetchTextWithFriendlyErrors(
+    pagesAutograderUrl(org, classroom, autograder),
+    `autograder ${autograder}`,
+  )
+
+  if (!workflow.includes("jobs:")) {
+    throw new Error(
+      `Autograder ${autograder} may be malformed YAML. Ask your instructor to check the file in the config repo.`,
+    )
+  }
+
+  return workflow
+}
+
+async function createRepoFromTemplate(params: {
+  client: GitHubClient
+  templateOwner: string
+  templateRepo: string
+  owner: string
+  name: string
+}) {
+  const { client, templateOwner, templateRepo, owner, name } = params
+
+  try {
+    return await client.request<GitHubRepo>(
+      `/repos/${templateOwner}/${templateRepo}/generate`,
+      {
+        method: "POST",
+        body: {
+          owner,
+          name,
+          private: true,
+          include_all_branches: false,
+        },
+      },
+    )
+  } catch (err) {
+    if (err instanceof GitHubAPIError) {
+      if (err.status === 422) {
+        const existing = await client.request<GitHubRepo>(
+          `/repos/${owner}/${name}`,
+        )
+
+        return {
+          repo: existing,
+          alreadyAccepted: true,
+        }
+      }
+
+      if (err.status === 404) {
+        throw new Error(
+          `Template ${templateOwner}/${templateRepo} is not accessible to you. Ask your instructor to make it public or grant your account access.`,
+        )
+      }
+
+      throw err
+    }
+  }
+}
+
+async function patchRepoSurface(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+) {
+  await client.request<GitHubRepo>(`/repos/${owner}/${repo}`, {
+    method: "PATCH",
+    body: {
+      has_issues: false,
+      has_projects: false,
+      has_wiki: false,
+    },
+  })
+}
+
+async function addMaintainCollaborator(params: {
+  client: GitHubClient
+  owner: string
+  repo: string
+  username: string
+}) {
+  const { client, owner, repo, username } = params
+
+  await client.request(`/repos/${owner}/${repo}/collaborators/${username}`, {
+    method: "PUT",
+    body: {
+      permissions: "maintain",
+    },
+  })
+}
+
+function createClassroom50Yaml(params: {
+  classroom: string
+  assignment: string
+  sourceOwner: string
+  sourceRepo: string
+  sourceBranch: string
+}) {
+  const { classroom, assignment, sourceOwner, sourceRepo, sourceBranch } =
+    params
+
+  return [
+    `classroom: ${JSON.stringify(classroom)}`,
+    `assignment: ${JSON.stringify(assignment)}`,
+    `source:`,
+    `  owner: ${JSON.stringify(sourceOwner)}`,
+    `  repo: ${JSON.stringify(sourceRepo)}`,
+    `  branch: ${JSON.stringify(sourceBranch)}`,
+    ``,
+  ].join("\n")
+}
+
+async function getAuthenticatedUser(client: GitHubClient) {
+  return client.request<GitHubUser>("/user")
+}
+
+type AcceptAssignmentResult = {
+  status: "created" | "already-accepted"
+  repo: GitHubRepo
+  cloneCommand: string
+}
+export async function acceptAssignment(params: {
+  client: GitHubClient
+  org: string
+  classroom: string
+  assignmentSlug: string
+}): Promise<AcceptAssignmentResult> {
+  const { client, org, classroom, assignmentSlug } = params
+
+  const user = await getAuthenticatedUser(client)
+  const username = user.login
+
+  await acceptPendingOrgInvite(client, org)
+
+  const assignment = await fetchAssignmentFromPages(
+    org,
+    classroom,
+    assignmentSlug,
+  )
+
+  const sourceOwner = assignment.template.owner
+  const sourceRepo = assignment.template.repo
+  const sourceBranch = assignment.template.branch ?? "main"
+
+  const autogradeYaml = await resolveAutograderWorkflow(
+    org,
+    classroom,
+    assignment.autograder,
+  )
+
+  const studentRepoName =
+    `${classroom}-${assignment.slug}-${username}`.toLowerCase()
+
+  const generated = await createRepoFromTemplate({
+    client,
+    templateOwner: sourceOwner,
+    templateRepo: sourceRepo,
+    owner: org,
+    name: studentRepoName,
+  })
+
+  if (
+    generated &&
+    "alreadyAccepted" in generated &&
+    generated.alreadyAccepted
+  ) {
+    return {
+      status: "already-accepted",
+      repo: generated.repo,
+      cloneCommand: `git clone ${generated.repo.ssh_url}`,
+    }
+  }
+
+  const repo = generated as GitHubRepo
+
+  await patchRepoSurface(client, org, repo.name)
+
+  await addMaintainCollaborator({
+    client,
+    owner: org,
+    repo: repo.name,
+    username,
+  })
+
+  const targetBranch = repo.default_branch || sourceBranch
+
+  const ref = await getBranchRefRepo(client, org, repo.name, targetBranch)
+  const currentCommit = await getCommitByRepo(
+    client,
+    org,
+    repo.name,
+    ref.object.sha,
+  )
+
+  const metadataYaml = createClassroom50Yaml({
+    classroom,
+    assignment: assignment.slug,
+    sourceOwner,
+    sourceRepo,
+    sourceBranch,
+  })
+
+  const tree = await createTreeForAssignment({
+    client,
+    owner: org,
+    repo: repo.name,
+    baseTreeSha: currentCommit.tree.sha,
+    metadataYaml,
+    autogradeYaml,
+  })
+
+  const commit = await createCommitForAssignment({
+    client,
+    owner: org,
+    repo: repo.name,
+    message: `Accept ${classroom}/${assignment.slug}`,
+    treeSha: tree.sha,
+    parentSha: ref.object.sha,
+  })
+
+  await updateRefForRepo({
+    client,
+    owner: org,
+    repo: repo.name,
+    branch: targetBranch,
+    commitSha: commit.sha,
+  })
+
+  return {
+    status: "created",
+    repo,
+    cloneCommand: `git clone ${repo.ssh_url}`,
   }
 }

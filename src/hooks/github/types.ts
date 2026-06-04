@@ -56,6 +56,8 @@ export type GitHubRepo = {
     triage?: boolean
     pull: boolean
   }
+  ssh_url: string
+  html_url: string
 }
 
 export type GitHubUser = {

@@ -1,11 +1,11 @@
-import type { GithubUser } from './types'
+import type { GitHubUser } from "@/hooks/github/types"
 
-export async function fetchGithubUser(token: string): Promise<GithubUser> {
-  const res = await fetch('https://api.github.com/user', {
+export async function fetchGithubUser(token: string): Promise<GitHubUser> {
+  const res = await fetch("https://api.github.com/user", {
     headers: {
       Authorization: `Bearer ${token}`,
-      Accept: 'application/vnd.github+json'
-    }
+      Accept: "application/vnd.github+json",
+    },
   })
 
   if (!res.ok) {
