@@ -135,7 +135,7 @@ const AcceptAssignmentPage = () => {
             )}
 
             {acceptMutation.data && (
-              <div className="alert alert-success items-start">
+              <div className="alert alert-success items-start p-8">
                 <CheckCircle2 className="size-5 shrink-0" />
                 <div className="min-w-0">
                   <div className="font-bold">
@@ -156,10 +156,20 @@ const AcceptAssignmentPage = () => {
                     </a>
                   </div>
 
-                  <div className="mockup-code mt-4 text-sm">
-                    <pre data-prefix="$">
-                      <code>{acceptMutation.data.cloneCommand}</code>
-                    </pre>
+                  <div className="mt-4 max-w-full overflow-hidden rounded-lg bg-black text-sm text-white">
+                    <div className="flex gap-2 px-6 pt-6">
+                      <span className="block h-3 w-3 rounded-full bg-white/40" />
+                      <span className="block h-3 w-3 rounded-full bg-white/40" />
+                      <span className="block h-3 w-3 rounded-full bg-white/40" />
+                    </div>
+
+                    <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-3 px-6 py-6 font-mono text-base">
+                      <span className="select-none text-white/50">$</span>
+
+                      <code className="min-w-0 whitespace-pre-wrap break-all leading-relaxed">
+                        {acceptMutation.data.cloneCommand}
+                      </code>
+                    </div>
                   </div>
                 </div>
               </div>

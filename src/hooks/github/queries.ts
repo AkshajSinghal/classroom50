@@ -95,6 +95,57 @@ export function getBranchRefRepo(
   )
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isGitRepositoryEmptyError(error: unknown) {
+  return (
+    error instanceof Error &&
+    error.message.toLowerCase().includes("git repository is empty")
+  )
+}
+
+function isNotFoundError(error: unknown) {
+  return (
+    error instanceof Error && error.message.toLowerCase().includes("not found")
+  )
+}
+
+export async function waitForBranchRefRepo(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+  branch: string,
+  options: {
+    attempts?: number
+    delayMs?: number
+  } = {},
+) {
+  const attempts = options.attempts ?? 8
+  const delayMs = options.delayMs ?? 750
+
+  let lastError: unknown
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await getBranchRefRepo(client, owner, repo, branch)
+    } catch (err) {
+      lastError = err
+
+      if (!isGitRepositoryEmptyError(err) && !isNotFoundError(err)) {
+        throw error
+      }
+
+      if (attempt < attempts) {
+        await sleep(delayMs)
+      }
+    }
+  }
+
+  throw lastError
+}
+
 export function branchRefQuery(client: GitHubClient, org: string) {
   return queryOptions({
     queryKey: githubKeys.branchRef(org),
