@@ -84,6 +84,17 @@ export function getBranchRef(client: GitHubClient, org: string) {
   )
 }
 
+export function getBranchRefRepo(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+  branch: string,
+) {
+  return client.request<GitHubBranchRef>(
+    `/repos/${owner}/${repo}/git/ref/heads/${branch}`,
+  )
+}
+
 export function branchRefQuery(client: GitHubClient, org: string) {
   return queryOptions({
     queryKey: githubKeys.branchRef(org),
@@ -105,6 +116,17 @@ export function getCommit(
 ) {
   return client.request<GitHubCommitRef>(
     `/repos/${org}/classroom50/git/commits/${branchSha}`,
+  )
+}
+
+export function getCommitByRepo(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+  branch: string,
+) {
+  return client.request<GitHubCommitRef>(
+    `/repos/${owner}/${repo}/git/commits/${branch}`,
   )
 }
 export function commitQuery(
