@@ -364,6 +364,7 @@ export async function createAssignment(
     mode: input.mode,
     tests: input.tests,
     max_group_size: input.max_group_size,
+    due_date: input.due_date,
     autograder: "",
     runtime: {
       container: {
@@ -1143,17 +1144,6 @@ async function fetchTextWithFriendlyErrors(
 function pagesAutograderUrl(org: string, classroom: string, name: string) {
   return `https://${org}.github.io/classroom50/${classroom}/autograders/${name}/yaml`
 }
-
-const DEFAULT_AUTOGRADER_WORKFLOW = `name: Autograde
-
-on:
-  push:
-  workflow_dispatch:
-
-jobs:
-  autograde:
-    uses: cs50/classroom50/.github/workflows/autograde.yml@main
-`
 
 function defaultAutograderWorkflow(org: string) {
   return `name: Autograde

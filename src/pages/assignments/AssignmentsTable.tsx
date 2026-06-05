@@ -2,14 +2,20 @@ import { Link } from "@tanstack/react-router"
 import { UserRound, UsersRound } from "lucide-react"
 
 import useGetScores from "@/hooks/useGetScores"
-import { useEffect } from "react"
+
+function formatDate(dateString: string) {
+  const [year, month, day] = dateString.split("-").map(Number)
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(year, month - 1, day))
+}
 
 const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
   const { data: scoresData } = useGetScores(org, classroom)
 
-  useEffect(() => {
-    console.log("scores data", scoresData)
-  }, [scoresData])
   return (
     <div className="overflow-x-auto rounded-box border border-base-content/5 bg-base-100">
       <div className="table">
@@ -39,9 +45,10 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
                 )}
               </td>
               <td>
-                {/* TODO: decide how due dates are stored in assignments schema? */}
                 <span className="badge badge-soft">
-                  {assignment.due_date || "Jun 1, 2026"}
+                  {assignment.due_date
+                    ? formatDate(assignment.due_date)
+                    : "Invalid Date"}
                 </span>
               </td>
               <td>
@@ -53,8 +60,10 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
                   value={
                     students.length === 0
                       ? 0
-                      : (scoresData?.submissions?.[assignment.slug]?.length ||
-                          0 / students.length) * 100
+                      : ((scoresData?.submissions?.[assignment.slug]?.length ||
+                          0) /
+                          students.length) *
+                        100
                   }
                   max="100"
                 ></progress>
