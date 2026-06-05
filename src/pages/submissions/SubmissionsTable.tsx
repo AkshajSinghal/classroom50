@@ -32,6 +32,13 @@ const SubmissionsTable = ({ scores, students }) => {
           </tr>
         </thead>
         <tbody>
+          {!scores?.length && (
+            <tr>
+              <td colSpan={5} className="text-center">
+                No scores submitted!
+              </td>
+            </tr>
+          )}
           {scores
             .sort((a, b) => a.datetime - b.datetime)
             .toReversed()
@@ -62,17 +69,38 @@ const SubmissionsTable = ({ scores, students }) => {
                 </td>
                 <td>
                   <div className="flex gap-4">
-                    <div className="flex gap-2">
-                      <SquareArrowOutUpRight />
-                      <span>Commit</span>
+                    <div>
+                      <a
+                        className="flex gap-2"
+                        href={rest.commit}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <SquareArrowOutUpRight />
+                        <span>Commit</span>
+                      </a>
                     </div>
-                    <div className="flex gap-2">
-                      <MessageCircle />
-                      <span>Review</span>
+                    <div>
+                      <a
+                        className="flex gap-2"
+                        href={rest.review}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <MessageCircle />
+                        <span>Review</span>
+                      </a>
                     </div>
-                    <div className="flex gap-2">
-                      <ChartColumnIncreasing />
-                      <span>Details</span>
+                    <div>
+                      <a
+                        className="flex gap-2"
+                        href={rest.release}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <ChartColumnIncreasing />
+                        <span>Details</span>
+                      </a>
                     </div>
                   </div>
                 </td>

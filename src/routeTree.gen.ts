@@ -16,6 +16,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthIndexRouteImport } from './routes/auth/index'
 import { Route as OrgIndexRouteImport } from './routes/$org/index'
 import { Route as OrgClassesIndexRouteImport } from './routes/$org/classes/index'
+import { Route as OrgClassroomIndexRouteImport } from './routes/$org/$classroom/index'
 import { Route as OrgClassesNewIndexRouteImport } from './routes/$org/classes/new/index'
 import { Route as OrgClassroomStudentsIndexRouteImport } from './routes/$org/$classroom/students/index'
 import { Route as OrgClassroomAssignmentsIndexRouteImport } from './routes/$org/$classroom/assignments/index'
@@ -56,6 +57,11 @@ const OrgIndexRoute = OrgIndexRouteImport.update({
 const OrgClassesIndexRoute = OrgClassesIndexRouteImport.update({
   id: '/$org/classes/',
   path: '/$org/classes/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OrgClassroomIndexRoute = OrgClassroomIndexRouteImport.update({
+  id: '/$org/$classroom/',
+  path: '/$org/$classroom/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OrgClassesNewIndexRoute = OrgClassesNewIndexRouteImport.update({
@@ -101,6 +107,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/$org/': typeof OrgIndexRoute
   '/auth/': typeof AuthIndexRoute
+  '/$org/$classroom/': typeof OrgClassroomIndexRoute
   '/$org/classes/': typeof OrgClassesIndexRoute
   '/$org/$classroom/assignments/': typeof OrgClassroomAssignmentsIndexRoute
   '/$org/$classroom/students/': typeof OrgClassroomStudentsIndexRoute
@@ -116,6 +123,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/$org': typeof OrgIndexRoute
   '/auth': typeof AuthIndexRoute
+  '/$org/$classroom': typeof OrgClassroomIndexRoute
   '/$org/classes': typeof OrgClassesIndexRoute
   '/$org/$classroom/assignments': typeof OrgClassroomAssignmentsIndexRoute
   '/$org/$classroom/students': typeof OrgClassroomStudentsIndexRoute
@@ -132,6 +140,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/$org/': typeof OrgIndexRoute
   '/auth/': typeof AuthIndexRoute
+  '/$org/$classroom/': typeof OrgClassroomIndexRoute
   '/$org/classes/': typeof OrgClassesIndexRoute
   '/$org/$classroom/assignments/': typeof OrgClassroomAssignmentsIndexRoute
   '/$org/$classroom/students/': typeof OrgClassroomStudentsIndexRoute
@@ -149,6 +158,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/$org/'
     | '/auth/'
+    | '/$org/$classroom/'
     | '/$org/classes/'
     | '/$org/$classroom/assignments/'
     | '/$org/$classroom/students/'
@@ -164,6 +174,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/$org'
     | '/auth'
+    | '/$org/$classroom'
     | '/$org/classes'
     | '/$org/$classroom/assignments'
     | '/$org/$classroom/students'
@@ -179,6 +190,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/$org/'
     | '/auth/'
+    | '/$org/$classroom/'
     | '/$org/classes/'
     | '/$org/$classroom/assignments/'
     | '/$org/$classroom/students/'
@@ -195,6 +207,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   OrgIndexRoute: typeof OrgIndexRoute
   AuthIndexRoute: typeof AuthIndexRoute
+  OrgClassroomIndexRoute: typeof OrgClassroomIndexRoute
   OrgClassesIndexRoute: typeof OrgClassesIndexRoute
   OrgClassroomAssignmentsIndexRoute: typeof OrgClassroomAssignmentsIndexRoute
   OrgClassroomStudentsIndexRoute: typeof OrgClassroomStudentsIndexRoute
@@ -255,6 +268,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgClassesIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/$org/$classroom/': {
+      id: '/$org/$classroom/'
+      path: '/$org/$classroom'
+      fullPath: '/$org/$classroom/'
+      preLoaderRoute: typeof OrgClassroomIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/$org/classes/new/': {
       id: '/$org/classes/new/'
       path: '/$org/classes/new'
@@ -307,6 +327,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   OrgIndexRoute: OrgIndexRoute,
   AuthIndexRoute: AuthIndexRoute,
+  OrgClassroomIndexRoute: OrgClassroomIndexRoute,
   OrgClassesIndexRoute: OrgClassesIndexRoute,
   OrgClassroomAssignmentsIndexRoute: OrgClassroomAssignmentsIndexRoute,
   OrgClassroomStudentsIndexRoute: OrgClassroomStudentsIndexRoute,

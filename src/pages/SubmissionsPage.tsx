@@ -61,15 +61,19 @@ const SubmissionsPage = () => {
             <div className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
               <div className="card-body">
                 <label className="uppercase">Class Average</label>
-                <div className="flex items-end gap-1">
-                  <h2 className="text-xl font-bold">
-                    {scoresInfo?.reduce(
-                      (a, c) => Number(a) + Number(c["score"]),
-                      0,
-                    ) / students.length || 1}
-                  </h2>
-                  /<h4>{scoresInfo?.[0]?.["max-score"]}</h4>
-                </div>
+                {!scoresInfo?.[0]?.["max-score"] ? (
+                  <h2 className="text-xl">N/A</h2>
+                ) : (
+                  <div className="flex items-end gap-1">
+                    <h2 className="text-xl font-bold">
+                      {scoresInfo?.reduce(
+                        (a, c) => Number(a) + Number(c["score"]),
+                        0,
+                      ) / students.length || 1}
+                    </h2>
+                    /<h4>{scoresInfo?.[0]?.["max-score"]}</h4>
+                  </div>
+                )}
               </div>
             </div>
           </div>
