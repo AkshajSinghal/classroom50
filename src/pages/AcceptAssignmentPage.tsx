@@ -13,6 +13,7 @@ import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useGithubAuth } from "@/auth/useGithubAuth"
 import { useMutation } from "@tanstack/react-query"
 import { acceptAssignment } from "@/hooks/github/mutations"
+import usePagesAssignments from "@/hooks/usePagesAssignments"
 
 const initialsFor = (user: GitHubUser | null) => {
   const source = user?.name || user?.login || "?"
@@ -31,12 +32,151 @@ const titleForSlug = (slug: string) =>
     .map((word) => `${word[0]?.toUpperCase() ?? ""}${word.slice(1)}`)
     .join(" ")
 
+const AcceptNavbar = () => {
+  return (
+    <div className="navbar bg-base-100 shadow-sm">
+      <div className="flex p-6 text-lg font-bold">
+        <GraduationCap className="size-8 text-[#accefb] mr-2" /> Classroom 50
+      </div>
+    </div>
+  )
+}
+
+const AcceptCard = ({ children }) => {
+  return (
+    <div className="card w-200 h-180 max-w-[calc(100vw-2em)] p-8 m-auto rounded-xl mt-10 border border-[#eee]">
+      {children}
+    </div>
+  )
+}
+
+const UserInfo = ({ user }) => {
+  const username = user?.login
+  const displayName = user?.name || user?.login || "GitHub user"
+
+  return (
+    <div className="flex gap-4 bg-[#fafafa] p-4 rounded-xl border border-[#ddd]">
+      <div className="avatar avatar-placeholder">
+        {user?.avatar_url ? (
+          <div className="w-12 rounded-full">
+            <img src={user.avatar_url} alt={`${displayName}'s GitHub avatar`} />
+          </div>
+        ) : (
+          <div className="bg-base-200 text-black rounded-full w-12">
+            <span>{initialsFor(user)}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <div className="font-medium text-base-content">{displayName}</div>
+
+        <div className="flex items-center gap-1 text-sm text-base-content/60">
+          <GitHub className="size-4" />
+          <span>{username ?? "Checking GitHub user..."}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const AssignmentNotFound = ({ user, assignment }) => {
+  return (
+    <div className="min-h-screen bg-base-100">
+      <AcceptNavbar />
+
+      <AcceptCard>
+        <div className="card-body gap-8">
+          <div>
+            <span className="badge badge-error badge-soft gap-2">
+              <AlertTriangle className="size-4" />
+              Assignment unavailable
+            </span>
+
+            <h1 className="mt-6 text-2xl font-bold">Assignment not found</h1>
+
+            <p className="mt-2 text-base text-base-content/70">
+              We couldn&apos;t find an assignment matching{" "}
+              <span className="font-mono font-semibold text-base-content">
+                {assignment}
+              </span>{" "}
+              in this classroom. The link may be incorrect, or the assignment
+              may not have been published yet.
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-error/20 bg-error/5 p-5">
+            <div className="flex items-start gap-4">
+              <div className="rounded-full bg-error/10 p-3 text-error">
+                <AlertTriangle className="size-6" />
+              </div>
+
+              <div className="min-w-0">
+                <div className="font-bold text-error">
+                  Unable to load assignment
+                </div>
+
+                <div className="mt-1 text-sm text-base-content/70">
+                  Expected to find assignment slug:
+                </div>
+
+                <pre className="mt-3 overflow-x-auto rounded-lg bg-base-100 p-3 text-sm">
+                  {assignment}
+                </pre>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-base-300 bg-base-200/40 p-4 text-sm text-base-content/70">
+            Check that the URL is correct, or ask your instructor to confirm
+            that this assignment has been added to{" "}
+            <span className="font-mono text-base-content">
+              assignments.json
+            </span>
+            .
+          </div>
+
+          <div className="divider my-0" />
+
+          <div className="space-y-3">
+            <label className="label p-0 text-base font-semibold">
+              Signed in as
+            </label>
+
+            <UserInfo user={user} />
+          </div>
+        </div>
+      </AcceptCard>
+    </div>
+  )
+}
+
+const modeMap = {
+  individual: "Individual Assignment",
+  group: "Group Assignment",
+}
+
+function formatDate(dateString: string) {
+  const [year, month, day] = dateString.split("-").map(Number)
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(year, month - 1, day))
+}
+
 const AcceptAssignmentPage = () => {
   const { org, classroom, assignment } = useParams({ strict: false })
   const client = useGitHubClient()
 
   const { user } = useGithubAuth()
   const username = user?.login
+
+  const { data: assignmentsData, isLoading: loadingAssignments } =
+    usePagesAssignments(org, classroom)
+
+  const assignmentData = assignmentsData?.find((a) => a.slug === assignment)
 
   const expectedRepoName = username
     ? `${classroom}-${assignment}-${username}`.toLowerCase()
@@ -53,22 +193,37 @@ const AcceptAssignmentPage = () => {
   })
 
   const isBusy = acceptMutation.isPending
-  const displayName = user?.name || user?.login || "GitHub user"
+
+  if (loadingAssignments) {
+    return (
+      <div className="min-h-screen bg-base-100">
+        <AcceptNavbar />
+        <AcceptCard>
+          <div className="loading loading-spinner loading-xl text-center m-auto" />
+        </AcceptCard>
+      </div>
+    )
+  }
+
+  if (!assignmentData) {
+    return <AssignmentNotFound user={user} assignment={assignment} />
+  }
 
   return (
     <div className="min-h-screen bg-base-100">
-      <div className="navbar bg-base-100 shadow-sm">
-        <div className="flex p-6 text-lg font-bold">
-          <GraduationCap className="size-8 text-[#accefb] mr-2" /> Classroom 50
-        </div>
-      </div>
-      <div className="card w-200 max-w-[calc(100vw-2em)] p-8 m-auto rounded-xl mt-10 border border-[#eee]">
+      <AcceptNavbar />
+      <AcceptCard>
         <div className="card-body gap-4">
-          <span className="badge badge-primary badge-soft">
-            <UserRound className="size-4" />
-            Individual Assignment
-          </span>
-          <h1 className="text-xl font-bold pt-6">{titleForSlug(assignment)}</h1>
+          <div className="flex justify-between">
+            <span className="badge badge-primary badge-soft">
+              <UserRound className="size-4" />
+              {modeMap[assignmentData?.mode ?? ""] ?? ""}
+            </span>
+            <span className="badge">
+              Due {formatDate(assignmentData?.due_date)}
+            </span>
+          </div>
+          <h1 className="text-xl font-bold pt-6">{assignmentData?.name}</h1>
           <h2 className="text-lg">
             Accept this assignment to get your own copy of the starter code
             repository.
@@ -79,33 +234,7 @@ const AcceptAssignmentPage = () => {
           <label className="label text-lg">Signed in as</label>
 
           <div className="flex flex-col gap-8">
-            <div className="flex gap-4 bg-[#fafafa] p-4 rounded-xl border border-[#ddd]">
-              <div className="avatar avatar-placeholder">
-                {user?.avatar_url ? (
-                  <div className="w-12 rounded-full">
-                    <img
-                      src={user.avatar_url}
-                      alt={`${displayName}'s GitHub avatar`}
-                    />
-                  </div>
-                ) : (
-                  <div className="bg-base-200 text-black rounded-full w-12">
-                    <span>{initialsFor(user)}</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="min-w-0 flex-1">
-                <div className="font-medium text-base-content">
-                  {displayName}
-                </div>
-
-                <div className="flex items-center gap-1 text-sm text-base-content/60">
-                  <GitHub className="size-4" />
-                  <span>{username ?? "Checking GitHub user..."}</span>
-                </div>
-              </div>
-            </div>
+            <UserInfo user={user} />
 
             <div className="flex gap-2 flex-col bg-[#fafafa] p-4 rounded-xl border border-[#ddd]">
               <label className="label text-lg">
@@ -193,7 +322,7 @@ const AcceptAssignmentPage = () => {
             )}
           </div>
         </div>
-      </div>
+      </AcceptCard>
     </div>
   )
 }

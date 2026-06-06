@@ -17,6 +17,7 @@ export type Assignment = {
     branch: string
   }
   mode: string
+  due_date: string
   autograder: string
   runtime: {
     container: {
