@@ -1,5 +1,5 @@
-import { useParams } from "@tanstack/react-router"
-import { useMutation } from "@tanstack/react-query"
+import { useNavigate, useParams } from "@tanstack/react-router"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 
 import {
   createClassroomFilesWithConflictRetry,
@@ -15,10 +15,13 @@ import Drawer, {
 } from "@/components/drawer"
 import Breadcrumb from "@/components/breadcrumb"
 import CreateClassroomForm from "./classes/CreateClassroomForm"
+import { githubKeys } from "@/hooks/github/queries"
 
 const CreateClassroomPage = () => {
   const client = useGitHubClient()
+  const queryClient = useQueryClient()
   const { org } = useParams({ strict: false })
+  const navigate = useNavigate()
   const createClassroomMutation = useMutation<
     CreateClassroomResult,
     GitHubAPIError,
@@ -44,6 +47,12 @@ const CreateClassroomPage = () => {
       } else {
         console.error("non-GitHub API error:", err)
       }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: githubKeys.rawFile(org, "classroom50", `/`),
+      })
+      navigate({ to: `/${org}/` })
     },
   })
 

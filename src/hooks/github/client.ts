@@ -48,6 +48,7 @@ export function createGitHubClient(args: {
       body:
         options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: options.signal,
+      cache: options.method === "GET" ? "no-store" : undefined,
     })
 
     const rateLimit = readGitHubRateLimitHeaders(res)

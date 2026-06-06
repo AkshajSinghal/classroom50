@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useParams } from "@tanstack/react-router"
 
 import Breadcrumb from "@/components/breadcrumb"
@@ -16,11 +16,13 @@ import {
 } from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { slugify } from "./classes/CreateClassroomForm"
+import { githubKeys } from "@/hooks/github/queries"
 
 const CreateAssignmentPage = () => {
   const client = useGitHubClient()
   const navigate = useNavigate()
   const { org, classroom } = useParams({ strict: false })
+  const queryClient = useQueryClient()
   const createClassroomMutation = useMutation<
     CreateAssignmentResult,
     GitHubAPIError,
@@ -47,7 +49,16 @@ const CreateAssignmentPage = () => {
         console.error("non-GitHub API error:", err)
       }
     },
-    onSuccess: () => navigate({ to: `/${org}/${classroom}/assignments` }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: githubKeys.jsonFile(
+          org,
+          "classroom50",
+          `${classroom}/assignments.json`,
+        ),
+      })
+      navigate({ to: `/${org}/${classroom}/assignments` })
+    },
   })
   return (
     <div className="min-h-screen">

@@ -1,6 +1,6 @@
 import { useRef, useState } from "react"
 import type { AssignmentTest } from "@/types/classroom"
-import { Check, Pencil, Trash, X } from "lucide-react"
+import { Pencil, Trash } from "lucide-react"
 
 const emptyTest = (): AssignmentTest => ({
   name: "",
@@ -109,13 +109,12 @@ const AutogradingTestModal = ({
             Done
           </button>
         </div>
-
-        <form method="dialog" className="modal-backdrop">
-          <button type="button" onClick={onClose}>
-            close
-          </button>
-        </form>
       </div>
+      <form method="dialog" className="modal-backdrop">
+        <button type="button" onClick={onClose}>
+          close
+        </button>
+      </form>
     </dialog>
   )
 }
