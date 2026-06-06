@@ -430,3 +430,122 @@ export async function ensureTeam(
     throw error
   }
 }
+
+export async function fetchJson<T>(url: string): Promise<T> {
+  const response = await fetch(url, {
+    cache: "no-store",
+    // headers: {
+    //   "Cache-Control": "no-cache, no-store, max-age=0",
+    //   Pragma: "no-cache",
+    // },
+  })
+
+  if (response.status === 404) {
+    throw new Error(
+      "The classroom may not exist yet, or publish-pages.yaml may not have run.",
+    )
+  }
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch ${url}: ${response.status}`)
+  }
+
+  return response.json() as Promise<T>
+}
+
+function pagesAssignmentUrl(org: string, classroom: string) {
+  return `https://${org}.github.io/classroom50/${classroom}/assignments.json`
+}
+
+type AssignmentsJson =
+  | Assignment[]
+  | {
+      version?: 1
+      assignments: Assignment[]
+    }
+function extractAssignments(json: AssignmentsJson): Assignment[] {
+  if (Array.isArray(json)) return json
+
+  if (json.version !== undefined && json.version !== 1) {
+    throw new Error(
+      `This classroom uses assignments.json v${json.version}, but this client only supports v1. Please update classroom50.`,
+    )
+  }
+
+  if (!Array.isArray(json.assignments)) {
+    throw new Error(
+      "assignments.json has an invalid v1 shape. Ask your instructor to check classroom50 configuration.",
+    )
+  }
+
+  return json.assignments
+}
+
+export async function fetchPagesAssignments(
+  org: string,
+  classroom: string,
+): Promise<Assignment[]> {
+  const json = await fetchJson<AssignmentsJson>(
+    pagesAssignmentUrl(org, classroom),
+  )
+  const assignments = extractAssignments(json)
+
+  return assignments
+}
+
+export async function fetchAssignmentFromPages(
+  org: string,
+  classroom: string,
+  assignmentSlug: string,
+): Promise<Assignment> {
+  const json = await fetchJson<AssignmentsJson>(
+    pagesAssignmentUrl(org, classroom),
+  )
+
+  const assignments = extractAssignments(json)
+  console.log("assignments", assignments)
+  const assignment = assignments.find((entry) => entry.slug === assignmentSlug)
+
+  if (!assignment) {
+    throw new Error(`Assignment ${assignmentSlug} was not found.`)
+  }
+
+  // if (assignment.mode === "group") {
+  //   throw new Error("Group assignments are not yet supported.")
+  // }
+
+  if (!assignment.template?.owner || !assignment.template?.repo) {
+    throw new Error(
+      `Assignment "${assignmentSlug}" is missing template.owner or template.repo.`,
+    )
+  }
+
+  return assignment
+}
+
+export async function fetchTextWithFriendlyErrors(
+  url: string,
+  label: string,
+): Promise<string> {
+  const response = await fetch(url)
+
+  if (response.status === 404) {
+    throw new Error(
+      `${label} is not published yet. Ask your instructor to confirm the file exists in the config repo and that publish-pages.yaml has been run.`,
+    )
+  }
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch ${label}: ${response.status}`)
+  }
+
+  const text = await response.text()
+
+  if (!text.trim()) {
+    throw new Error(
+      "Pages deployment may still be in flight. Retry in a minute.",
+    )
+  }
+
+  return text
+}
