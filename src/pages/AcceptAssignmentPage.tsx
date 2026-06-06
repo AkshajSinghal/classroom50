@@ -155,22 +155,6 @@ const AcceptAssignmentPage = () => {
                       {acceptMutation.data.repo.full_name}
                     </a>
                   </div>
-
-                  <div className="mt-4 max-w-full overflow-hidden rounded-lg bg-black text-sm text-white">
-                    <div className="flex gap-2 px-6 pt-6">
-                      <span className="block h-3 w-3 rounded-full bg-white/40" />
-                      <span className="block h-3 w-3 rounded-full bg-white/40" />
-                      <span className="block h-3 w-3 rounded-full bg-white/40" />
-                    </div>
-
-                    <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-3 px-6 py-6 font-mono text-base">
-                      <span className="select-none text-white/50">$</span>
-
-                      <code className="min-w-0 whitespace-pre-wrap break-all leading-relaxed">
-                        {acceptMutation.data.cloneCommand}
-                      </code>
-                    </div>
-                  </div>
                 </div>
               </div>
             )}

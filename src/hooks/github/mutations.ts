@@ -1039,11 +1039,17 @@ export async function acceptPendingOrgInvite(
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url)
+  const response = await fetch(url, {
+    cache: "no-store",
+    headers: {
+      "Cache-Control": "no-cache, no-store, max-age=0",
+      Pragma: "no-cache",
+    },
+  })
 
   if (response.status === 404) {
     throw new Error(
-      "The classroom may not exist yet, or publish-pages.yaml may not have run. Ask your instructor to confirm the Pages site has been deployed.",
+      "The classroom may not exist yet, or publish-pages.yaml may not have run.",
     )
   }
 

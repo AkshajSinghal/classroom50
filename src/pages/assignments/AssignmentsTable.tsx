@@ -29,6 +29,13 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
           </tr>
         </thead>
         <tbody>
+          {!assignments?.length && (
+            <tr>
+              <td colSpan={5} className="text-center">
+                No assignments created.
+              </td>
+            </tr>
+          )}
           {assignments?.map((assignment) => (
             <tr>
               <td>{assignment.name}</td>
