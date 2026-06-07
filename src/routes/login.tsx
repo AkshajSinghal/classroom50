@@ -1,7 +1,6 @@
-import { createFileRoute } from '@tanstack/react-router'
-import LoginPage from '@/pages/LoginPage'
+import { createFileRoute } from "@tanstack/react-router"
+import { GitHubAuthCard } from "@/auth/GitHubAuthCard"
 
-export const Route = createFileRoute('/login')({
-  component: LoginPage,
+export const Route = createFileRoute("/login")({
+  component: GitHubAuthCard,
 })
-
