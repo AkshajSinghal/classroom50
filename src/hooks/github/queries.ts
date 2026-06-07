@@ -549,3 +549,74 @@ export async function fetchTextWithFriendlyErrors(
 
   return text
 }
+
+export async function listAuthedOrgMemberships(client: GitHubClient) {
+  return client.request<GitHubOrgMembership[]>(
+    "/user/memberships/orgs?per_page=100",
+  )
+}
+
+export type Classroom50OrgSummary = {
+  org: {
+    login: string
+    id: number
+    avatar_url: string
+    description?: string | null
+    html_url: string
+  }
+
+  membership: {
+    state: "active" | "pending"
+    role: "admin" | "member"
+  }
+
+  classroom50: {
+    status: Classroom50Status
+    canAccessRepo: boolean
+    canInitialize: boolean
+    pagesUrl: string
+  }
+}
+
+type Classroom50Status = "ready" | "needs_setup" | "no_access" | "unknown"
+export async function getClassroom50OrgSummary(
+  client: GitHubClient,
+  membership: GitHubOrgMembership,
+): Promise<Classroom50OrgSummary> {
+  const org = membership.organization
+
+  let canAccessRepo = false
+  let status: Classroom50Status = "unknown"
+
+  try {
+    await client.request(`/repos/${org.login}/classroom50`)
+    canAccessRepo = true
+    status = "ready"
+  } catch (error: any) {
+    if (error.status === 404) {
+      canAccessRepo = false
+
+      status =
+        membership.state === "active" && membership.role === "admin"
+          ? "needs_setup"
+          : "no_access"
+    } else {
+      status = "unknown"
+    }
+  }
+
+  return {
+    org,
+    membership: {
+      state: membership.state,
+      role: membership.role,
+    },
+    classroom50: {
+      status,
+      canAccessRepo,
+      canInitialize:
+        membership.state === "active" && membership.role === "admin",
+      pagesUrl: `https://${org.login}.github.io/classroom50/`,
+    },
+  }
+}

@@ -6,6 +6,7 @@ export type GitHubOrgMembership = {
     id: number
     avatar_url: string
     html_url: string
+    description: string
   }
 }
 
