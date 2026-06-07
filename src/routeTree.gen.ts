@@ -13,8 +13,8 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as ClassesRouteImport } from './routes/classes'
 import { Route as AssignmentsRouteImport } from './routes/assignments'
 import { Route as AuthedRouteImport } from './routes/_authed'
-import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthIndexRouteImport } from './routes/auth/index'
+import { Route as AuthedIndexRouteImport } from './routes/_authed/index'
 import { Route as AuthedOrgIndexRouteImport } from './routes/_authed/$org/index'
 import { Route as AuthedOrgClassesIndexRouteImport } from './routes/_authed/$org/classes/index'
 import { Route as AuthedOrgClassroomIndexRouteImport } from './routes/_authed/$org/$classroom/index'
@@ -45,15 +45,15 @@ const AuthedRoute = AuthedRouteImport.update({
   id: '/_authed',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AuthIndexRoute = AuthIndexRouteImport.update({
   id: '/auth/',
   path: '/auth/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AuthedIndexRoute = AuthedIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AuthedRoute,
 } as any)
 const AuthedOrgIndexRoute = AuthedOrgIndexRouteImport.update({
   id: '/$org/',
@@ -114,7 +114,7 @@ const AuthedOrgClassroomAssignmentsAssignmentAcceptIndexRoute =
   } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
+  '/': typeof AuthedIndexRoute
   '/assignments': typeof AssignmentsRoute
   '/classes': typeof ClassesRoute
   '/login': typeof LoginRoute
@@ -131,10 +131,10 @@ export interface FileRoutesByFullPath {
   '/$org/$classroom/assignments/$assignment/submissions/': typeof AuthedOrgClassroomAssignmentsAssignmentSubmissionsIndexRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
   '/assignments': typeof AssignmentsRoute
   '/classes': typeof ClassesRoute
   '/login': typeof LoginRoute
+  '/': typeof AuthedIndexRoute
   '/auth': typeof AuthIndexRoute
   '/$org': typeof AuthedOrgIndexRoute
   '/$org/$classroom': typeof AuthedOrgClassroomIndexRoute
@@ -149,11 +149,11 @@ export interface FileRoutesByTo {
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
   '/_authed': typeof AuthedRouteWithChildren
   '/assignments': typeof AssignmentsRoute
   '/classes': typeof ClassesRoute
   '/login': typeof LoginRoute
+  '/_authed/': typeof AuthedIndexRoute
   '/auth/': typeof AuthIndexRoute
   '/_authed/$org/': typeof AuthedOrgIndexRoute
   '/_authed/$org/$classroom/': typeof AuthedOrgClassroomIndexRoute
@@ -186,10 +186,10 @@ export interface FileRouteTypes {
     | '/$org/$classroom/assignments/$assignment/submissions/'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/'
     | '/assignments'
     | '/classes'
     | '/login'
+    | '/'
     | '/auth'
     | '/$org'
     | '/$org/$classroom'
@@ -203,11 +203,11 @@ export interface FileRouteTypes {
     | '/$org/$classroom/assignments/$assignment/submissions'
   id:
     | '__root__'
-    | '/'
     | '/_authed'
     | '/assignments'
     | '/classes'
     | '/login'
+    | '/_authed/'
     | '/auth/'
     | '/_authed/$org/'
     | '/_authed/$org/$classroom/'
@@ -222,7 +222,6 @@ export interface FileRouteTypes {
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
   AuthedRoute: typeof AuthedRouteWithChildren
   AssignmentsRoute: typeof AssignmentsRoute
   ClassesRoute: typeof ClassesRoute
@@ -260,19 +259,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/auth/': {
       id: '/auth/'
       path: '/auth'
       fullPath: '/auth/'
       preLoaderRoute: typeof AuthIndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_authed/': {
+      id: '/_authed/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof AuthedIndexRouteImport
+      parentRoute: typeof AuthedRoute
     }
     '/_authed/$org/': {
       id: '/_authed/$org/'
@@ -348,6 +347,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthedRouteChildren {
+  AuthedIndexRoute: typeof AuthedIndexRoute
   AuthedOrgIndexRoute: typeof AuthedOrgIndexRoute
   AuthedOrgClassroomIndexRoute: typeof AuthedOrgClassroomIndexRoute
   AuthedOrgClassesIndexRoute: typeof AuthedOrgClassesIndexRoute
@@ -361,6 +361,7 @@ interface AuthedRouteChildren {
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
+  AuthedIndexRoute: AuthedIndexRoute,
   AuthedOrgIndexRoute: AuthedOrgIndexRoute,
   AuthedOrgClassroomIndexRoute: AuthedOrgClassroomIndexRoute,
   AuthedOrgClassesIndexRoute: AuthedOrgClassesIndexRoute,
@@ -382,7 +383,6 @@ const AuthedRouteWithChildren =
   AuthedRoute._addFileChildren(AuthedRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
   AuthedRoute: AuthedRouteWithChildren,
   AssignmentsRoute: AssignmentsRoute,
   ClassesRoute: ClassesRoute,

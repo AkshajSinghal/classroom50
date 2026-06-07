@@ -21,6 +21,8 @@ export const DrawerSidebar = ({ selected = "", page = "" }) => {
       <div className="flex flex-col min-h-full w-60 min-w-30 [&>div]:px-6">
         {page === "classes" ? (
           <SidebarContentClasses />
+        ) : page === "orgs" ? (
+          <SidebarContentOrgs />
         ) : (
           <SidebarContent selected={selected} />
         )}
@@ -146,13 +148,29 @@ export const SidebarContent = ({ selected }: { selected: string }) => {
 }
 
 export const MyClasses = () => {
+  const { org } = useParams({ strict: false })
   return (
     <div className="py-4">
       <ul className="[&>a>li]:py-2 [&>a>li>span]:pl-2">
-        <Link to="/cs50/cs50-2026/students">
+        <Link to={`/${org}`}>
           <li className="flex bg-[#323b49] px-2 rounded-box">
             <BookText />
             <span>My Classes</span>
+          </li>
+        </Link>
+      </ul>
+    </div>
+  )
+}
+
+export const MyOrgs = () => {
+  return (
+    <div className="py-4">
+      <ul className="[&>a>li]:py-2 [&>a>li>span]:pl-2">
+        <Link to="/">
+          <li className="flex bg-[#323b49] px-2 rounded-box">
+            <BookText />
+            <span>My Orgs</span>
           </li>
         </Link>
       </ul>
@@ -165,6 +183,16 @@ export const SidebarContentClasses = () => {
     <>
       <ClassroomLogo />
       <MyClasses />
+      <SidebarFooter />
+    </>
+  )
+}
+
+export const SidebarContentOrgs = () => {
+  return (
+    <>
+      <ClassroomLogo />
+      <MyOrgs />
       <SidebarFooter />
     </>
   )
