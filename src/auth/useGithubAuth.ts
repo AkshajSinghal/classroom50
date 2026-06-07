@@ -19,7 +19,7 @@ import {
   persistGithubToken,
   saveOAuthSession,
 } from "./storage"
-import type { DeviceAuthState, GithubAuthScreen, GitHubUser } from "./types"
+import type { DeviceAuthState, GithubAuthScreen } from "./types"
 
 function formatError(err: unknown) {
   const message = err instanceof Error ? err.message : String(err)
@@ -61,6 +61,7 @@ export function useGithubAuth() {
   const [error, setError] = useState<string | null>(null)
   const [device, setDevice] = useState<DeviceAuthState | null>(null)
   const [now, setNow] = useState(() => Date.now())
+  const [hasLoadedStoredAuth, setHasLoadedStoredAuth] = useState(false)
 
   const githubUserQuery = useQuery({
     queryKey: ["github", "user", token],
@@ -90,6 +91,8 @@ export function useGithubAuth() {
       setToken(storedToken)
       setScreen("authed")
     }
+
+    setHasLoadedStoredAuth(true)
   }, [])
 
   useEffect(() => {
@@ -431,6 +434,33 @@ export function useGithubAuth() {
     }
   }, [device, now])
 
+  const status = useMemo(() => {
+    if (!hasLoadedStoredAuth) {
+      return "loading"
+    }
+
+    if (!token) {
+      return "unauthenticated"
+    }
+
+    if (githubUserQuery.isLoading || githubUserQuery.isPending) {
+      return "loading"
+    }
+
+    if (githubUserQuery.isError || !githubUserQuery.data) {
+      return "unauthenticated"
+    }
+
+    return "authenticated"
+  }, [
+    hasLoadedStoredAuth,
+    token,
+    githubUserQuery.isLoading,
+    githubUserQuery.isPending,
+    githubUserQuery.isError,
+    githubUserQuery.data,
+  ])
+
   return {
     screen,
     clientId,
@@ -452,5 +482,6 @@ export function useGithubAuth() {
     markDeviceCodeCopied,
     markVerificationOpened,
     signOut,
+    status,
   }
 }
