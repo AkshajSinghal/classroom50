@@ -18,7 +18,7 @@ function OrgCard({ summary }: { summary: Classroom50OrgSummary }) {
   return (
     <div className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
       <div className="card-body justify-between">
-        <div className="flex items-start gap-4">
+        <div className="flex gap-4">
           <img
             src={org.avatar_url}
             alt=""

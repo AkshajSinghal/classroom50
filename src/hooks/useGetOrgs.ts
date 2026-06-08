@@ -22,6 +22,7 @@ const useGetOrgs = () => {
         ),
       )
     },
+    staleTime: 10 * 60 * 1000,
   })
 }
 

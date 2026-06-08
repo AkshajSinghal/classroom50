@@ -1328,3 +1328,94 @@ export async function acceptAssignment(params: {
     cloneCommand: `git clone ${repo.ssh_url}`,
   }
 }
+
+async function tryStep<T>(fn: () => Promise<T>) {
+  try {
+    const data = await fn()
+    return { status: "complete" as const, data }
+  } catch (err) {
+    if (
+      err instanceof GitHubAPIError &&
+      (err.status === 409 || err.status === 403)
+    ) {
+      return {
+        status: "warning" as const,
+        message: err.message,
+      }
+    }
+
+    return {
+      status: "error" as const,
+      message: (err as any).message ?? "Unknown error",
+    }
+  }
+}
+
+type InitStepStatus =
+  | "pending"
+  | "running"
+  | "complete"
+  | "warning"
+  | "error"
+  | "skipped"
+
+type InitResults = {
+  orgDefaults: string
+}
+
+export async function initClassroom50({
+  client,
+  org,
+  collectToken,
+  serviceAccountConfirmed,
+}: {
+  client: GitHubClient
+  org: string
+  collectToken?: string
+  serviceAccountConfirmed: boolean
+}) {
+  const results: InitResults = {}
+
+  results.orgDefaults = await tryStep(() =>
+    updateOrgClassroomSafetyDefaults(client, org),
+  )
+
+  results.configRepo = await tryStep(() => ensureClassroom50Repo(client, org))
+
+  results.skeleton = await tryStep(() => ensureSkeletonFiles(client, org))
+
+  results.pages = await tryStep(() => ensurePages(client, org, "classroom50"))
+
+  results.actionsPermissions = await tryStep(() =>
+    ensureWorkflowPermissions(client, org, "classroom50"),
+  )
+
+  results.reusableWorkflowAccess = await tryStep(() =>
+    ensureReusableWorkflowAccess(client, org, "classroom50"),
+  )
+
+  results.branchProtection = await tryStep(() =>
+    ensureBranchProtection(client, org, "classroom50", "main"),
+  )
+
+  if (collectToken) {
+    if (!serviceAccountConfirmed) {
+      throw new Error("Service account confirmation is required.")
+    }
+
+    results.collectToken = await tryStep(() =>
+      putRepoSecret(
+        client,
+        org,
+        "classroom50",
+        "CLASSROOM50_COLLECT_TOKEN",
+        collectToken,
+      ),
+    )
+  }
+
+  return {
+    ...results,
+    pagesUrl: `https://${org}.github.io/classroom50/`,
+  }
+}
