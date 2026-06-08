@@ -1457,10 +1457,135 @@ export async function ensureClassroom50Repo(client: GitHubClient, org: string) {
   return { status: "complete" as const, created: true, repo }
 }
 
+export type SkeletonFile = {
+  path: string
+  mode: "100644"
+  type: "blob"
+  content: string
+}
+
+export type GitHubTreeResponse = {
+  tree: Array<{
+    path: string
+    type: "blob" | "tree" | "commit"
+    sha: string
+  }>
+  truncated: boolean
+}
+
+const SKELETON_PATHS = [
+  "workflows/publish-pages.yaml",
+  "workflows/collect-scores.yaml",
+  "workflows/autograde-runner.yaml",
+  "scripts/collect_scores.py",
+  "scripts/runner.py",
+]
+const FOUNDATION_BASE = "cli/gh-teacher/skeleton/dotgithub"
+const ORG_BASE = ".github"
+const CONFIG_REPO = "classroom50"
+const SKELETON_SOURCE_OWNER = "foundation50"
+const SKELETON_SOURCE_REPO = "classroom50"
+const SKELETON_SOURCE_REF = "main"
+
+export async function listTargetRepoPaths(
+  client: GitHubClient,
+  org: string,
+  branch = "main",
+): Promise<Set<string>> {
+  const ref = await client.request<{
+    object: { sha: string }
+  }>(`/repos/${org}/${CONFIG_REPO}/git/ref/heads/${branch}`)
+
+  const commit = await client.request<{
+    tree: { sha: string }
+  }>(`/repos/${org}/${CONFIG_REPO}/git/commits/${ref.object.sha}`)
+
+  const tree = await client.request<GitHubTreeResponse>(
+    `/repos/${org}/${CONFIG_REPO}/git/trees/${commit.tree.sha}/?recursive=1`,
+  )
+
+  if (tree.truncated) {
+    throw new Error(
+      `The ${org}/${CONFIG_REPO} tree is too large to safely inspect for missing skeleton files.`,
+    )
+  }
+
+  return new Set(
+    tree.tree.filter((item) => item.type === "blob").map((item) => item.path),
+  )
+}
+
+function encodeGitHubContentPath(path: string): string {
+  return path
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/")
+}
+
+function isNotFound(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "status" in err &&
+    (err as GitHubAPIError).status === 404
+  )
+}
+
+export async function fetchSkeletonSourceFile(
+  client: GitHubClient,
+  path: string,
+): Promise<string> {
+  const encodedPath = encodeGitHubContentPath(path)
+
+  try {
+    return await client.requestRaw(
+      `/repos/${SKELETON_SOURCE_OWNER}/${SKELETON_SOURCE_REPO}/contents/${encodedPath}?ref=${encodeURIComponent(
+        SKELETON_SOURCE_REF,
+      )}`,
+      {
+        method: "GET",
+        headers: {
+          Accept: "application/vnd.github.raw+json",
+        },
+      },
+    )
+  } catch (err) {
+    if (isNotFound(err)) {
+      throw new Error(
+        `Skeleton source file not found: ${SKELETON_SOURCE_OWNER}/${SKELETON_SOURCE_REPO}:${path}`,
+      )
+    }
+
+    throw err
+  }
+}
+
 export async function findMissingSkeletonFiles(
   client: GitHubClient,
   org: string,
-) {}
+) {
+  const existingPaths = await listTargetRepoPaths(client, org)
+  const adjustedTargets = SKELETON_PATHS.map((path) => `${ORG_BASE}/${path}`)
+  const missingPaths = adjustedTargets.filter(
+    (path) => !existingPaths.has(path),
+  )
+
+  return Promise.all(
+    missingPaths.map(async (path): Promise<SkeletonFile> => {
+      const content = await fetchSkeletonSourceFile(
+        client,
+        path.replace(ORG_BASE, FOUNDATION_BASE),
+      )
+
+      return {
+        path,
+        mode: "100644",
+        type: "blob",
+        content,
+      }
+    }),
+  )
+}
 
 export async function ensureSkeletonFiles(client: GitHubClient, org: string) {
   const missing = await findMissingSkeletonFiles(client, org)
