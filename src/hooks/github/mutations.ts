@@ -2141,11 +2141,12 @@ export async function encryptSecret(publicKey: string, secret: string) {
 
 export async function putRepoSecret(
   client: GitHubClient,
-  owner: string,
+  owner: string | undefined,
   repo: string,
   name: string,
   plaintext: string,
 ) {
+  if (!owner) throw new Error(`org must be specified to create a PAT`)
   const key = await client.request<{
     key_id: string
     key: string
@@ -2333,8 +2334,6 @@ export type InitStepUpdate = {
 export async function initClassroom50({
   client,
   org,
-  collectToken,
-  serviceAccountConfirmed,
   onStepUpdate,
 }: {
   client: GitHubClient
@@ -2393,25 +2392,6 @@ export async function initClassroom50({
     onStepUpdate,
     fn: () => ensureBranchProtection(client, org, "classroom50", "main"),
   })
-
-  if (collectToken) {
-    if (!serviceAccountConfirmed) {
-      throw new Error("Service account confirmation is required.")
-    }
-
-    results.collectToken = await tryStep({
-      id: "collectToken",
-      onStepUpdate,
-      fn: () =>
-        putRepoSecret(
-          client,
-          org,
-          "classroom50",
-          "CLASSROOM50_COLLECT_TOKEN",
-          collectToken,
-        ),
-    })
-  }
 
   return {
     org,
