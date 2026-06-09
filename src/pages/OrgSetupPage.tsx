@@ -58,7 +58,6 @@ const INIT_STEP_ORDER: InitStepId[] = [
   "workflowPermissions",
   "reusableWorkflowAccess",
   "pages",
-  "collectToken",
 ]
 const OrgSteps = ({ steps, mutation }) => {
   return (
@@ -164,11 +163,6 @@ const initialSteps: Record<InitStepId, InitStepUpdate> = {
     id: "pages",
     status: "pending",
     title: "GitHub Pages",
-  },
-  collectToken: {
-    id: "collectToken",
-    status: "pending",
-    title: "Collect token",
   },
 }
 

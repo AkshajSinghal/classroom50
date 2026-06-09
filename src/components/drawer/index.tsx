@@ -1,4 +1,4 @@
-import { GraduationCap, BookText, UsersRound } from "lucide-react"
+import { GraduationCap, BookText, UsersRound, Settings } from "lucide-react"
 import { Link, useParams } from "@tanstack/react-router"
 import { useGithubAuth } from "../../auth/useGithubAuth"
 import duck from "@/assets/duck.png"
@@ -22,7 +22,7 @@ export const DrawerSidebar = ({ selected = "", page = "" }) => {
         {page === "classes" ? (
           <SidebarContentClasses />
         ) : page === "orgs" ? (
-          <SidebarContentOrgs />
+          <SidebarContentOrgs selected={selected} />
         ) : (
           <SidebarContent selected={selected} />
         )}
@@ -163,14 +163,25 @@ export const MyClasses = () => {
   )
 }
 
-export const MyOrgs = () => {
+export const MyOrgs = ({ settings = false }) => {
+  const { org } = useParams({ strict: false })
   return (
     <div className="py-4">
       <ul className="[&>a>li]:py-2 [&>a>li>span]:pl-2">
         <Link to="/">
-          <li className="flex bg-[#323b49] px-2 rounded-box">
+          <li
+            className={`flex${!settings ? " bg-[#323b49]" : ""} px-2 rounded-box`}
+          >
             <BookText />
             <span>My Orgs</span>
+          </li>
+        </Link>
+        <Link to={`/${org}`}>
+          <li
+            className={`flex${!settings ? "" : " bg-[#323b49]"} px-2 rounded-box`}
+          >
+            <Settings />
+            <span>Settings</span>
           </li>
         </Link>
       </ul>
@@ -188,11 +199,11 @@ export const SidebarContentClasses = () => {
   )
 }
 
-export const SidebarContentOrgs = () => {
+export const SidebarContentOrgs = ({ selected }) => {
   return (
     <>
       <ClassroomLogo />
-      <MyOrgs />
+      <MyOrgs settings={selected === "settings"} />
       <SidebarFooter />
     </>
   )
