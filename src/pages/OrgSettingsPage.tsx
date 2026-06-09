@@ -5,12 +5,13 @@ import Drawer, {
   DrawerToggle,
 } from "@/components/drawer"
 import { useParams } from "@tanstack/react-router"
-import { useMutation } from "@tanstack/react-query"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { putRepoSecret } from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 
 const OrgSettingsPage = () => {
   const client = useGitHubClient()
+  const queryClient = useQueryClient()
   const { org } = useParams({ strict: false })
   const [collectToken, setCollectToken] = useState("")
   const [patSaved, setPatSaved] = useState(false)
@@ -28,6 +29,7 @@ const OrgSettingsPage = () => {
     onSuccess: () => {
       setCollectToken("")
       setPatSaved(true)
+      queryClient.invalidateQueries({ queryKey: ["orgs"] })
     },
   })
 
