@@ -2320,7 +2320,6 @@ export type InitStepId =
   | "workflowPermissions"
   | "reusableWorkflowAccess"
   | "pages"
-  | "collectToken"
 
 export type InitStepUpdate = {
   id: InitStepId
