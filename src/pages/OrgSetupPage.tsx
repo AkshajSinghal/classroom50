@@ -16,6 +16,7 @@ import {
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { AlertCircle, AlertTriangle, CheckCircle } from "lucide-react"
+import { OrgSettingsPane } from "./OrgSettingsPage"
 
 const InitStep = ({
   title,
@@ -70,22 +71,34 @@ const INIT_STEP_ORDER: InitStepId[] = [
   "reusableWorkflowAccess",
   "pages",
 ]
-const OrgSteps = ({ steps, mutation, nextStep = false, org = "" }) => {
+const OrgSteps = ({
+  steps,
+  mutation,
+  nextStep = false,
+  org = "",
+  stage = 1,
+  setStage = (num: number) => {},
+}) => {
   return (
     <div className="card border border-base-300 bg-base-100 shadow-sm">
       <div className="card-body gap-5">
-        <div className="flex justify-between">
-          <div>
-            <h2 className="card-title">Setup Classroom 50</h2>
-            <p className="text-sm text-base-content/70">
-              This will set up your GitHub organization to use Classroom 50.
-            </p>
-          </div>
-          <div className="card-actions justify-end">
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center">
+          <ul className="steps steps-horizontal col-start-2 justify-self-center">
+            <li
+              className={`step ${stage === 1 ? "step-info" : "step-success"}`}
+            ></li>
+            <li
+              className={`step ${stage === 2 ? "step-info" : stage === 3 ? "step-success" : "[--step-bg: #eee]"}`}
+            ></li>
+            <li
+              className={`step ${stage === 3 ? "step-primary" : "[--step-bg: #eee]"}`}
+            ></li>
+          </ul>
+          <div className="card-actions col-start-3 justify-self-end">
             {!nextStep ? (
               <button
                 disabled={mutation.isPending}
-                className="btn btn-primary"
+                className="btn btn-primary ml-auto"
                 onClick={mutation.mutateAsync}
               >
                 {mutation.isPending ? (
@@ -95,27 +108,42 @@ const OrgSteps = ({ steps, mutation, nextStep = false, org = "" }) => {
                 )}
               </button>
             ) : (
-              <Link className="btn btn-primary" to={`/${org}/settings`}>
-                Next
-              </Link>
+              <></>
             )}
           </div>
         </div>
 
-        <div className="grid gap-3">
-          {INIT_STEP_ORDER.map((id) => {
-            const step = steps[id]
+        {stage === 1 ? (
+          <div className="grid gap-3">
+            {INIT_STEP_ORDER.map((id) => {
+              const step = steps[id]
 
-            return (
-              <InitStep
-                key={step.id}
-                title={step.title ?? step.id}
-                status={step.status}
-                description={step.message ?? step.error}
-              />
-            )
-          })}
-        </div>
+              return (
+                <InitStep
+                  key={step.id}
+                  title={step.title ?? step.id}
+                  status={step.status}
+                  description={step.message ?? step.error}
+                />
+              )
+            })}
+          </div>
+        ) : stage === 2 ? (
+          <div className="px-20">
+            <OrgSettingsPane onSubmit={() => setStage(3)} />
+          </div>
+        ) : (
+          <div className="alert alert-success">
+            <div>
+              You have finished setting up your organization for Classroom 50.
+              Please click{" "}
+              <Link className="underline" to={`/${org}`}>
+                here
+              </Link>{" "}
+              to view your organization and its classrooms.
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -208,11 +236,14 @@ const OrgSetupPage = () => {
     useGetOrgPlanDetails(org)
   const [nextStep, setNextStep] = useState(false)
 
+  // 1 = init classroom50 repo etc
+  // 2 = PAT
+  // 3 = finished
+  const [currentStage, setCurrentStage] = useState(1)
+
   const mutation = useMutation({
     mutationFn: async () => {
-      console.log("triggering mutation")
       if (!org) {
-        console.log("org missing", org)
         return
       }
       return initClassroom50({
@@ -230,6 +261,7 @@ const OrgSetupPage = () => {
         queryKey: ["orgs"],
       })
       setNextStep(true)
+      setCurrentStage(2)
     },
   })
 
@@ -243,6 +275,12 @@ const OrgSetupPage = () => {
       <Drawer>
         <DrawerToggle />
         <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
+          <div className="mb-8">
+            <h1 className="font-bold text-2xl">Setup Classroom 50</h1>
+            <p className="text-sm text-base-content/70">
+              This will set up your GitHub organization to use Classroom 50.
+            </p>
+          </div>
           {!isLoadingPlanDetails && !isTeamOrEnterprise && (
             <NotTeamOrEnterpriseWarning />
           )}
@@ -254,6 +292,8 @@ const OrgSetupPage = () => {
               mutation={mutation}
               nextStep={nextStep}
               org={org}
+              setStage={setCurrentStage}
+              stage={currentStage}
             />
           )}
         </DrawerContent>

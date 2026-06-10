@@ -171,18 +171,6 @@ export const MyClasses = ({ settings = false, selected = "" }) => {
             <span>My Classes</span>
           </li>
         </Link>
-        {org ? (
-          <Link to={`/${org}/settings`}>
-            <li
-              className={`flex${!(settings || selected === "settings") ? "" : " bg-[#323b49]"} px-2 rounded-box`}
-            >
-              <Settings />
-              <span>Settings</span>
-            </li>
-          </Link>
-        ) : (
-          <></>
-        )}
       </ul>
     </div>
   )
@@ -202,18 +190,6 @@ export const MyOrgs = ({ settings = false }) => {
             <span>Organizations</span>
           </li>
         </Link>
-        {org ? (
-          <Link to={`/${org}/settings`}>
-            <li
-              className={`flex${!settings ? "" : " bg-[#323b49]"} px-2 rounded-box`}
-            >
-              <Settings />
-              <span>Settings</span>
-            </li>
-          </Link>
-        ) : (
-          <></>
-        )}
       </ul>
     </div>
   )
