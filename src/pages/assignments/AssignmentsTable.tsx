@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "@tanstack/react-router"
+import { useNavigate } from "@tanstack/react-router"
 import { UserRound, UsersRound } from "lucide-react"
 
 import useGetScores from "@/hooks/useGetScores"
@@ -19,7 +19,7 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
 
   return (
     <div className="overflow-x-auto rounded-box border border-base-content/5 bg-base-100">
-      <div className="table">
+      <table className="table">
         <thead>
           <tr>
             <th>Assignment</th>
@@ -38,6 +38,7 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
           )}
           {assignments?.map((assignment) => (
             <tr
+              key={assignment.slug}
               className="hover:cursor-pointer hover:bg-[#fafafa]"
               onClick={() =>
                 navigate({
@@ -62,9 +63,7 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
               </td>
               <td>
                 <span className="badge badge-soft">
-                  {assignment.due_date
-                    ? formatDate(assignment.due_date)
-                    : "Invalid Date"}
+                  {assignment.due ? formatDate(assignment.due) : "No due date"}
                 </span>
               </td>
               <td>
@@ -87,7 +86,7 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
             </tr>
           ))}
         </tbody>
-      </div>
+      </table>
     </div>
   )
 }
