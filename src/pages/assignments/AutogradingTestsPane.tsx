@@ -65,7 +65,12 @@ const AutogradingTestModal = ({
 
     for (const fieldName of VALIDATED_FIELDS) {
       const message = errors[fieldName]
-      form.setFieldMeta(`tests[${index}].${fieldName}`, (meta) => ({
+      const key = `tests[${index}].${fieldName}`
+      // Fields that never mounted (e.g. exit code on an io test, or the
+      // not-yet-built fixture-file inputs) have no meta to update — and
+      // nowhere to display an error anyway.
+      if (!form.getFieldMeta(key)) continue
+      form.setFieldMeta(key, (meta) => ({
         ...meta,
         errorMap: { ...meta.errorMap, onSubmit: message },
       }))
