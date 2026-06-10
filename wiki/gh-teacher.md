@@ -24,7 +24,10 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | `gh teacher roster add <org> <classroom> <username>` | Append or upsert a student in `students.csv`; resolves `github_id`, sends an org invite if needed. Optional flags: `--first-name`, `--last-name`, `--email`, `--section`. |
 | `gh teacher roster remove <org> <classroom> <username>` | Remove a row from `students.csv`. Does NOT touch org membership. Idempotent. |
 | `gh teacher roster import <org> <classroom> <path-to-csv>` | Bulk upsert from a local CSV (`username,first_name,last_name,email,section` header; trailing `github_id` accepted but ignored). One Tree commit; auto-invites new students. |
-| `gh teacher assignment add <org> <classroom> <slug>` | Register or upsert an assignment in `assignments.json`. Required flags: `--name`, `--template`. Optional: `--description`, `--due` (ISO-8601), `--mode` (only `individual` currently supported), `--runtime <path-to-json>` (per-assignment runtime: `runs-on`, language toolchains, apt packages, container image), `--autograder <name>` (default `default`; non-default values reference a sibling shim at `<classroom>/autograders/<name>.yaml`). Per-assignment grading logic is NOT registered here — drop an `autograder.py` (and any sibling fixtures) under `<classroom>/autograders/<slug>/` in the config repo, or set a classroom default with `gh teacher autograder set-default`. |
+| `gh teacher assignment add <org> <classroom> <slug>` | Register or upsert an assignment in `assignments.json`. Required flags: `--name`, `--template`. Optional: `--description`, `--due` (ISO-8601), `--mode` (only `individual` currently supported), `--runtime <path-to-json>` (per-assignment runtime: `runs-on`, language toolchains, apt packages, container image), `--tests <path-to-json>` (declarative io/run/python tests, graded with no `autograder.py`), `--autograder <name>` (default `default`; non-default values reference a sibling shim at `<classroom>/autograders/<name>.yaml`). Custom grading code is NOT registered here — drop an `autograder.py` (and any sibling fixtures) under `<classroom>/autograders/<slug>/` in the config repo, or set a classroom default with `gh teacher autograder set-default`. |
+| `gh teacher assignment test add <org> <classroom> <slug>` | Add or update one declarative test on an existing assignment's `tests` block. Required flags: `--name`, `--type {io,run,python}`, `--run`. Optional: `--setup`, `--input`/`--input-file`, `--expected`/`--expected-file`, `--comparison {included,exact,regex}`, `--timeout`, `--exit-code`, `--points`. Mutually exclusive with a per-assignment `autograder.py`. |
+| `gh teacher assignment test list <org> <classroom> <slug>` | Print the declarative test names on an assignment, one per line. `--json` for the full spec array, `-q` to suppress the stderr summary. Read-only. |
+| `gh teacher assignment test remove <org> <classroom> <slug> <test-name>` | Drop one declarative test by name. Idempotent. |
 | `gh teacher autograder set-default <org> <classroom>` | Drop a default `autograder.py` at `<classroom>/autograder.py` in the config repo. With `--from <path>` (or `--from -` for stdin), uploads the given Python source. Without `--from`, installs a diagnostic stub that echoes runner metadata and emits a vacuous-pass `result.json` — useful for verifying the runner pipeline before authoring real grading logic. |
 | `gh teacher assignment remove <org> <classroom> <slug>` | Drop an assignment entry from `assignments.json`. Does NOT touch existing student repos. Idempotent. |
 | `gh teacher assignment list <org> <classroom>` | Print every assignment slug registered in `assignments.json`, one per line on stdout. Pass `--json` for the full entries array, `-q` to suppress the stderr summary. Read-only. |
@@ -246,12 +249,12 @@ Writes flow through the same optimistic-update-with-rebase loop the roster comma
 ### `gh teacher assignment add`
 
 ```sh
-gh teacher assignment add <org> <classroom> <slug> --name "<name>" --template <owner>/<repo>[@branch] [--description <text>] [--due <ISO-8601>] [--mode individual] [--runtime <path-to-json>] [--autograder <name>]
+gh teacher assignment add <org> <classroom> <slug> --name "<name>" --template <owner>/<repo>[@branch] [--description <text>] [--due <ISO-8601>] [--mode individual] [--runtime <path-to-json>] [--tests <path-to-json>] [--autograder <name>]
 gh teacher assignment add cs50-fall-2026 cs-principles hello --name "Hello" --template cs50/hello-template --due 2026-09-15T23:59:00-04:00
 gh teacher assignment add cs50-fall-2026 cs-principles intro --name "Intro" --template cs50/intro-template@main --runtime ./runtime-c.json
 ```
 
-Register or upsert one assignment. Idempotent on re-run: the same `slug` replaces the existing entry in place (position-preserving), a new `slug` appends.
+Register or upsert one assignment. Idempotent on re-run: the same `slug` replaces the existing entry in place (position-preserving), a new `slug` appends. Replacement is wholesale — re-running without `--tests` drops any tests previously added via `gh teacher assignment test add` (the CLI prints a warning when that happens).
 
 **Slug rules** (same as classroom short-names): `^[a-z0-9][a-z0-9-]{1,38}$`, 2-39 chars, lowercase letters/digits/hyphens, starting with a letter or digit. The slug becomes part of the student repo name `<classroom>-<slug>-<username>`, so the constraint mirrors GitHub's repo-name rules.
 
@@ -266,9 +269,16 @@ Register or upsert one assignment. Idempotent on re-run: the same `slug` replace
 - `--due <ISO-8601>` — due date in RFC 3339 form, e.g. `2026-09-15T23:59:00-04:00`. The timezone is required. Stored verbatim, so a teacher's choice of offset round-trips through the file.
 - `--mode individual` — `individual` is the only currently-supported value; `group` is planned for a future release and produces an explicit error today.
 - `--runtime <path>` — JSON file describing the runtime environment for this assignment's autograde job. Supports `runs-on` (allow-listed GitHub-hosted runner labels only), `python` / `node` / `java` / `go` toolchain versions, `apt` packages, and an escape-hatch `container` image. Omit for the defaults (ubuntu-latest + Python 3.12). See the [Autograders](Autograders) wiki page for the schema and worked examples.
+- `--tests <path>` — JSON file with a bare array of declarative test specs (`io` / `run` / `python`), or `-` for stdin. Replaces the entry's whole `tests` block — the bulk counterpart to `gh teacher assignment test add`, in the same shape `assignment test list --json` emits. Mutually exclusive with a per-assignment `autograder.py`. See the [Autograders](Autograders) wiki page for the field reference.
 - `--autograder <name>` — reserved for the rare case where you want to call a different *reusable workflow* entirely (not just different language toolchains — for that, use `--runtime`). The default `default` resolves to the universal shim embedded in `gh-student`. Non-default values reference a sibling shim at `<classroom>/autograders/<name>.yaml` in the config repo; the referenced file must exist at write time.
 
-**Where grading logic lives.** Per-assignment grading is NOT registered through this command. Drop an `autograder.py` (Python script that produces `result.json`) at `<classroom>/autograders/<slug>/autograder.py` in the config repo — sibling fixtures and helpers go in the same folder and ride along in the bundle. Or run `gh teacher autograder set-default <org> <classroom>` to install a classroom default at `<classroom>/autograder.py` (used for every assignment in the classroom that has no per-assignment override). See the [Autograders](Autograders) wiki page for the entrypoint contract and copy-pasteable templates (pytest, check50, custom).
+**Where grading logic lives.** Three options, in increasing order of effort:
+
+1. **Declarative tests** — pass `--tests` here (or use `gh teacher assignment test add`) to describe io/run/python checks the runner grades with no grading code.
+2. **Per-assignment `autograder.py`** — a Python script that produces `result.json`, dropped at `<classroom>/autograders/<slug>/autograder.py` in the config repo. Sibling fixtures and helpers ride along in the bundle. Mutually exclusive with declarative tests.
+3. **Classroom default** — `gh teacher autograder set-default <org> <classroom>` installs `<classroom>/autograder.py`, used by every assignment that has neither of the above.
+
+See the [Autograders](Autograders) wiki page for the entrypoint contract and copy-pasteable templates (pytest, check50, custom).
 
 **Errors:**
 
@@ -278,6 +288,9 @@ Register or upsert one assignment. Idempotent on re-run: the same `slug` replace
 - Template repo exists but `is_template: false` → message naming the Settings toggle to flip.
 - `--autograder <name>` (non-default) references a file that doesn't exist in the config repo at write time → `autograder "<name>" does not exist at <org>/classroom50/<classroom>/autograders/<name>.yaml — create it (or pass --autograder default) before registering this assignment`. The default name resolves to the embedded gh-student shim and skips the file-existence probe.
 - `--runtime <path>` JSON fails the schema or allow-list (e.g. self-hosted `runs-on`, malformed apt name, raw token in container credentials) → an error naming the offending field, with the path to the JSON file.
+- `--tests <path>` JSON fails validation (unknown field, bad `type`/`comparison`, out-of-bounds timeout/points, duplicate names) → an error naming the offending test and field, with the path to the JSON file.
+- `--tests` passed while `<classroom>/autograders/<slug>/autograder.py` exists → `declarative tests and a hand-written autograder.py are mutually exclusive`, with the conflicting path.
+- `--tests` passed but the config repo is missing `.github/scripts/materialize_tests.py` (skeleton predates declarative tests, so they would never run) → an error pointing at `gh teacher init` to update the skeleton. Applies to `gh teacher assignment test add` too.
 - Repeated rebase failures (5 attempts with exponential backoff) → `lost the rebase race` with a retry hint.
 
 **Same-slug concurrent writes.** The rebase loop handles concurrent edits to *different* slugs cleanly — each teacher's retry sees the other's commit and re-applies their own upsert. For concurrent edits to the *same* slug (two teachers running `gh teacher assignment add hello ...` within the rebase window), the contract is last-writer-wins: the loser's retry observes the winner's entry and replaces it with theirs, without an on-CLI signal. Both commits remain in the config repo's git history, so a teacher who notices an unexpected overwrite can recover with `git revert` on the config repo.
@@ -302,14 +315,38 @@ Read-only enumeration of every slug registered in `<org>/classroom50/<classroom>
 
 **Flags:**
 
-- `--json` — emit the full JSON array of assignment entries instead of one slug per line. Preserves every field (template ref, due, mode, autograder) so an agent can introspect the manifest without a second API call. Output matches the on-disk indent so `jq` pipes work without reformatting.
+- `--json` — emit the full JSON array of assignment entries instead of one slug per line. Preserves every field (template ref, due, mode, autograder, runtime, tests) so an agent can introspect the manifest without a second API call. Output matches the on-disk indent so `jq` pipes work without reformatting.
 - `--quiet` / `-q` — suppress the one-line stderr summary (`<repo-path>: N assignments`). Use this when capturing stdout from a script that should not have to filter mixed streams.
 
 **Errors:** same shape as `add` and `remove` — missing config repo points at `gh teacher init`, missing `assignments.json` points at `gh teacher classroom add`. Exits 0 with empty stdout when the classroom has no assignments yet (the stderr summary, when not suppressed, hints at `gh teacher assignment add` for the next step).
 
+### `gh teacher assignment test`
+
+```sh
+gh teacher assignment test add <org> <classroom> <slug> --name "<name>" --type {io,run,python} --run "<command>" [--setup <cmd>] [--input <text> | --input-file <name>] [--expected <text> | --expected-file <name>] [--comparison {included,exact,regex}] [--timeout <seconds>] [--exit-code <n>] [--points <n>]
+gh teacher assignment test list <org> <classroom> <slug> [--json] [-q]
+gh teacher assignment test remove <org> <classroom> <slug> <test-name>
+
+gh teacher assignment test add cs50-fall-2026 cs-principles hello \
+    --name compiles --type run --run "gcc -o hello hello.c" --points 1
+gh teacher assignment test add cs50-fall-2026 cs-principles hello \
+    --name "prints hello" --type io --setup "gcc -o hello hello.c" \
+    --run ./hello --expected "Hello, world!" --comparison included --points 2
+```
+
+Manage the **declarative `tests` block** on an existing assignment — GitHub Classroom-style io / run / python checks the runner grades with a built-in interpreter, no `autograder.py` needed. On the next config-repo push, publish-pages materializes the block into the assignment's Pages bundle as `tests.json`; grading picks it up on the submission after that. See the [Autograders](Autograders) wiki page for the field reference, comparison semantics, and precedence rules.
+
+- **`add`** upserts one test by `--name`: the same name replaces in place, a new name appends. The slug must already be registered (`gh teacher assignment add` first). Refused while a hand-written `<classroom>/autograders/<slug>/autograder.py` exists — the runner prefers `autograder.py`, so the tests would silently never run.
+- **`list`** prints test names one per line on stdout (pipeable into `remove`); `--json` emits the full spec array (`[]` when empty), `-q` suppresses the stderr summary. Read-only.
+- **`remove`** drops one test by name. Idempotent: an already-absent name exits 0 with a note and lands no commit. Errors only if the slug itself isn't registered.
+
+For bulk edits (or a GUI/agent export), `gh teacher assignment add ... --tests <file.json>` replaces the whole array in one write.
+
+Writes flow through the same optimistic-rebase loop as every other `assignments.json` edit; the conflict probe and slug lookup re-run against each attempt's parent commit, so concurrent edits rebase cleanly.
+
 ## `gh teacher autograder`
 
-Manage the **classroom default autograder** at `<classroom>/autograder.py`. The runner uses this script for every assignment in the classroom that has no per-assignment override under `<classroom>/autograders/<slug>/`.
+Manage the **classroom default autograder** at `<classroom>/autograder.py`. The runner uses this script for every assignment in the classroom that has neither a per-assignment override under `<classroom>/autograders/<slug>/` nor a declarative `tests` block on its entry.
 
 ### `gh teacher autograder set-default`
 

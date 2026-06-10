@@ -4,7 +4,7 @@ How Classroom 50 grades student submissions, and how teachers customize.
 
 ## Architecture in one paragraph
 
-Every push to a student's `main` branch triggers the **shim workflow** at `.github/workflows/autograde.yaml` in their assignment repo. The shim is ~20 lines and does one thing: it `uses:` the **autograde-runner** reusable workflow in your config repo (`<org>/classroom50/.github/workflows/autograde-runner.yaml@main`). The runner workflow's `setup` job creates a `submit/<UTC-timestamp>-<short-sha>` tag at the pushed commit, reads `assignments.json` from Pages, and emits the assignment's runtime block as job outputs. The `grade` job runs on the chosen runner (or container), conditionally sets up language toolchains and apt packages, fetches the **runner script** (`runner.py`) from Pages, and executes it. `runner.py` downloads the per-assignment bundle (also from Pages), resolves the **entrypoint** (the bundled `autograder.py` if present, otherwise the classroom default at `<classroom>/autograder.py`), and execs it with helper env vars and `cwd` at the student's repo checkout. When neither exists, the runner synthesizes a vacuous-pass `result.json` so the workflow still publishes the submit-tag release with a clear "no autograder configured" status. The autograder writes `./result.json` (and optionally `./release-body.md` + `status=`/`summary=` to `$GITHUB_OUTPUT`); `runner.py` validates and synthesizes anything missing. The workflow then posts a commit status and publishes a GitHub Release at the submit tag with `result.json` attached. A small follow-up `set-latest` job, serialized via a per-repo concurrency group, flips the "latest" release pointer forward exactly once at a time. The **`collect-scores.yaml`** workflow on the config repo aggregates each release's `result.json` into `<classroom>/scores.json`.
+Every push to a student's `main` branch triggers the **shim workflow** at `.github/workflows/autograde.yaml` in their assignment repo. The shim is ~20 lines and does one thing: it `uses:` the **autograde-runner** reusable workflow in your config repo (`<org>/classroom50/.github/workflows/autograde-runner.yaml@main`). The runner workflow's `setup` job creates a `submit/<UTC-timestamp>-<short-sha>` tag at the pushed commit, reads `assignments.json` from Pages, and emits the assignment's runtime block as job outputs. The `grade` job runs on the chosen runner (or container), conditionally sets up language toolchains and apt packages, fetches the **runner script** (`runner.py`) from Pages, and executes it. `runner.py` downloads the per-assignment bundle (also from Pages), resolves the **entrypoint** — a bundled per-assignment `autograder.py`, else a bundled `tests.json` ([declarative tests](#declarative-tests-no-autograderpy), graded in-process), else the classroom default at `<classroom>/autograder.py` — and execs it with helper env vars and `cwd` at the student's repo checkout. When none of those exist, the runner synthesizes a vacuous-pass `result.json` so the workflow still publishes the submit-tag release with a clear "no autograder configured" status. The autograder writes `./result.json` (and optionally `./release-body.md` + `status=`/`summary=` to `$GITHUB_OUTPUT`); `runner.py` validates and synthesizes anything missing. The workflow then posts a commit status and publishes a GitHub Release at the submit tag with `result.json` attached. A small follow-up `set-latest` job, serialized via a per-repo concurrency group, flips the "latest" release pointer forward exactly once at a time. The **`collect-scores.yaml`** workflow on the config repo aggregates each release's `result.json` into `<classroom>/scores.json`.
 
 Everything substantive (runner workflow, `runner.py`, classroom-default and per-assignment `autograder.py`, runtime configuration, per-assignment bundle) lives in the config repo and is fetched at workflow runtime, so teacher edits propagate to every existing student repo on the next submission with zero per-student-repo maintenance.
 
@@ -58,6 +58,94 @@ This is the **only** contract every autograder must satisfy. Whatever produces i
 
 `collect-scores.yaml` validates this payload before merging into `scores.json`. Mismatches against the source repo's identity (classroom/assignment/username triple) are rejected with a warning.
 
+## Declarative tests (no `autograder.py`)
+
+The lowest-friction way to grade: describe input/output, run-command, and pytest checks directly on the assignment's entry in `assignments.json`, and the runner grades them with a built-in interpreter — no grading code to write. The three test types map one-to-one onto GitHub Classroom's legacy autograder presets, so migrating classrooms can keep their existing tests.
+
+Author tests one at a time:
+
+```sh
+gh teacher assignment test add cs50-fall-2026 cs-principles hello \
+    --name compiles --type run --run "gcc -o hello hello.c" --points 1
+gh teacher assignment test add cs50-fall-2026 cs-principles hello \
+    --name "prints hello" --type io --setup "gcc -o hello hello.c" \
+    --run ./hello --expected "Hello, world!" --comparison included --points 2
+gh teacher assignment test list cs50-fall-2026 cs-principles hello
+gh teacher assignment test remove cs50-fall-2026 cs-principles hello compiles
+```
+
+Or set the whole array at once with `gh teacher assignment add ... --tests <file.json>` (`--tests -` reads stdin). The file is a bare JSON array of test specs — the same shape `assignment test list --json` emits:
+
+```json
+[
+  { "name": "compiles", "type": "run", "run": "gcc -o hello hello.c", "timeout": 30, "points": 1 },
+  { "name": "prints Hello, world!", "type": "io", "setup": "gcc -o hello hello.c",
+    "run": "./hello", "expected": "Hello, world!", "comparison": "included", "points": 2 },
+  { "name": "greets by name", "type": "io", "setup": "gcc -o hello hello.c",
+    "run": "./hello", "input": "Alice\n", "expected": "^hello,\\s+Alice\\b",
+    "comparison": "regex", "points": 2 },
+  { "name": "pytest suite", "type": "python",
+    "setup": "pip install --quiet pytest pytest-json-report",
+    "run": "python -m pytest -q", "timeout": 120, "points": 10 }
+]
+```
+
+### How it flows
+
+The tests live inline on the assignment's entry in `assignments.json`. On the next config-repo push, the publish-pages workflow **materializes** them into `<classroom>/autograders/<slug>/tests.json` and tars that into the per-assignment Pages bundle, alongside any fixture files in the same directory. At grade time, `runner.py` runs each spec in the student checkout: one row per test in `result.json`, plus a pass/fail breakdown in the release body with a truncated expected-vs-actual diff for each failure.
+
+Test commands are teacher-authored shell, executed at the same privilege as a hand-written `autograder.py` — inside the sandboxed grade job, fetched as data from Pages, never interpolated into workflow YAML. Students can't edit `assignments.json`; it lives in your config repo.
+
+### Test types
+
+| Type | Pass criterion | Type-specific fields |
+|---|---|---|
+| `io` | stdout of `run` matches `expected` per `comparison` | `input` / `input-file`, `expected` / `expected-file`, `comparison` |
+| `run` | exit code of `run` equals `exit-code` (default 0) | `exit-code` |
+| `python` | pytest passes; points split across cases as `points × passed/total` (needs `pytest-json-report`; without it, all-or-nothing on exit code) | — |
+
+### Fields
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | string | Required. Unique within the assignment (it's the test's identity in `result.json`), ≤ 100 bytes (UTF-8), no control characters. |
+| `type` | string | Required. `io`, `run`, or `python`. |
+| `run` | string | Required. Shell command, executed in the student checkout. |
+| `setup` | string | Optional pre-command (e.g. compile). Non-zero exit fails the test with captured stderr. |
+| `input` / `input-file` | string | `io` only, mutually exclusive. Inline stdin, or a fixture file bundled from `<classroom>/autograders/<slug>/`. |
+| `expected` / `expected-file` | string | `io` only, mutually exclusive. Inline expected stdout, or a bundled fixture. Must be non-empty for `included`/`regex` — an empty expected would match everything. |
+| `comparison` | string | `io` only. `included` (substring), `exact` (equal after trimming surrounding whitespace), or `regex` (Python `re.search` with `re.MULTILINE`, so `^`/`$` anchor at line boundaries and lookaround/backreferences work; a malformed pattern surfaces as a failing test, not a write error). |
+| `timeout` | int | Seconds, 1–600. Omit (or 0) for the default of 10s. Applies to `setup` and `run` separately. |
+| `exit-code` | int | `run` only, 0–255. Omit to require 0. |
+| `points` | int | Required, 0–1000. 0-point tests are informational. |
+
+At most 100 tests per assignment. Large fixtures belong in files (`input-file` / `expected-file`) committed under `<classroom>/autograders/<slug>/` rather than inline, so `assignments.json` stays well under the contents-API size ceiling.
+
+### Precedence and the conflict rule
+
+Entrypoint resolution order in `runner.py`:
+
+1. Bundled per-assignment `autograder.py` — a hand-written override always wins (the escape hatch).
+2. Bundled per-assignment `tests.json` — the declarative grader.
+3. Classroom default `<classroom>/autograder.py`.
+4. None of the above — vacuous pass.
+
+Tests beat the classroom default (more specific intent); a per-assignment `autograder.py` beats tests. So that precedence never silently swallows anyone's tests, the CLI refuses `assignment test add` and `assignment add --tests` while `<classroom>/autograders/<slug>/autograder.py` exists. When declarative tests can't express what you need, remove them and graduate to an `autograder.py`.
+
+### Validation
+
+Specs are validated three times, mirroring the `runtime:` block's discipline. The CLI checks at write time (enums, bounds, name uniqueness, field applicability). The inline validator in `autograde-runner.yaml` re-checks at submission setup, so a hand-edited `assignments.json` fails with a clear `::error::` instead of mid-grade. And `runner.py` re-checks the materialized `tests.json` before executing, turning a malformed file into a `status=error` release rather than a crash.
+
+### For other clients (GUI)
+
+Anything that writes a valid `assignments.json` gets the whole pipeline for free — materialization and grading don't care who authored the file. A non-CLI client (e.g. the web UI) should:
+
+1. Validate against [`schemas/assignments-v1.schema.json`](https://github.com/foundation50/classroom50/blob/main/schemas/assignments-v1.schema.json) before writing (a JSON Schema mirroring the CLI's validators; usable directly with `ajv`). Two rules it can't express: test names must be unique within an assignment, and name length is capped at 100 UTF-8 *bytes*.
+2. Probe before writing tests, exactly like the CLI: `<classroom>/autograders/<slug>/autograder.py` must NOT exist (mutual exclusion), and `.github/scripts/materialize_tests.py` MUST exist (skeleton supports materialization).
+3. Write via the git-data API against the current branch tip and retry on a non-fast-forward rejection — the read-modify-write loop in `cli/gh-teacher/tree_commit.go` is the reference implementation.
+
+The CLI must stay interoperable with the file afterwards, and it parses strictly (unknown fields are rejected) — so only schema fields may be persisted. `examples/declarative-tests/tests.json` is a canonical fixture covering every test feature.
+
 ## Writing an `autograder.py`
 
 The autograder is a Python script the runner invokes once per submission. There are two scopes:
@@ -65,9 +153,10 @@ The autograder is a Python script the runner invokes once per submission. There 
 | Path | Scope | Resolution |
 |---|---|---|
 | `<classroom>/autograders/<slug>/autograder.py` | One assignment | Used if present in the bundle |
-| `<classroom>/autograder.py` | One classroom | Falls back to this when no per-assignment override exists |
+| `<classroom>/autograders/<slug>/tests.json` | One assignment | [Declarative tests](#declarative-tests-no-autograderpy), materialized from `assignments.json`; used when no per-assignment `autograder.py` exists |
+| `<classroom>/autograder.py` | One classroom | Falls back to this when the assignment has neither of the above |
 
-If neither exists, the runner synthesizes a vacuous-pass result (status=`success`, score 0/0, summary "submitted — no autograder configured for `<slug>`") and the submission still lands as a tagged release. "No autograder configured" is a valid mid-setup state — classrooms work end-to-end before any grading code is written.
+If none exist, the runner synthesizes a vacuous-pass result (status=`success`, score 0/0, summary "submitted — no autograder configured for `<slug>`") and the submission still lands as a tagged release. "No autograder configured" is a valid mid-setup state — classrooms work end-to-end before any grading code is written.
 
 Replace the classroom default to grade every assignment in the classroom with one script (e.g., a slug-driven dispatcher that calls a third-party grader like `check50`); add per-assignment overrides only where individual assignments diverge from the classroom default.
 
@@ -280,12 +369,13 @@ For a private image, supply pull credentials. Passwords must be `${{ secrets.NAM
 
 | What you want to change | Where to edit it | Propagation |
 |---|---|---|
-| **Grading logic for one assignment** | `<classroom>/autograders/<slug>/autograder.py` | Next submission |
+| **Simple checks for one assignment, no grading code** | `tests:` block in the matching `assignments.json` entry (via `gh teacher assignment test add` / `--tests`) | Next config-repo Pages publish, then next submission |
+| **Grading logic for one assignment** | `<classroom>/autograders/<slug>/autograder.py` (mutually exclusive with the `tests:` block) | Next submission |
 | **Grading logic shared across one classroom** | `<classroom>/autograder.py` (set via `gh teacher autograder set-default`; can branch on `ASSIGNMENT` to handle slug differences) | Next submission |
 | **Runtime environment for one assignment** | `runtime:` block in the matching `assignments.json` entry | Next submission |
 | **Runtime environment shared across many assignments** | Repeat the `runtime:` block on each entry, or pick a container image that covers everyone | Next submission |
 
-All four layers live in the config repo. None require any change in any student repo.
+All five layers live in the config repo. None require any change in any student repo.
 
 The runner workflow file itself (`autograde-runner.yaml`) is the right place to edit only when you need to add a language toolchain GitHub doesn't ship a setup-X action for, or change the post-grade publish steps. For everything else, `autograder.py` + the `runtime:` block cover the cases.
 
@@ -308,6 +398,8 @@ The runner synthesizes a v1-shaped `result.json` on every error path so the work
 | `.classroom50.yaml` is missing or corrupt | Runner setup exits with `::error::`; commit status = `error`; **no release published** (debug from Actions UI) |
 | `assignments.json` returns 404 | Same — `::error::` from runner setup with the missing URL |
 | `runtime` block contains a disallowed value | Same — `::error::` naming the offending field |
+| `tests` block fails structural validation (hand-edited `assignments.json`) | Same — `::error::` from runner setup naming the offending test/field |
+| Bundled `tests.json` is malformed at grade time | Runner synthesizes `result.json` with `status=error` and a clear message; **release publishes** |
 | Auto-tag step fails | Setup job fails before grading starts; no commit status, no release |
 | `runner.py` returns 404 | Setup succeeds but the grade job's curl exits non-zero; commit status = `error`; **no release published** |
 | Bundle fetch fails (network, corruption) | Runner synthesizes `result.json` with empty tests + `status=error`; **release publishes** with the failure summary so collect-scores still ingests as "submitted, error" |
