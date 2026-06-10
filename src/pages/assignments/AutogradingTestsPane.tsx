@@ -1,13 +1,29 @@
 import { useEffect, useRef, useState } from "react"
-import type { AssignmentTest } from "@/types/classroom"
 import { Pencil, Trash } from "lucide-react"
 
-const emptyTest = (): AssignmentTest => ({
-  name: "",
-  input: "",
-  output: "",
-  points: 10,
-})
+import type { AssignmentTestDraft } from "@/util/assignmentTests"
+import { emptyTestDraft } from "@/util/assignmentTests"
+
+const TYPE_OPTIONS = [
+  {
+    value: "io",
+    label: "Input/Output",
+    hint: "Run a command, feed it stdin, and compare its stdout against an expected value.",
+  },
+  {
+    value: "run",
+    label: "Run command",
+    hint: "Run a command and pass when its exit code matches (0 by default).",
+  },
+  {
+    value: "python",
+    label: "Python (pytest)",
+    hint: "Run a pytest command; points are split across discovered test cases at grade time.",
+  },
+] as const
+
+const FieldError = ({ error }: { error?: string }) =>
+  error ? <p className="text-error text-sm mt-1">{error}</p> : null
 
 type AutogradingTestModalProps = {
   form: any
@@ -29,8 +45,8 @@ const AutogradingTestModal = ({
         <div className="mb-6">
           <h3 className="text-lg font-bold">Edit Test {index + 1}</h3>
           <p className="text-sm opacity-70">
-            Define the input, expected output, and point value for this
-            autograding test.
+            Pick a test type, then fill in the command and pass criteria.
+            Commands run in the student&apos;s repository checkout.
           </p>
         </div>
 
@@ -46,62 +62,233 @@ const AutogradingTestModal = ({
                   onChange={(e) => field.handleChange(e.target.value)}
                   placeholder="e.g., Prints hello"
                 />
+                <FieldError error={field.state.meta.errors[0]} />
               </div>
             )}
           </form.Field>
 
-          <form.Field name={`tests[${index}].input`}>
+          <form.Field name={`tests[${index}].type`}>
             {(field) => (
               <div>
-                <label className="label font-bold">Input / Command</label>
-                <textarea
-                  className="textarea w-full font-mono"
-                  value={field.state.value}
-                  onBlur={field.handleBlur}
-                  onChange={(e) => field.handleChange(e.target.value)}
-                  placeholder="e.g., python main.py"
-                  rows={5}
-                />
-              </div>
-            )}
-          </form.Field>
-
-          <form.Field name={`tests[${index}].output`}>
-            {(field) => (
-              <div>
-                <label className="label font-bold">Output</label>
-                <textarea
-                  className="textarea w-full font-mono"
-                  value={field.state.value}
-                  onBlur={field.handleBlur}
-                  onChange={(e) => field.handleChange(e.target.value)}
-                  placeholder="Expected stdout"
-                  rows={7}
-                />
-              </div>
-            )}
-          </form.Field>
-
-          <form.Field name={`tests[${index}].points`}>
-            {(field) => (
-              <div className="flex flex-col">
-                <label className="label font-bold">Points</label>
-                <input
-                  className="input w-32"
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={field.state.value}
-                  onBlur={field.handleBlur}
-                  onChange={(e) =>
-                    field.handleChange(
-                      e.target.value === "" ? 0 : e.target.valueAsNumber,
-                    )
+                <label className="label font-bold">Test Type</label>
+                <div className="join w-full">
+                  {TYPE_OPTIONS.map((option) => (
+                    <input
+                      key={option.value}
+                      type="radio"
+                      className="join-item btn btn-sm"
+                      name={`tests-${index}-type`}
+                      aria-label={option.label}
+                      checked={field.state.value === option.value}
+                      onChange={() => field.handleChange(option.value)}
+                    />
+                  ))}
+                </div>
+                <p className="label text-sm pt-1">
+                  {
+                    TYPE_OPTIONS.find((o) => o.value === field.state.value)
+                      ?.hint
                   }
+                </p>
+              </div>
+            )}
+          </form.Field>
+
+          <form.Field name={`tests[${index}].setup`}>
+            {(field) => (
+              <div>
+                <label className="label font-bold">Setup Command</label>
+                <input
+                  className="input w-full font-mono"
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                  placeholder="optional — e.g., gcc -o hello hello.c"
                 />
               </div>
             )}
           </form.Field>
+
+          <form.Field name={`tests[${index}].run`}>
+            {(field) => (
+              <div>
+                <label className="label font-bold">Run Command</label>
+                <input
+                  className="input w-full font-mono"
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                  placeholder="e.g., ./hello or python3 main.py"
+                />
+                <FieldError error={field.state.meta.errors[0]} />
+              </div>
+            )}
+          </form.Field>
+
+          <form.Subscribe
+            selector={(state) => state.values.tests[index]?.type}
+          >
+            {(typeValue) => (
+              <>
+                {typeValue === "io" && (
+                  <>
+                    <form.Field name={`tests[${index}].input`}>
+                      {(field) => (
+                        <div>
+                          <label className="label font-bold">
+                            Input (stdin)
+                          </label>
+                          <textarea
+                            className="textarea w-full font-mono"
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            placeholder="optional — text fed to the command on stdin"
+                            rows={3}
+                          />
+                        </div>
+                      )}
+                    </form.Field>
+
+                    <form.Field name={`tests[${index}].expected`}>
+                      {(field) => (
+                        <div>
+                          <label className="label font-bold">
+                            Expected Output
+                          </label>
+                          <textarea
+                            className="textarea w-full font-mono"
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            placeholder="Expected stdout"
+                            rows={5}
+                          />
+                          <FieldError error={field.state.meta.errors[0]} />
+                        </div>
+                      )}
+                    </form.Field>
+
+                    <form.Field name={`tests[${index}].comparison`}>
+                      {(field) => (
+                        <div>
+                          <label className="label font-bold">Comparison</label>
+                          <select
+                            className="select w-full"
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                          >
+                            <option value="included">
+                              Included — expected appears anywhere in the output
+                            </option>
+                            <option value="exact">
+                              Exact — output equals expected (surrounding
+                              whitespace ignored)
+                            </option>
+                            <option value="regex">
+                              Regex — Python re.search, multiline
+                            </option>
+                          </select>
+                        </div>
+                      )}
+                    </form.Field>
+                  </>
+                )}
+
+                {typeValue === "run" && (
+                  <form.Field name={`tests[${index}].exitCode`}>
+                    {(field) => (
+                      <div className="flex flex-col">
+                        <label className="label font-bold">
+                          Required Exit Code
+                        </label>
+                        <input
+                          className="input w-32"
+                          type="number"
+                          min={0}
+                          max={255}
+                          step={1}
+                          value={field.state.value}
+                          onBlur={field.handleBlur}
+                          onChange={(e) =>
+                            field.handleChange(
+                              e.target.value === ""
+                                ? ""
+                                : e.target.valueAsNumber,
+                            )
+                          }
+                          placeholder="0"
+                        />
+                        <p className="label text-sm pt-1">
+                          Leave empty to require a successful exit (0).
+                        </p>
+                        <FieldError error={field.state.meta.errors[0]} />
+                      </div>
+                    )}
+                  </form.Field>
+                )}
+
+                {typeValue === "python" && (
+                  <p className="rounded-box border border-dashed p-3 text-sm opacity-70">
+                    The run command should invoke pytest (e.g.{" "}
+                    <code>python3 -m pytest -q</code>) against test files in
+                    the assignment template. Points are split across the cases
+                    pytest discovers.
+                  </p>
+                )}
+              </>
+            )}
+          </form.Subscribe>
+
+          <div className="flex gap-8">
+            <form.Field name={`tests[${index}].timeout`}>
+              {(field) => (
+                <div className="flex flex-col">
+                  <label className="label font-bold">Timeout (seconds)</label>
+                  <input
+                    className="input w-32"
+                    type="number"
+                    min={0}
+                    max={600}
+                    step={1}
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) =>
+                      field.handleChange(
+                        e.target.value === "" ? 0 : e.target.valueAsNumber,
+                      )
+                    }
+                  />
+                  <p className="label text-sm pt-1">0 = default (10s)</p>
+                  <FieldError error={field.state.meta.errors[0]} />
+                </div>
+              )}
+            </form.Field>
+
+            <form.Field name={`tests[${index}].points`}>
+              {(field) => (
+                <div className="flex flex-col">
+                  <label className="label font-bold">Points</label>
+                  <input
+                    className="input w-32"
+                    type="number"
+                    min={0}
+                    max={1000}
+                    step={1}
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) =>
+                      field.handleChange(
+                        e.target.value === "" ? 0 : e.target.valueAsNumber,
+                      )
+                    }
+                  />
+                  <FieldError error={field.state.meta.errors[0]} />
+                </div>
+              )}
+            </form.Field>
+          </div>
         </div>
 
         <div className="modal-action">
@@ -118,6 +305,10 @@ const AutogradingTestModal = ({
     </dialog>
   )
 }
+
+const typeBadge = (type: AssignmentTestDraft["type"]) =>
+  TYPE_OPTIONS.find((o) => o.value === type)?.label ?? type
+
 const AutogradingTestsPane = ({ form }) => {
   const dialogRef = useRef<HTMLDialogElement | null>(null)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
@@ -155,7 +346,7 @@ const AutogradingTestsPane = ({ form }) => {
                       <>
                         {tests.length} tests •{" "}
                         {tests.reduce(
-                          (sum: number, test: AssignmentTest) =>
+                          (sum: number, test: AssignmentTestDraft) =>
                             sum + test.points,
                           0,
                         )}{" "}
@@ -171,7 +362,7 @@ const AutogradingTestsPane = ({ form }) => {
                   className="btn btn-primary btn-outline"
                   onClick={() => {
                     const newIndex = field.state.value.length
-                    field.pushValue(emptyTest())
+                    field.pushValue(emptyTestDraft())
                     openEditor(newIndex)
                   }}
                 >
@@ -182,9 +373,9 @@ const AutogradingTestsPane = ({ form }) => {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Test Name / Command</th>
-                  <th>Input</th>
-                  <th>Expected Output</th>
+                  <th>Test Name</th>
+                  <th>Type</th>
+                  <th>Run Command</th>
                   <th>Points</th>
                   <th className="w-28"></th>
                 </tr>
@@ -200,7 +391,7 @@ const AutogradingTestsPane = ({ form }) => {
                   </tr>
                 ) : (
                   field.state.value.map(
-                    (test: AssignmentTest, index: number) => (
+                    (test: AssignmentTestDraft, index: number) => (
                       <tr key={index}>
                         <td>
                           <div className="font-bold max-w-[12rem] truncate">
@@ -209,17 +400,15 @@ const AutogradingTestsPane = ({ form }) => {
                         </td>
 
                         <td>
-                          <div className="max-w-xs">
-                            <pre className="max-w-[12rem] truncate rounded bg-base-200 p-2 text-xs">
-                              {test.input || "-"}
-                            </pre>
-                          </div>
+                          <span className="badge badge-ghost badge-soft">
+                            {typeBadge(test.type)}
+                          </span>
                         </td>
 
                         <td>
                           <div className="max-w-xs">
                             <pre className="max-w-[12rem] truncate rounded bg-base-200 p-2 text-xs">
-                              {test.output || "-"}
+                              {test.run || "-"}
                             </pre>
                           </div>
                         </td>

@@ -62,9 +62,7 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
               </td>
               <td>
                 <span className="badge badge-soft">
-                  {assignment.due_date
-                    ? formatDate(assignment.due_date)
-                    : "Invalid Date"}
+                  {assignment.due ? formatDate(assignment.due) : "No due date"}
                 </span>
               </td>
               <td>
