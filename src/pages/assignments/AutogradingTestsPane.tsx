@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { Pencil, Trash } from "lucide-react"
 
 import type { AssignmentTestDraft } from "@/util/assignmentTests"
-import { emptyTestDraft } from "@/util/assignmentTests"
+import { emptyTestDraft, validateTestDraft } from "@/util/assignmentTests"
 
 const TYPE_OPTIONS = [
   {
@@ -25,6 +25,20 @@ const TYPE_OPTIONS = [
 const FieldError = ({ error }: { error?: string }) =>
   error ? <p className="text-error text-sm mt-1">{error}</p> : null
 
+// Every draft field that can carry a validation error; stale errors on
+// these are cleared whenever the test re-validates.
+const VALIDATED_FIELDS = [
+  "name",
+  "run",
+  "points",
+  "timeout",
+  "input",
+  "inputFile",
+  "expected",
+  "expectedFile",
+  "exitCode",
+] as const
+
 type AutogradingTestModalProps = {
   form: any
   dialogRef: React.RefObject<HTMLDialogElement | null>
@@ -39,8 +53,52 @@ const AutogradingTestModal = ({
 }: AutogradingTestModalProps) => {
   if (index === null) return null
 
+  // Validate this test now (the form-level validator only runs on the
+  // page's submit) and surface per-field errors. Returns whether the
+  // test is valid; "Done" keeps the modal open until it is.
+  const validateAndShowErrors = () => {
+    const drafts: AssignmentTestDraft[] = form.state.values.tests
+    const otherNames = drafts
+      .filter((_, i) => i !== index)
+      .map((d) => d.name.trim())
+    const errors = validateTestDraft(drafts[index], otherNames)
+
+    for (const fieldName of VALIDATED_FIELDS) {
+      const message = errors[fieldName]
+      form.setFieldMeta(`tests[${index}].${fieldName}`, (meta) => ({
+        ...meta,
+        errorMap: { ...meta.errorMap, onSubmit: message },
+      }))
+    }
+
+    return Object.keys(errors).length === 0
+  }
+
+  const handleDone = () => {
+    if (validateAndShowErrors()) onClose()
+  }
+
   return (
-    <dialog ref={dialogRef} className="modal" onClose={onClose}>
+    <dialog
+      ref={dialogRef}
+      className="modal"
+      onClose={onClose}
+      onKeyDown={(e) => {
+        // Enter inside a modal input would implicitly submit the
+        // surrounding create-assignment form (this dialog renders
+        // inside it). Repurpose it as "Done"; textareas keep Enter
+        // for newlines.
+        if (
+          e.key === "Enter" &&
+          e.target instanceof HTMLElement &&
+          e.target.tagName !== "TEXTAREA" &&
+          e.target.tagName !== "BUTTON"
+        ) {
+          e.preventDefault()
+          handleDone()
+        }
+      }}
+    >
       <div className="modal-box max-w-3xl">
         <div className="mb-6">
           <h3 className="text-lg font-bold">Edit Test {index + 1}</h3>
@@ -292,7 +350,11 @@ const AutogradingTestModal = ({
         </div>
 
         <div className="modal-action">
-          <button type="button" className="btn btn-primary" onClick={onClose}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={handleDone}
+          >
             Done
           </button>
         </div>
