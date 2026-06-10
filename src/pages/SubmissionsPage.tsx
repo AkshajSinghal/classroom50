@@ -1,3 +1,6 @@
+import { useState } from "react"
+import Papa from "papaparse"
+
 import {
   ArrowDownWideNarrow,
   Check,
@@ -17,7 +20,6 @@ import SubmissionsTable from "@/pages/submissions/SubmissionsTable"
 import useGetScores from "@/hooks/useGetScores"
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetStudents from "@/hooks/useGetStudents"
-import { useState } from "react"
 
 const SubmissionsPage = () => {
   const { org, classroom, assignment } = useParams({ strict: false })
@@ -40,6 +42,37 @@ const SubmissionsPage = () => {
     assignmentData?.assignments.find((a) => a.slug === assignment) || {}
   const scoresInfo = scoresData?.submissions?.[assignment] || []
 
+  const downloadScoresCsv = () => {
+    const rows = scoresInfo
+      .toSorted((a, b) => Number(b.datetime) - Number(a.datetime))
+      .map(({ usernames, score, datetime, ...rest }) => ({
+        usernames: usernames.join(", "),
+        score,
+        max_score: rest["max-score"],
+        submitted_at: new Date(datetime).toISOString(),
+        commit: rest.commit,
+        review: rest.review,
+        release: rest.release,
+      }))
+
+    const csv = Papa.unparse(rows, {
+      header: true,
+    })
+
+    const blob = new Blob([csv], {
+      type: "text/csv;charset=utf-8;",
+    })
+
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+
+    link.href = url
+    link.download = `${classroom}-${assignment}-scores.csv`
+    link.click()
+
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="min-h-screen">
       <Drawer>
@@ -61,7 +94,12 @@ const SubmissionsPage = () => {
               </div>
             </div>
             <div className="pt-10">
-              <button className="btn btn-outline">
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={downloadScoresCsv}
+                disabled={!scoresInfo.length}
+              >
                 <HardDriveDownload /> Download Scores (CSV)
               </button>
             </div>
