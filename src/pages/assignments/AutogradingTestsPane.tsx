@@ -297,11 +297,14 @@ const AutogradingTestModal = ({
           </button>
         </div>
       </div>
-      <form method="dialog" className="modal-backdrop">
+      {/* Plain div instead of daisyUI's usual <form method="dialog">
+          backdrop: the modal renders inside the create-assignment form,
+          and React (19) rejects nested <form> elements. */}
+      <div className="modal-backdrop">
         <button type="button" onClick={onClose}>
           close
         </button>
-      </form>
+      </div>
     </dialog>
   )
 }
