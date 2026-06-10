@@ -1,7 +1,8 @@
 import { useForm } from "@tanstack/react-form"
 import GitHub from "@/assets/github.svg?react"
 import AutogradingTestsPane from "./AutogradingTestsPane"
-import type { AssignmentTest } from "@/types/classroom"
+import type { AssignmentTestDraft } from "@/util/assignmentTests"
+import { validateTestDrafts } from "@/util/assignmentTests"
 
 export type CreateAssignmentFormValues = {
   name: string
@@ -10,7 +11,7 @@ export type CreateAssignmentFormValues = {
   template_repo: string
   due_date: string
   max_group_size: number
-  tests: AssignmentTest[]
+  tests: AssignmentTestDraft[]
 }
 
 type CreateAssignmentFormProps = {
@@ -34,6 +35,7 @@ const FormErrors = ({ form }) => (
 const CreateAssignmentForm = ({
   defaultValues,
   onSubmit,
+  loading = false,
 }: CreateAssignmentFormProps) => {
   const form = useForm({
     defaultValues: {
@@ -41,15 +43,14 @@ const CreateAssignmentForm = ({
       description: defaultValues?.description ?? "",
       mode: defaultValues?.mode ?? "individual",
       template_repo: defaultValues?.template_repo ?? "",
-      due_date: defaultValues?.due_date ?? new Date().toString(),
+      due_date:
+        defaultValues?.due_date ?? new Date().toISOString().slice(0, 10),
       max_group_size: defaultValues?.max_group_size ?? 2,
       tests: defaultValues?.tests ?? [],
     } satisfies CreateAssignmentFormValues,
     validators: {
       onSubmit: ({ value }) => {
-        const errors: Partial<
-          Record<keyof CreateAssignmentFormValues, string>
-        > = {}
+        const errors: Record<string, string> = {}
         if (!value.name.trim()) {
           errors.name = "Assignment name is required."
         }
@@ -57,11 +58,10 @@ const CreateAssignmentForm = ({
           errors.max_group_size = "Max group size must be a valid number."
         }
 
-        value.tests.forEach((test, index) => {
-          if (!Number.isFinite(test.points)) {
-            errors[`tests[${index}].points`] = "Points must be a valid number"
-          }
-        })
+        // Mirrors gh-teacher's write-time validation so a bad test is
+        // caught in the form, not by a failed commit (or worse, a file
+        // the CLI later refuses to parse).
+        Object.assign(errors, validateTestDrafts(value.tests))
 
         return Object.keys(errors).length > 0 ? { fields: errors } : undefined
       },
@@ -268,9 +268,13 @@ const CreateAssignmentForm = ({
             <button
               type="submit"
               className="btn btn-primary"
-              disabled={!canSubmit || isSubmitting}
+              disabled={!canSubmit || isSubmitting || loading}
             >
-              {isSubmitting ? "Creating..." : "Create Assignment"}
+              {isSubmitting || loading ? (
+                <span className="loading loading-spinner" />
+              ) : (
+                "Create Assignment"
+              )}
             </button>
           )}
         </form.Subscribe>

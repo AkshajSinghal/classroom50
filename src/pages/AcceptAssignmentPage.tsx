@@ -220,7 +220,9 @@ const AcceptAssignmentPage = () => {
               {modeMap[assignmentData?.mode ?? ""] ?? ""}
             </span>
             <span className="badge">
-              Due {formatDate(assignmentData?.due_date)}
+              {assignmentData?.due
+                ? `Due ${formatDate(assignmentData.due)}`
+                : "No due date"}
             </span>
           </div>
           <h1 className="text-xl font-bold pt-6">{assignmentData?.name}</h1>
