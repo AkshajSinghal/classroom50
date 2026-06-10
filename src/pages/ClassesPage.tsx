@@ -20,20 +20,32 @@ const ClassCard = ({ cl, org }: { cl: GitHubFileListing; org: string }) => {
   return (
     <div className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
       <div className="card-body gap-4">
-        <label
-          className={`badge badge-soft ${classroomData?.active ? "badge-success" : "badge-primary"}`}
-        >
-          {classroomData?.term || "No Term Specified"}
-        </label>
-        <h1 className="text-xl">
-          {classroomData?.name ||
-            classroomData?.short_name ||
-            "Unknown Class Name"}
-        </h1>
-        <div className="flex gap-2">
-          <UsersRound />
-          {students ? `${students.length} Students` : "No Students"}
-        </div>
+        {classroomData ? (
+          <label
+            className={`h-6 badge badge-soft ${classroomData?.active ? "badge-success" : "badge-primary"}`}
+          >
+            {classroomData?.term || "No Term Specified"}
+          </label>
+        ) : (
+          <div className="skeleton w-10 h-6" />
+        )}
+        {classroomData ? (
+          <h1 className="text-xl h-8">
+            {classroomData?.name ||
+              classroomData?.short_name ||
+              "Unknown Class Name"}
+          </h1>
+        ) : (
+          <div className="skeleton h-8 w-40" />
+        )}
+        {classroomData ? (
+          <div className="flex gap-2 h-6">
+            <UsersRound />
+            {students ? `${students.length} Students` : "No Students"}
+          </div>
+        ) : (
+          <div className="skeleton w-20 h-6" />
+        )}
         <Link
           type="button"
           to={`/${org}/${cl.path}/assignments`}
