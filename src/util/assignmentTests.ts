@@ -66,14 +66,17 @@ export function draftToTest(draft: AssignmentTestDraft): AssignmentTest {
     points: draft.points,
   }
 
-  if (draft.setup.trim()) test.setup = draft.setup
+  if (draft.setup.trim()) test.setup = draft.setup.trim()
   if (draft.timeout > 0) test.timeout = draft.timeout
 
+  // Commands and file names are trimmed; stdin and expected output are
+  // written raw (leading/trailing whitespace and newlines are
+  // meaningful there) and only their *emptiness* is judged trimmed.
   if (draft.type === "io") {
     test.comparison = draft.comparison
-    if (draft.input && !draft.inputFile.trim()) test.input = draft.input
+    if (draft.input.trim() && !draft.inputFile.trim()) test.input = draft.input
     if (draft.inputFile.trim()) test["input-file"] = draft.inputFile.trim()
-    if (draft.expected && !draft.expectedFile.trim())
+    if (draft.expected.trim() && !draft.expectedFile.trim())
       test.expected = draft.expected
     if (draft.expectedFile.trim())
       test["expected-file"] = draft.expectedFile.trim()
@@ -136,7 +139,7 @@ export function validateTestDraft(
     draft.timeout < 0 ||
     draft.timeout > TIMEOUT_MAX_SECONDS
   ) {
-    errors.timeout = `Timeout must be between 1 and ${TIMEOUT_MAX_SECONDS} seconds (0 = default of 10s).`
+    errors.timeout = `Timeout must be 0 (use the 10s default) or a whole number of seconds up to ${TIMEOUT_MAX_SECONDS}.`
   }
 
   if (draft.type === "io") {
@@ -147,11 +150,12 @@ export function validateTestDraft(
       errors.expectedFile =
         "Provide inline expected output or an expected file, not both."
     }
-    // `included`/`regex` against an empty expected match everything —
-    // an always-passing test, so the CLI rejects it at write time too.
+    // `included`/`regex` against an empty (or whitespace-only) expected
+    // match almost everything — an always-passing test, so reject it
+    // here like the CLI does at write time.
     if (
       draft.comparison !== "exact" &&
-      !draft.expected &&
+      !draft.expected.trim() &&
       !draft.expectedFile.trim()
     ) {
       errors.expected = `Expected output is required for the "${draft.comparison}" comparison (an empty expected would match everything).`
