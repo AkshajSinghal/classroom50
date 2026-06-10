@@ -21,7 +21,9 @@ import {
   fetchAssignmentFromPages,
   getRepo,
 } from "./queries"
-import type { Assignment, AssignmentTest } from "@/types/classroom"
+import type { Assignment } from "@/types/classroom"
+import type { AssignmentTestDraft } from "@/util/assignmentTests"
+import { draftToTest } from "@/util/assignmentTests"
 import Papa from "papaparse"
 import sodium from "libsodium-wrappers"
 
@@ -386,11 +388,69 @@ export function createGitCommit(
   )
 }
 
+// contentsPathExists: 404 -> false, 200 -> true, anything else throws.
+async function contentsPathExists(
+  client: GitHubClient,
+  org: string,
+  path: string,
+): Promise<boolean> {
+  try {
+    await client.request(
+      `/repos/${org}/classroom50/contents/${path
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/")}`,
+    )
+    return true
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.status === 404) {
+      return false
+    }
+    throw err
+  }
+}
+
+// Same pre-write probes gh-teacher runs before writing declarative
+// tests (see the "For other clients" section of the Autograders wiki).
+async function ensureDeclarativeTestsWritable(
+  client: GitHubClient,
+  org: string,
+  classroom: string,
+  slug: string,
+) {
+  const materializeScript = ".github/scripts/materialize_tests.py"
+  if (!(await contentsPathExists(client, org, materializeScript))) {
+    throw new Error(
+      `${org}/classroom50 is missing ${materializeScript}, so autograding tests would never run. ` +
+        "Re-initialize the organization (or run `gh teacher init`) to update the config repo, then retry.",
+    )
+  }
+
+  const autograderPath = `${classroom}/autograders/${slug}/autograder.py`
+  if (await contentsPathExists(client, org, autograderPath)) {
+    throw new Error(
+      `Assignment "${slug}" already has a custom autograder at ${autograderPath}. ` +
+        "Autograding tests and a hand-written autograder.py are mutually exclusive — remove one before adding the other.",
+    )
+  }
+}
+
 export type CreateAssignmentResult = CreateClassroomResult
 export async function createAssignment(
   client: GitHubClient,
   input: CreateAssignmentInput,
 ): Promise<CreateAssignmentResult> {
+  const tests = input.tests.map(draftToTest)
+
+  if (tests.length > 0) {
+    await ensureDeclarativeTestsWritable(
+      client,
+      input.org,
+      input.classroom,
+      input.slug,
+    )
+  }
+
   const ref = await getBranchRef(client, input.org)
   const commit = await getCommit(client, input.org, ref.object.sha)
 
@@ -401,26 +461,34 @@ export async function createAssignment(
     ref: "main",
   })
 
-  const assignmentBody = {
+  // The entry must match classroom50/assignments/v1 exactly — the CLI
+  // parses the file with unknown fields rejected, so stray keys would
+  // break `gh teacher` for the whole classroom. Optional fields are
+  // omitted (not written empty), the same normalized form the CLI
+  // writes. Schema: schemas/assignments-v1.schema.json in the
+  // foundation50/classroom50 repo.
+  const assignmentBody: Assignment = {
     slug: input.slug,
     name: input.name,
-    description: input.description,
     template: {
       owner: input.org,
       repo: input.template_repo,
       branch: "main",
     },
     mode: input.mode,
-    tests: input.tests,
-    max_group_size: input.max_group_size,
-    due_date: input.due_date,
-    autograder: "",
-    runtime: {
-      container: {
-        image: "",
-        user: "",
-      },
-    },
+    autograder: "default",
+  }
+  if (input.description.trim()) {
+    assignmentBody.description = input.description.trim()
+  }
+  if (input.due_date.trim()) {
+    assignmentBody.due = input.due_date.trim()
+  }
+  if (input.mode === "group" && input.max_group_size > 0) {
+    assignmentBody.max_group_size = input.max_group_size
+  }
+  if (tests.length > 0) {
+    assignmentBody.tests = tests
   }
 
   if (
@@ -475,7 +543,7 @@ export type CreateAssignmentInput = {
   classroom: string
   org: string
   max_group_size: number
-  tests: AssignmentTest[]
+  tests: AssignmentTestDraft[]
 }
 export async function createAssignmentWithConflictRetry(
   client: GitHubClient,
@@ -1536,7 +1604,16 @@ const SKELETON_PATHS = [
   "workflows/autograde-runner.yaml",
   "scripts/collect_scores.py",
   "scripts/runner.py",
+  // Translates assignments.json `tests` blocks into per-assignment
+  // tests.json bundles during publish-pages — without it, declarative
+  // autograding tests silently never grade.
+  "scripts/materialize_tests.py",
 ]
+
+// gh teacher init substitutes this placeholder (publish-pages.yaml's
+// push trigger) with the config repo's default branch at commit time;
+// committing it raw would leave the Pages workflow never firing.
+const DEFAULT_BRANCH_PLACEHOLDER = "{{DEFAULT_BRANCH}}"
 const FOUNDATION_BASE = "cli/gh-teacher/skeleton/dotgithub"
 const ORG_BASE = ".github"
 const CONFIG_REPO = "classroom50"
@@ -1627,6 +1704,17 @@ export async function findMissingSkeletonFiles(
     (path) => !existingPaths.has(path),
   )
 
+  if (missingPaths.length === 0) {
+    return []
+  }
+
+  // The skeleton is committed against the config repo's actual default
+  // branch (org policy can rename `main`), matching gh teacher init.
+  const repo = await client.request<GitHubRepo>(
+    `/repos/${org}/${CONFIG_REPO}`,
+  )
+  const defaultBranch = repo.default_branch || "main"
+
   return Promise.all(
     missingPaths.map(async (path): Promise<SkeletonFile> => {
       const content = await fetchSkeletonSourceFile(
@@ -1638,7 +1726,7 @@ export async function findMissingSkeletonFiles(
         path,
         mode: "100644",
         type: "blob",
-        content,
+        content: content.replaceAll(DEFAULT_BRANCH_PLACEHOLDER, defaultBranch),
       }
     }),
   )

@@ -7,30 +7,48 @@ export type Classroom = {
   org: string
 }
 
+// Mirrors one entry of classroom50/assignments/v1 — the shape gh-teacher
+// writes and parses (strictly: unknown fields are rejected by the CLI).
+// Schema: https://github.com/foundation50/classroom50/blob/main/schemas/assignments-v1.schema.json
 export type Assignment = {
   slug: string
   name: string
-  description: string
+  description?: string
   template: {
     owner: string
     repo: string
     branch: string
   }
+  due?: string
   mode: string
-  due_date: string
   autograder: string
-  runtime: {
-    container: {
+  max_group_size?: number
+  runtime?: {
+    container?: {
       image: string
-      user: string
+      user?: string
     }
   }
+  tests?: AssignmentTest[]
 }
 
+export type AssignmentTestType = "io" | "run" | "python"
+export type AssignmentTestComparison = "included" | "exact" | "regex"
+
+// One declarative autograding test (v1 testSpec, kebab-case wire keys).
+// `io` compares stdout, `run` checks the exit code, `python` runs pytest.
 export type AssignmentTest = {
   name: string
-  input: string
-  output: string
+  type: AssignmentTestType
+  setup?: string
+  run: string
+  input?: string
+  "input-file"?: string
+  expected?: string
+  "expected-file"?: string
+  comparison?: AssignmentTestComparison
+  timeout?: number
+  "exit-code"?: number
   points: number
 }
 
