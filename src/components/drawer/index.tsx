@@ -131,6 +131,10 @@ export const SidebarFooter = () => {
   const footerRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
+    console.log("user", user)
+  }, [user])
+
+  useEffect(() => {
     if (!menuOpen) return
 
     const handlePointerDown = (event: PointerEvent) => {
