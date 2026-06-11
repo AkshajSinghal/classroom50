@@ -123,16 +123,12 @@ const truncateName = (name: string) => {
 export const SidebarFooter = () => {
   const { signOut, user } = useGithubAuth()
   const avatar_img = user?.avatar_url || duck
-  const name = truncateName(user?.name || "") || "User"
+  const name = truncateName(user?.name || "") || user?.login || "User"
   const { org } = useParams({ strict: false })
   const { isTeacher } = useCourseTeacherAccess(org)
 
   const [menuOpen, setMenuOpen] = useState(false)
   const footerRef = useRef<HTMLDivElement | null>(null)
-
-  useEffect(() => {
-    console.log("user", user)
-  }, [user])
 
   useEffect(() => {
     if (!menuOpen) return
