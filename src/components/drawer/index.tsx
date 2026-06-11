@@ -151,22 +151,38 @@ export const SidebarFooter = () => {
   return (
     <div
       ref={footerRef}
-      className="relative mt-auto border-t border-[#444] py-4"
+      className="relative mt-auto cursor-pointer border-t border-[#444] py-4"
+      onClick={() => setMenuOpen((open) => !open)}
+      role="button"
+      tabIndex={0}
+      aria-haspopup="menu"
+      aria-expanded={menuOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault()
+          setMenuOpen((open) => !open)
+        }
+
+        if (event.key === "Escape") {
+          setMenuOpen(false)
+        }
+      }}
     >
       <div
         className={`
-          absolute bottom-full left-6 right-6 z-50 mb-3
-          origin-bottom rounded-box
-          transition-all duration-150 ease-out
+        absolute bottom-full left-6 right-6 z-50 mb-3
+        origin-bottom rounded-box
+        transition-all duration-150 ease-out
 
-          ${
-            menuOpen
-              ? "translate-y-0 scale-100 opacity-100"
-              : "pointer-events-none translate-y-2 scale-95 opacity-0"
-          }
-        `}
+        ${
+          menuOpen
+            ? "translate-y-0 scale-100 opacity-100"
+            : "pointer-events-none translate-y-2 scale-95 opacity-0"
+        }
+      `}
+        onClick={(event) => event.stopPropagation()}
       >
-        <ul className="menu rounded-box border border-base-300 bg-base-100 p-2 text-base-content shadow-xl w-full">
+        <ul className="menu w-full rounded-box border border-base-300 bg-base-100 p-2 text-base-content shadow-xl">
           <li>
             <a
               href="https://github.com/foundation50/classroom50/discussions"
@@ -177,6 +193,7 @@ export const SidebarFooter = () => {
               Classroom 50 Help
             </a>
           </li>
+
           <li>
             <button type="button" className="text-error" onClick={signOut}>
               <LogOut className="size-4" />
@@ -186,13 +203,7 @@ export const SidebarFooter = () => {
         </ul>
       </div>
 
-      <button
-        type="button"
-        className="flex w-full cursor-pointer items-center justify-start gap-4 text-left"
-        onClick={() => setMenuOpen((open) => !open)}
-        aria-haspopup="menu"
-        aria-expanded={menuOpen}
-      >
+      <div className="flex w-full items-center justify-start gap-4 text-left">
         <div className="avatar avatar-placeholder">
           <img
             src={avatar_img}
@@ -212,7 +223,7 @@ export const SidebarFooter = () => {
             </div>
           ) : null}
         </div>
-      </button>
+      </div>
     </div>
   )
 }
