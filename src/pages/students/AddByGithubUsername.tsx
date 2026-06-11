@@ -3,14 +3,9 @@ import GitHub from "@/assets/github.svg?react"
 import { useForm } from "@tanstack/react-form"
 import useGetOrgMembers from "@/hooks/useGetOrgMembers"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import useGetTeam from "@/hooks/useGetTeam"
-import { useEffect } from "react"
 import useEnsureTeam from "@/hooks/useEnsureTeam"
 import { githubKeys } from "@/hooks/github/queries"
-import {
-  addStudentToClassroom,
-  enrollStudentInClassroom,
-} from "@/hooks/github/mutations"
+import { enrollStudentInClassroom } from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 
 type AddByGithubUsernameProps = {
