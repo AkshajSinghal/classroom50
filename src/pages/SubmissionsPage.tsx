@@ -165,7 +165,7 @@ const SubmissionsPage = () => {
                       {scoresInfo?.reduce(
                         (a, c) => Number(a) + Number(c["score"]),
                         0,
-                      ) / students.length || 1}
+                      ) / scoresInfo?.length || 1}
                     </h2>
                     /<h4>{scoresInfo?.[0]?.["max-score"]}</h4>
                   </div>
