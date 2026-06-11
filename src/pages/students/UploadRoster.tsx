@@ -1,4 +1,4 @@
-import { HardDriveUpload, Rows, X } from "lucide-react"
+import { HardDriveUpload, X } from "lucide-react"
 import { useRef, useState } from "react"
 
 import Papa from "papaparse"

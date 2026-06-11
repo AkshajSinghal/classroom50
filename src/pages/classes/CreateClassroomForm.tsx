@@ -1,4 +1,3 @@
-import { useGitHubClient } from "@/context/github/GitHubProvider"
 import useGetClasses from "@/hooks/useGetClasses"
 import { useForm } from "@tanstack/react-form"
 import { useParams } from "@tanstack/react-router"
