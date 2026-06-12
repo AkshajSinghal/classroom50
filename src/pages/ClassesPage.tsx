@@ -94,7 +94,7 @@ const ClassesPage = () => {
                 </div>
               </div>
 
-              {classes.length && (
+              {classes.length ? (
                 <div className="flex sm:self-end">
                   <Link
                     type="button"
@@ -104,6 +104,8 @@ const ClassesPage = () => {
                     + New Class
                   </Link>
                 </div>
+              ) : (
+                <></>
               )}
             </div>
           </div>
