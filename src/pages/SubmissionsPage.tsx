@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Papa from "papaparse"
 
 import {
@@ -7,6 +7,7 @@ import {
   Copy,
   HardDriveDownload,
   LinkIcon,
+  RefreshCw,
 } from "lucide-react"
 import { useParams } from "@tanstack/react-router"
 
@@ -20,15 +21,38 @@ import SubmissionsTable from "@/pages/submissions/SubmissionsTable"
 import useGetScores from "@/hooks/useGetScores"
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetStudents from "@/hooks/useGetStudents"
+import { formatDistanceToNow } from "date-fns"
+
+// utility hook for forcing a component refresh; just grabs current time every X interval
+const useNow = (intervalMs = 30_000) => {
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), intervalMs)
+    return () => window.clearInterval(id)
+  }, [intervalMs])
+}
 
 const SubmissionsPage = () => {
   const { org, classroom, assignment } = useParams({ strict: false })
-  const { data: scoresData } = useGetScores(org, classroom)
+  const {
+    data: scoresData,
+    refetch: refetchScores,
+    isFetching: scoresFetching,
+    dataUpdatedAt: scoresUpdatedAt,
+  } = useGetScores(org, classroom)
   const { data: assignmentData } = useGetClassroomAssignments(org, classroom)
   const { students } = useGetStudents(org, classroom)
   const [copiedSubmitLink, setCopiedSubmitLink] = useState(false)
+  const scoresLastUpdated =
+    scoresUpdatedAt > 0
+      ? formatDistanceToNow(scoresUpdatedAt, { addSuffix: true })
+      : "never"
 
   const assignmentSubmitUrl = `${window.location.origin}/${org}/${classroom}/assignments/${assignment}/accept`
+
+  // simply having this here will trigger a re-render every 30s by default for the refresh label
+  const now = useNow()
 
   const copySubmitLink = async () => {
     await navigator.clipboard.writeText(assignmentSubmitUrl)
@@ -172,6 +196,23 @@ const SubmissionsPage = () => {
                 )}
               </div>
             </div>
+          </div>
+          <div className="mb-2 flex items-center justify-end gap-1 text-sm text-base-content/60">
+            <span>Updated {scoresLastUpdated}</span>
+
+            <button
+              type="button"
+              className="btn btn-ghost btn-xs btn-circle"
+              disabled={scoresFetching}
+              onClick={() => refetchScores()}
+              aria-label="Refresh submissions"
+              title="Refresh submissions"
+            >
+              <RefreshCw
+                size={14}
+                className={scoresFetching ? "animate-spin" : ""}
+              />
+            </button>
           </div>
           <SubmissionsTable scores={scoresInfo} students={students} />
         </DrawerContent>
