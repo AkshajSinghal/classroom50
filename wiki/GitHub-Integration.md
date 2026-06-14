@@ -55,7 +55,7 @@ Same device flow as above, but with student-appropriate scopes:
 | Setting | Value |
 |---------|-------|
 | Resource owner | your teaching org |
-| Repository access | All repositories, or "Only select repositories" filtered to repos matching `<classroom>-*` |
+| Repository access | **All repositories** ("Only select repositories" misses student repos, which `gh student accept` creates on demand after the token is minted) |
 | Contents | **Read** |
 | Expiry | 1–366 days (fine-grained PATs support up to 1 year); set a calendar reminder to rotate before it expires |
 

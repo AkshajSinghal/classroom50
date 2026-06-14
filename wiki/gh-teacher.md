@@ -55,7 +55,7 @@ Performs these steps in order:
 8. **Reusable-workflow access** — `PUT .../actions/permissions/access` with `access_level: organization` so student-repo shims can `uses:` the autograde-runner workflow. 403/409 is warn-and-continue with manual recovery instructions.
 9. **Collect token** — reads `CLASSROOM50_COLLECT_TOKEN` from env (trimmed), piped stdin, or hidden TTY prompt; libsodium sealbox-encrypts and uploads as a repo-level Actions secret.
 
-**Collect token requirements:** fine-grained PAT with `Contents: read` on org repos matching `<classroom>-*`. No CLI flag for the value. Prefer an org-owned service account.
+**Collect token requirements:** fine-grained PAT with `Contents: read` on all org repos (student repos are created on demand by `gh student accept`, so an "Only select repositories" scope silently misses them).
 
 **Skeleton shipped:**
 

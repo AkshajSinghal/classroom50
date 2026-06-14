@@ -43,7 +43,16 @@ gh teacher init <org>
 
 `init` is idempotent: re-running picks up where a prior run left off. It also offers to refresh skeleton files that differ from the CLI's embedded version (how an existing org gains new features like declarative tests) — since that resets any teacher edits to those files, it asks for confirmation first and skips them if you decline (`--yes` skips the prompt for scripted runs).
 
-**Collect token.** Supply a fine-grained PAT with **Contents: read** on org repos whose names match `<classroom>-*`. Store it only via the `CLASSROOM50_COLLECT_TOKEN` environment variable or a hidden stdin prompt — there is no `--collect-token` flag (command-line PATs leak via shell history and process listings). Use an org-owned service account, not a personal teacher account; pass `--service-account-confirm` to silence the reminder. Rotate before expiry (fine-grained PATs support up to 1 year; 90 days is a common rotation interval) with:
+**Collect token.** Supply a fine-grained PAT with **Contents: read** to all repositories in the org. Store it only via the `CLASSROOM50_COLLECT_TOKEN` environment variable or a hidden stdin prompt — there is no `--collect-token` flag (command-line PATs leak via shell history and process listings). Use an org-owned service account, not a personal teacher account; pass `--service-account-confirm` to silence the reminder. Rotate before expiry (fine-grained PATs support up to 1 year; 90 days is a common rotation interval) with:
+
+> **Why all repositories, not just `<classroom>-*`?** Student repos are created on
+> demand when students run `gh student accept`, so they don't exist when you mint the
+> token — a PAT scoped to "Only select repositories" can't include them, and
+> `collect-scores` silently counts those students as not submitted, logging
+> `0/<N> submitted` for the assignment, since an unreadable repo and one with no
+> release yet both surface as a 404 from `/releases/latest`. Org-wide
+> `Contents: read` is broader than strictly necessary, but it avoids that trap;
+> tighten it later if your org policy requires.
 
 ```sh
 gh teacher rotate-collect-token <org>
@@ -223,7 +232,7 @@ What it does on each run:
 5. Logs a per-assignment `cs-principles/hello: 23/30 submitted` line so you see roster coverage at a glance.
 6. Commits the updated `*/scores.json` files back to `<org>/classroom50` on a single `collect: refresh scores.json` commit. A no-op run (no submissions changed) does not produce a commit.
 
-**Token requirements.** The workflow reads the `CLASSROOM50_COLLECT_TOKEN` secret provisioned by `gh teacher init` (a fine-grained PAT with `Contents: read` on `<classroom>-*` repos). If that token expires mid-semester, the workflow run fails loudly with a 401 — rotate with `gh teacher rotate-collect-token <org>`.
+**Token requirements.** The workflow reads the `CLASSROOM50_COLLECT_TOKEN` secret provisioned by `gh teacher init` (a fine-grained PAT with `Contents: read` on all org repos; see the collect-token note in the setup section above). If that token expires mid-semester, the workflow run fails loudly with a 401 — rotate with `gh teacher rotate-collect-token <org>`.
 
 **Override workflow.** To grant partial credit for a flaky test or correct a misgrade, hand-edit `<classroom>/scores.json` in the config repo, change the row's `score`, and add `"override": true`. Commit and push. The next collect run will leave that row alone. A `gh teacher score override` CLI helper is planned for a later release; until then, the JSON edit is the canonical path.
 
