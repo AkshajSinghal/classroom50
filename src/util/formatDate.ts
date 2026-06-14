@@ -28,12 +28,16 @@ const pad = (n: number) => String(n).padStart(2, "0")
 // (e.g. 2026-06-10 -> 2026-06-10T23:59:00-04:00). Values that already carry a
 // time component are passed through unchanged.
 export const toRfc3339DueDate = (dateOnly: string): string => {
-  if (dateOnly.includes("T")) {
+  // Only normalize the exact <input type="date"> shape.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
     return dateOnly
   }
 
   const [year, month, day] = dateOnly.split("-").map(Number)
   const date = new Date(year, month - 1, day, 23, 59, 0)
+  if (Number.isNaN(date.getTime())) {
+    return dateOnly
+  }
 
   const offsetMinutes = -date.getTimezoneOffset()
   const sign = offsetMinutes >= 0 ? "+" : "-"
