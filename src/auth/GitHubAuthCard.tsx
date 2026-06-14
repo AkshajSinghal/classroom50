@@ -113,12 +113,12 @@ export function GitHubAuthCard() {
         <footer className="flex items-center justify-between border-t border-base-200 px-7 py-4 text-xs text-base-content/50">
           <span>Manage assignments and submissions via GitHub.</span>
           <a
-            className="link-hover shrink-0"
-            href="https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps"
+            className="link link-info link-hover shrink-0"
+            href="https://github.com/foundation50/classroom50/wiki"
             target="_blank"
             rel="noreferrer"
           >
-            GitHub OAuth docs
+            Visit Classroom 50's docs
           </a>
         </footer>
       </section>
