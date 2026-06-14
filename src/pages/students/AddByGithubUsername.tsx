@@ -46,7 +46,11 @@ const AddByGithubUsername = ({
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({
-        queryKey: githubKeys.csvFile(org, classroom, "students.csv"),
+        queryKey: githubKeys.csvFile(
+          org,
+          "classroom50",
+          `${classroom}/students.csv`,
+        ),
       })
     },
   })

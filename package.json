@@ -25,6 +25,7 @@
     "@babel/core": "^7.29.0",
     "@eslint/js": "^10.0.1",
     "@rolldown/plugin-babel": "^0.2.3",
+    "@tanstack/react-query-devtools": "^5.101.0",
     "@tanstack/router-plugin": "^1.167.28",
     "@types/babel__core": "^7.20.5",
     "@types/node": "^24.12.2",
