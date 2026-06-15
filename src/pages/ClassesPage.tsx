@@ -14,6 +14,10 @@ import type { GitHubFileListing } from "@/hooks/github/types"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import { useEffect } from "react"
 import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
+import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { acceptPendingOrgInvite } from "@/hooks/github/mutations"
+import { useGitHubClient } from "@/context/github/GitHubProvider"
 
 const ClassCard = ({ cl, org }: { cl: GitHubFileListing; org: string }) => {
   const { data: classroomData } = useGetClassroom(org, cl.path)
@@ -61,10 +65,97 @@ const ClassCard = ({ cl, org }: { cl: GitHubFileListing; org: string }) => {
   )
 }
 
+const CreateClassroomPane = ({ org }) => (
+  <div className="card border border-dashed border-base-300 bg-base-100 shadow-sm">
+    <div className="card-body items-center py-12 text-center">
+      <div className="mb-2 flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary">
+        <Plus className="size-7" />
+      </div>
+
+      <h2 className="card-title text-xl">No classrooms yet</h2>
+
+      <p className="max-w-md text-base-content/70">
+        Create your first classroom to start adding assignments, importing
+        students, and managing submissions.
+      </p>
+
+      <div className="card-actions mt-4">
+        <Link
+          to={`/${org}/classes/new`}
+          type="button"
+          className="btn btn-primary"
+        >
+          <Plus className="size-4" />
+          Create classroom
+        </Link>
+      </div>
+    </div>
+  </div>
+)
+
+const JoinOrgCard = ({ org }: { org: string }) => {
+  const client = useGitHubClient()
+  const queryClient = useQueryClient()
+
+  const mutation = useMutation({
+    mutationFn: () => acceptPendingOrgInvite(client, org),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["github", "memberships", "orgs", org],
+      })
+      queryClient.invalidateQueries({ queryKey: ["orgs"] })
+    },
+  })
+
+  return (
+    <div className="card border border-dashed border-base-300 bg-base-100 shadow-sm">
+      <div className="card-body items-center py-12 text-center">
+        <div className="mb-2 flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <Plus className="size-7" />
+        </div>
+
+        <h2 className="card-title text-xl">Join this classroom</h2>
+
+        <p className="max-w-md text-base-content/70">
+          You have a pending invitation to join{" "}
+          <span className="font-medium text-base-content">{org}</span>. Accept
+          the invitation to access your classroom assignments.
+        </p>
+
+        {mutation.isError ? (
+          <div className="alert alert-error mt-4 max-w-md text-left">
+            Unable to join the organization. Please try again.
+          </div>
+        ) : null}
+
+        <div className="card-actions mt-4">
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={mutation.isPending}
+            onClick={() => mutation.mutate()}
+          >
+            {mutation.isPending ? (
+              <span className="loading loading-spinner loading-sm" />
+            ) : (
+              <Plus className="size-4" />
+            )}
+            {mutation.isPending ? "Joining..." : "Join organization"}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const ClassesPage = () => {
   const { org } = useParams({ strict: false })
   const { classes } = useGetClasses(org)
   const { isTeacher, isStudent, isBlocked } = useCourseTeacherAccess(org)
+  const { data: membership, isLoading: loadingMembership } =
+    useGetOwnOrgMembership(org)
+
+  const isMember = membership?.state === "active"
 
   return (
     <div className="min-h-screen">
@@ -111,33 +202,14 @@ const ClassesPage = () => {
                 <></>
               )}
             </div>
+            {isStudent && !isMember && !loadingMembership ? (
+              <JoinOrgCard org={org} />
+            ) : (
+              <></>
+            )}
           </div>
           {classes.length === 0 && isTeacher ? (
-            <div className="card border border-dashed border-base-300 bg-base-100 shadow-sm">
-              <div className="card-body items-center py-12 text-center">
-                <div className="mb-2 flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary">
-                  <Plus className="size-7" />
-                </div>
-
-                <h2 className="card-title text-xl">No classrooms yet</h2>
-
-                <p className="max-w-md text-base-content/70">
-                  Create your first classroom to start adding assignments,
-                  importing students, and managing submissions.
-                </p>
-
-                <div className="card-actions mt-4">
-                  <Link
-                    to={`/${org}/classes/new`}
-                    type="button"
-                    className="btn btn-primary"
-                  >
-                    <Plus className="size-4" />
-                    Create classroom
-                  </Link>
-                </div>
-              </div>
-            </div>
+            <CreateClassroomPane org={org} />
           ) : null}
           <div className="grid grid-cols-12 gap-4 mb-6">
             {classes.map((cl) => (

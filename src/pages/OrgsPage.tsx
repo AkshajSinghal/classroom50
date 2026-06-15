@@ -82,6 +82,7 @@ function OrgCard({
   const needsSetup = classroom50.status === "needs_setup"
   const noAccess = classroom50.status === "no_access"
   const hasCollectToken = classroom50.collectToken?.status === "present"
+  const isAdmin = membership.role === "admin"
 
   return (
     <div className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
@@ -107,17 +108,17 @@ function OrgCard({
                 </span>
               )}
 
-              {!needsSetup && !hasCollectToken && (
+              {!needsSetup && !hasCollectToken && isAdmin && (
                 <span className="badge badge-warning gap-1">
                   <AlertTriangle className="size-3" />
                   Needs personal access token
                 </span>
               )}
 
-              {noAccess && (
+              {noAccess && isAdmin && (
                 <span className="badge badge-neutral gap-1">
                   <Lock className="size-3" />
-                  No Classroom50 access
+                  No <pre>classroom50</pre> access
                 </span>
               )}
             </div>
@@ -145,7 +146,7 @@ function OrgCard({
             </Link>
           )}
 
-          {!needsSetup && !hasCollectToken && (
+          {!needsSetup && !hasCollectToken && isAdmin && (
             <Link
               to="/$org/settings"
               params={{ org: org.login }}
@@ -176,16 +177,12 @@ const OrgsPage = () => {
   const cl50Orgs = orgs?.filter(
     (summary) =>
       summary.classroom50.status !== "unknown" &&
-      summary.classroom50.status !== "no_access" &&
-      summary.classroom50.status !== "needs_setup" &&
-      summary.membership.role === "admin",
+      summary.classroom50.status !== "needs_setup",
   )
   const nonCl50Orgs = orgs?.filter(
     (summary) =>
       summary.classroom50.status === "unknown" ||
-      summary.classroom50.status === "no_access" ||
-      summary.classroom50.status === "needs_setup" ||
-      summary.membership.role !== "admin",
+      summary.classroom50.status === "needs_setup",
   )
 
   return (

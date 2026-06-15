@@ -15,6 +15,7 @@ import { useMutation } from "@tanstack/react-query"
 import { acceptAssignment } from "@/hooks/github/mutations"
 import usePagesAssignments from "@/hooks/usePagesAssignments"
 import { formatDueDate } from "@/util/formatDate"
+import useGetRepo from "@/hooks/useGetRepo"
 
 const initialsFor = (user: GitHubUser | null) => {
   const source = user?.name || user?.login || "?"
@@ -45,7 +46,7 @@ const AcceptNavbar = () => {
 
 const AcceptCard = ({ children }) => {
   return (
-    <div className="card w-200 h-180 max-w-[calc(100vw-2em)] p-8 m-auto rounded-xl mt-10 border border-[#eee]">
+    <div className="card w-200 max-w-[calc(100vw-2em)] p-8 m-auto rounded-xl mt-10 border border-[#eee]">
       {children}
     </div>
   )
@@ -173,6 +174,12 @@ const AcceptAssignmentPage = () => {
     ? `${classroom}-${assignment}-${username}`.toLowerCase()
     : `${classroom}-${assignment}-{your-github-username}`.toLowerCase()
 
+  const { data: checkedRepo, isLoading: isLoadingRepo } = useGetRepo(
+    org,
+    expectedRepoName,
+  )
+  const repoExistsAlready = checkedRepo?.name === expectedRepoName
+
   const acceptMutation = useMutation({
     mutationFn: () =>
       acceptAssignment({
@@ -185,7 +192,7 @@ const AcceptAssignmentPage = () => {
 
   const isBusy = acceptMutation.isPending
 
-  if (loadingAssignments) {
+  if (loadingAssignments || isLoadingRepo) {
     return (
       <div className="min-h-screen bg-base-100">
         <AcceptNavbar />
@@ -216,13 +223,27 @@ const AcceptAssignmentPage = () => {
                 : "No due date"}
             </span>
           </div>
-          <h1 className="text-xl font-bold pt-6">{assignmentData?.name}</h1>
+          <h1 className="text-2xl font-bold tracking-tight pt-6">
+            {assignmentData?.name}
+          </h1>
           <h2 className="text-lg">
             Accept this assignment to get your own copy of the starter code
             repository.
           </h2>
 
-          <div className="divider" />
+          {repoExistsAlready && !acceptMutation.data && (
+            <div className="alert alert-warning items-start">
+              <AlertTriangle className="size-5 shrink-0" />
+              <div>
+                <div className="font-bold">Assignment already accepted</div>
+                <div className="text-sm">
+                  Your repository already exists. You can open it below.
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="divider mt-0" />
 
           <label className="label text-lg">Signed in as</label>
 
@@ -231,7 +252,9 @@ const AcceptAssignmentPage = () => {
 
             <div className="flex gap-2 flex-col bg-[#fafafa] p-4 rounded-xl border border-[#ddd]">
               <label className="label text-lg">
-                Repository will be created as:
+                {repoExistsAlready
+                  ? "Repository already exists as:"
+                  : "Repository will be created as:"}
               </label>
 
               <div className="flex gap-4 min-w-0">
@@ -281,7 +304,7 @@ const AcceptAssignmentPage = () => {
               </div>
             )}
 
-            {!acceptMutation.data && (
+            {!acceptMutation.data && !repoExistsAlready && (
               <button
                 type="button"
                 className="btn btn-primary w-full text-xl p-8"
@@ -302,10 +325,13 @@ const AcceptAssignmentPage = () => {
               </button>
             )}
 
-            {acceptMutation.data && (
+            {(acceptMutation.data || repoExistsAlready) && (
               <a
                 className="btn btn-primary w-full text-xl p-8"
-                href={acceptMutation.data.repo.html_url}
+                href={
+                  acceptMutation?.data?.repo.html_url ||
+                  `https://www.github.com/${org}/${checkedRepo?.name}`
+                }
                 target="_blank"
                 rel="noreferrer"
               >
