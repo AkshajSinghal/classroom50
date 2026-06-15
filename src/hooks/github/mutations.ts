@@ -6,6 +6,7 @@ import {
   type GitHubTeam,
   type GitHubRepo,
   type GitHubUser,
+  type GitHubOrgMembership,
 } from "./types"
 import { GitHubAPIError } from "./errors"
 import {
@@ -1158,6 +1159,10 @@ export async function acceptPendingOrgInvite(
   } catch {
     // ignore
   }
+}
+
+export async function getPendingOrgInvite(client: GitHubClient, org: string) {
+  return client.request<GitHubOrgMembership>(`/user/memberships/orgs/${org}`)
 }
 
 function pagesAutograderUrl(org: string, classroom: string, name: string) {

@@ -639,7 +639,7 @@ export async function getRepo(
   repo: string,
 ) {
   try {
-    return await client.request(`/repos/${owner}/${repo}`)
+    return await client.request<GitHubRepo>(`/repos/${owner}/${repo}`)
   } catch (err) {
     if (err instanceof GitHubAPIError && err.status === 404) {
       return null
