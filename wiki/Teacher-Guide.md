@@ -177,7 +177,7 @@ gh teacher assignment add cs50-fall-2026 cs-principles greet --name "Greet" --te
 **Optional flags:**
 
 - `--description <text>` — short description written into the entry.
-- `--due <ISO-8601>` — RFC 3339 timestamp with a timezone offset, e.g. `2026-09-15T23:59:00-04:00`. Stored verbatim so the timezone round-trips.
+- `--due <ISO-8601>` — a due date, e.g. `2026-09-15T23:59:00-04:00`. Normalized to a UTC instant before storage (so that example lands as `2026-09-16T03:59:00Z`). If you omit the offset (`2026-09-15T23:59:00`), your machine's local timezone is auto-detected and applied. The original value and detected zone are preserved in a `due_meta` block for auditing. A bare date with no time is rejected as ambiguous.
 - `--mode individual` — the only currently-supported value; `--mode group` is planned for a future release and produces an explicit error today.
 - `--runtime <path>` — JSON file describing the runtime environment for this assignment's autograde job (`runs-on`, `python` / `node` / `java` / `go`, `apt`, or a custom `container` image). Omit for the defaults (ubuntu-latest + Python 3.12). The runner reads this on every submission, so changes propagate without any student-repo edit. See the [Autograders](Autograders) wiki page for the schema and worked examples.
 - `--autograder <name>` — reserved for swapping the entire reusable workflow (rare). For different language toolchains or apt packages, use `--runtime` instead. Default `default` resolves to the universal shim embedded in `gh-student`; non-default values reference a sibling `<classroom>/autograders/<name>.yaml` you've authored, and the CLI verifies that file exists before the assignment lands.
@@ -228,7 +228,7 @@ What it does on each run:
 1. Iterates every classroom under `<org>/classroom50/<classroom>/` (or just the one you passed via `-f classroom=`).
 2. For each `(student, assignment)` pair in `students.csv` × `assignments.json`, computes the canonical repo name `<classroom>-<assignment>-<username>` (the same formula `gh student accept` uses) and asks GitHub for that repo's latest release. A `404` from `/releases/latest` means the student hasn't accepted or hasn't submitted yet — the collector counts the gap and moves on.
 3. For each release found, downloads `result.json`, schema-validates it, and checks that the payload's `classroom` / `assignment` / `usernames[0]` match the expected `(classroom, assignment, student)` tuple (defense against a hostile autograder payload trying to land in the wrong scores.json).
-4. Upserts the validated payload into `<classroom>/scores.json` under that assignment's bucket, dropping the now-redundant `assignment` field from the stored row (it's the bucket key). **Existing entries with `"override": true` are preserved verbatim** -- if you hand-edited a row to grant partial credit, the next collect run leaves it alone.
+4. Upserts the validated payload into `<classroom>/scores.json` under that assignment's bucket, dropping the now-redundant `assignment` field from the stored row (it's the bucket key). If the assignment has `due`, the row also gets `"late": true` or `"late": false` by comparing the submission `datetime` against the due timestamp. **Existing entries with `"override": true` are preserved verbatim** -- if you hand-edited a row to grant partial credit, the next collect run leaves it alone.
 5. Logs a per-assignment `cs-principles/hello: 23/30 submitted` line so you see roster coverage at a glance.
 6. Commits the updated `*/scores.json` files back to `<org>/classroom50` on a single `collect: refresh scores.json` commit. A no-op run (no submissions changed) does not produce a commit.
 
@@ -281,7 +281,7 @@ By default the command is **roster-driven**: it reads `<classroom>/students.csv`
 2. Clones it if it does, or reports `Missing: <username> (not accepted yet?)` if it doesn't.
 3. After each clone, refreshes `<repo>/result.json` from the latest submit-tag release on that repo — so the autograded payload lands alongside the code.
 
-After all clones, the command writes a `scores.csv` summary at the destination root: one row per roster entry (`username,score,max_score,datetime,submission_tag,review_url,override`). Submitters carry their scores; non-submitters get blank score columns so you can sort the spreadsheet by score and immediately see who hasn't submitted yet.
+After all clones, the command writes a `scores.csv` summary at the destination root: one row per roster entry (`username,score,max_score,datetime,submission_tag,review_url,late,override`). Submitters carry their scores; non-submitters get blank score columns so you can sort the spreadsheet by score and immediately see who hasn't submitted yet.
 
 Each run produces a fresh timestamped folder named `<classroom>-<assignment>_submissions_YYYY_MM_DD_T_HH_MM_SS/` (24-hour local time), so re-running picks up newer submissions without overwriting earlier downloads. Override the destination with `-d`:
 
