@@ -14,6 +14,7 @@ import {
   Lock,
   RefreshCw,
 } from "lucide-react"
+import { useEffect } from "react"
 
 function MissingOrgNotice() {
   const queryClient = useQueryClient()
@@ -167,6 +168,10 @@ function OrgCard({
 
 const OrgsPage = () => {
   const { data: orgs = [] } = useGetOrgs()
+
+  useEffect(() => {
+    console.log("orgs", orgs)
+  }, [orgs])
 
   const cl50Orgs = orgs?.filter(
     (summary) =>

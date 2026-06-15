@@ -556,6 +556,13 @@ export async function listAuthedOrgMemberships(client: GitHubClient) {
   )
 }
 
+export async function getAuthedOrgMembership(
+  client: GitHubClient,
+  org: string,
+) {
+  return client.request<GitHubOrgMembership>(`/user/memberships/orgs/${org}`)
+}
+
 export type Classroom50OrgSummary = {
   org: {
     login: string

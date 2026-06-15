@@ -12,6 +12,8 @@ import Drawer, {
 } from "@/components/drawer"
 import type { GitHubFileListing } from "@/hooks/github/types"
 import useGetClassroom from "@/hooks/useGetClassroom"
+import { useEffect } from "react"
+import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
 
 const ClassCard = ({ cl, org }: { cl: GitHubFileListing; org: string }) => {
   const { data: classroomData } = useGetClassroom(org, cl.path)
@@ -62,6 +64,7 @@ const ClassCard = ({ cl, org }: { cl: GitHubFileListing; org: string }) => {
 const ClassesPage = () => {
   const { org } = useParams({ strict: false })
   const { classes } = useGetClasses(org)
+  const { isTeacher, isStudent, isBlocked } = useCourseTeacherAccess(org)
 
   return (
     <div className="min-h-screen">
@@ -94,7 +97,7 @@ const ClassesPage = () => {
                 </div>
               </div>
 
-              {classes.length ? (
+              {classes.length && isTeacher ? (
                 <div className="flex sm:self-end">
                   <Link
                     type="button"
@@ -109,7 +112,7 @@ const ClassesPage = () => {
               )}
             </div>
           </div>
-          {classes.length === 0 ? (
+          {classes.length === 0 && isTeacher ? (
             <div className="card border border-dashed border-base-300 bg-base-100 shadow-sm">
               <div className="card-body items-center py-12 text-center">
                 <div className="mb-2 flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary">
