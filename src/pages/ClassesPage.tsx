@@ -4,7 +4,9 @@ import {
   BookText,
   ExternalLink,
   GraduationCap,
+  Pencil,
   Plus,
+  UserRound,
   UsersRound,
 } from "lucide-react"
 import GitHub from "@/assets/github.svg?react"
@@ -27,6 +29,7 @@ import { acceptPendingOrgInvite } from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import useGetOrgRepos from "@/hooks/useGetMyOrgRepos"
 import useDotClassroom50 from "@/hooks/useDotClassroom50"
+import useGetPublicAssignment from "@/hooks/useGetPublicAssignment"
 
 const ClassCard = ({ cl, org }: { cl: GitHubFileListing; org: string }) => {
   const { data: classroomData } = useGetClassroom(org, cl.path)
@@ -159,12 +162,27 @@ const JoinOrgCard = ({ org }: { org: string }) => {
 
 const RepoCard = ({ org, repo }) => {
   const cl50Yaml = useDotClassroom50(org, repo.name)
-  const { classroom } = cl50Yaml
+  const { classroom, assignment } = cl50Yaml
+  const assignmentData = useGetPublicAssignment(org, classroom, assignment)
+
+  const canEdit = classroom && assignment
 
   return (
-    <div className="card col-span-12 rounded-2xl border border-base-200 bg-base-100 md:col-span-6 xl:col-span-4">
+    <div className="card relative col-span-12 rounded-2xl border border-base-200 bg-base-100 md:col-span-6 xl:col-span-4">
+      {canEdit && (
+        <Link
+          to="/$org/$classroom/assignments/$assignment/edit"
+          params={{ org, classroom, assignment }}
+          className="btn btn-ghost btn-sm btn-circle absolute right-3 top-3 z-10 text-base-content/50 hover:text-primary"
+          aria-label={`Edit ${assignment}`}
+          title="Edit assignment"
+        >
+          <Pencil className="size-4" />
+        </Link>
+      )}
+
       <div className="card-body gap-4">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start justify-between gap-4 pr-8">
           <div className="min-w-0">
             <div className="mb-2 flex items-center gap-2">
               <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -207,12 +225,17 @@ const RepoCard = ({ org, repo }) => {
         )}
 
         <div className="card-actions items-center justify-between pt-1">
-          <div className="flex flex-wrap gap-2">
-            {repo.archived && (
-              <div className="badge badge-warning">Archived</div>
+          <div className="flex flex-wrap items-end gap-2">
+            {assignmentData?.mode === "individual" && (
+              <div className="badge badge-ghost badge-sm py-3">
+                <UserRound className="size-4" /> Individual
+              </div>
             )}
-            {repo.disabled && <div className="badge badge-error">Disabled</div>}
-            {repo.fork && <div className="badge badge-outline">Fork</div>}
+            {assignmentData?.mode === "group" && (
+              <div className="badge badge-ghost badge-sm">
+                <UsersRound className="size-4" /> Group
+              </div>
+            )}
           </div>
 
           <a

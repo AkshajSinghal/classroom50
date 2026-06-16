@@ -1166,7 +1166,7 @@ export async function getPendingOrgInvite(client: GitHubClient, org: string) {
 }
 
 function pagesAutograderUrl(org: string, classroom: string, name: string) {
-  return `https://${org}.github.io/classroom50/${classroom}/autograders/${name}/yaml`
+  return `https://${org}.github.io/classroom50/${classroom}/autograders/${name}.yaml`
 }
 
 function defaultAutograderWorkflow(org: string) {
