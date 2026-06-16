@@ -96,6 +96,8 @@ Tagging is the runner's job — the autograde workflow's first step creates `sub
 
 The hardcoded `main` push target means templates whose default branch is `master`/`develop` end up with a separate `main` after the first submit.
 
+**Feedback PR timing.** If your teacher enabled feedback, a single long-lived **Feedback** pull request appears on your **first submission that adds work** — not at accept time. (GitHub can't open a pull request with no changes to show, and right after accepting there's nothing yet.) Unlike GitHub Classroom — which opens the feedback PR the moment you accept — Classroom 50 waits for real work, so the diff your teacher reviews never includes the setup files (`.classroom50.yaml`, the autograde workflow). A side benefit: if you ever change those setup files, it stands out in the diff. The one PR is reused for every later submission.
+
 ## `gh student whoami` / `login` / `logout`
 
 - `gh student whoami` — prints the authenticated GitHub user.

@@ -381,6 +381,30 @@ All five layers live in the config repo. None require any change in any student 
 
 The runner workflow file itself (`autograde-runner.yaml`) is the right place to edit only when you need to add a language toolchain GitHub doesn't ship a setup-X action for, or change the post-grade publish steps. For everything else, `autograder.py` + the `runtime:` block cover the cases.
 
+## Feedback Pull Requests
+
+The **Feedback PR is on by default** for assignments created with `gh teacher assignment add` (persisted as `feedback_pr: true` in `assignments.json`); pass `--feedback-pr=false` to turn it off for a given assignment. When on, the autograde runner maintains **one long-lived "Feedback" pull request per student repo** so you review the student's cumulative work with inline GitHub review comments instead of (or alongside) the scored Release.
+
+> **Difference from GitHub Classroom:** GitHub Classroom opens the feedback PR at *accept* time; Classroom 50 opens it on the student's **first submission that adds work**. GitHub can't open a zero-change PR, and — by design — we freeze the PR base at the `gh student accept` commit so the diff you review contains only the student's own work, never the setup files (`.classroom50.yaml`, the autograde workflow). Bonus: if a student edits those setup files, it shows up as a change in the Feedback PR diff.
+
+**How it works:**
+
+- **Base = a frozen branch.** On the first submission that has a diff, the runner creates a `feedback` branch pointing at the student's **baseline commit** (the `gh student accept` plumbing commit), then never advances it. The PR is `base = feedback`, `head = the default branch`, so it always shows the full starter→latest-submission diff and auto-updates on every submission.
+- **One PR, reused.** The runner opens the PR once and reuses it across submissions. It's titled **Feedback** and labeled **Individual Assignment** or **Group Assignment** (by the assignment's `mode`) so you can filter/spot them. If a student closes it without merging, the runner reopens it; a teacher **merge** is treated as the "grading done" signal and left alone.
+- **Trusted baseline only.** If the runner can't identify the accept commit (unusual or rewritten history), it **skips** the PR rather than freezing a wrong base. It also warns if the `feedback` branch already exists at a commit other than the expected baseline (a sign someone pre-created it).
+- **Observable.** The runner posts a `classroom50/feedback-pr` commit status (`success` / `failure` / `error`) with the PR URL as the target, alongside the `classroom50/autograde` status — so a script or agent can poll whether the Feedback PR is in place without scraping the job log.
+
+**Prerequisites (handled by `gh teacher init`):**
+
+- The org setting **"Allow GitHub Actions to create and approve pull requests"** must be on — the workflow's `GITHUB_TOKEN` can't open the PR otherwise. `init` enables it. (GitHub couples "create" and "approve" in this single org setting; there is no create-only toggle. This is safe in the default Classroom 50 model because no branch requires PR review — but if you later add a required-review rule to a repo in this org, be aware a workflow token could self-approve.)
+- Two org **rulesets** `init` installs: one blocks force-push/deletion on the default branch (so submission history can't be rewritten), one locks the `feedback` branch against updates/deletes by anyone but an org admin (so students can't move or merge the frozen base). Org admins (you) bypass both, so you can merge the Feedback PR.
+
+If you enable `--feedback-pr` on an org that was set up before this feature, **re-run `gh teacher init`** to apply the org setting and rulesets. Re-running init **reconciles** the rulesets: an existing Classroom 50 ruleset is updated in place to the current definition, so a stale ruleset from an older CLI (e.g. one targeting the wrong branch pattern) is repaired rather than left behind.
+
+**Student repos accepted before this feature shipped.** The autograde shim in each student repo is written at `gh student accept` time and is **not** updated by re-accepting (re-accept is a no-op on an existing repo). Older shims grant only `contents`/`statuses` to the reusable runner; the Feedback PR runner additionally needs `pull-requests: write`, and a reusable workflow whose caller grants less than it requires **fails to load** — GitHub reports a `startup_failure` ("This run likely failed because of a workflow file issue") with no job logs. Repos created with the current `gh student accept` grant the right scope and are unaffected; pre-existing repos must be re-created (delete + re-accept) to pick up the new shim. (Pre-launch, this affects only test repos.)
+
+**Limitations:** the per-repo limit relies on the org rulesets being in place; on a plan or policy that rejects org rulesets, `init` warns and continues, and the protections silently don't apply. The Feedback PR opens only when there's a diff to show (a submission identical to the baseline produces no PR).
+
 ## Custom runner workflow (rare)
 
 The `--autograder <name>` flag on `gh teacher assignment add` exists for the rare case where you want an assignment to call a fundamentally different *reusable workflow* — not just a different `autograder.py`, but a different runner entirely. To opt in:
