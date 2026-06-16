@@ -152,6 +152,16 @@ gh teacher roster import <org> <classroom> <path-to-csv>
 
 Accepts either the canonical 6-column header (`username,first_name,last_name,email,section,github_id` — the same shape `students.csv` uses on disk) or a 5-column header without `github_id` (recommended for hand-authored CSVs since `github_id` is CLI-managed). The `email` column values may be empty per row. All usernames are resolved up-front; a single typo aborts the whole import before any commit. The entire file is then written in one Tree commit, and every new student is invited to the org. Re-running is safe — already-imported rows just refresh.
 
+**View the current roster:**
+
+```sh
+gh teacher roster list <org> <classroom>
+gh teacher roster list cs50-fall-2026 cs-principles --json
+gh teacher roster list cs50-fall-2026 cs-principles --quiet
+```
+
+Prints `students.csv` without opening it on GitHub. Default output is an aligned table (username, name, email, section, github_id; empty cells show as `-`) with a `N student(s)` summary on stderr. Use `--json` for scripting (the full row objects) or `--quiet` for one username per line (handy for piping into `xargs` or an agent loop). An empty roster exits 0 with a clear note; a missing `students.csv` points you back at `gh teacher classroom add`. Read-only — no commit lands.
+
 **Remove a student from the roster:**
 
 ```sh
@@ -160,7 +170,7 @@ gh teacher roster remove <org> <classroom> <username>
 
 Drops the row from `students.csv`. **Does NOT remove org membership** — use `gh teacher remove <org> <username>` (step 8) for that. Splitting roster removal from org removal is deliberate: an off-by-one roster edit shouldn't be able to revoke a student's access to every repo in the org.
 
-All three subcommands write through an optimistic-update-with-rebase loop (a small number of retries with exponential backoff) so two teachers editing the roster concurrently can't silently lose each other's work. If you see a `lost the rebase race` message, just retry the command.
+`roster list` is read-only; the three write subcommands (`add`, `import`, `remove`) go through an optimistic-update-with-rebase loop (a small number of retries with exponential backoff) so two teachers editing the roster concurrently can't silently lose each other's work. If you see a `lost the rebase race` message, just retry the command.
 
 ## 7. Add assignments
 

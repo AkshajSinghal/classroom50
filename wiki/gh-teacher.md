@@ -24,6 +24,7 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | `gh teacher classroom edit <org> <short-name>` | Update a classroom's display name and/or term in `classroom.json`. Requires at least one of `--name "<display name>"`, `--term <term>`. The short-name itself is immutable. No-op when values are unchanged. |
 | `gh teacher classroom remove <org> <short-name>` | Delete a classroom's `<short-name>/` directory from `<org>/classroom50` in one commit. Prompts for the typed short-name to confirm; `--yes` skips the prompt. Does NOT delete student repos. |
 | `gh teacher classroom migrate --source <id-or-org> --target <org>` | Import an existing GitHub Classroom into `<target>/classroom50`. Discovers the source classroom (numeric ID or org login), copies each starter repo into the target org as a fresh template, and commits a populated `<short-name>/` directory in one Tree commit. Optional: `--short-name`, `--term`, `--template-suffix`, `--include-archived`, `--dry-run`. Roster and scores are NOT migrated. |
+| `gh teacher roster list <org> <classroom>` | List the students in `students.csv` as an aligned table (username, name, email, section, github_id). Optional: `--json` (full `{username, first_name, last_name, email, section, github_id}` objects), `--quiet` (one username per line, no table or stderr summary). Read-only. |
 | `gh teacher roster add <org> <classroom> <username>` | Append or upsert a student in `students.csv`; resolves `github_id`, sends an org invite if needed. Optional flags: `--first-name`, `--last-name`, `--email`, `--section`. |
 | `gh teacher roster remove <org> <classroom> <username>` | Remove a row from `students.csv`. Does NOT touch org membership. Idempotent. |
 | `gh teacher roster import <org> <classroom> <path-to-csv>` | Bulk upsert from a local CSV (`username,first_name,last_name,email,section` header; trailing `github_id` accepted but ignored). One Tree commit; auto-invites new students. |
@@ -256,6 +257,22 @@ gh teacher classroom migrate --source 95884 --target cs50-fall-2026 \
 Manage student rows in `<org>/classroom50/<classroom>/students.csv`. All three subcommands write through a shared optimistic-update-with-rebase loop: each attempt reads the current branch tip, re-applies the upsert/remove against the latest file, and PATCHes the ref with a fast-forward check. Up to 5 attempts with exponential backoff before giving up — concurrent edits from multiple teachers can't silently lose each other's work.
 
 Every row carries an immutable numeric `github_id` (resolved at write time via `GET /users/{username}`) so a mid-class username change doesn't desynchronize records. The `github_id` column is CLI-managed; teachers should not hand-edit it. The column is named `github_id` (not the API-side `id`) to keep the source unambiguous when classroom50 grows additional ID columns from non-GitHub sources.
+
+### `gh teacher roster list`
+
+```sh
+gh teacher roster list <org> <classroom>
+gh teacher roster list cs50-fall-2026 cs-principles --json
+gh teacher roster list cs50-fall-2026 cs-principles --quiet
+```
+
+Reads `<classroom>/students.csv` and prints it. Three output modes:
+
+- **Default** — an aligned table on stdout (`USERNAME`, `NAME`, `EMAIL`, `SECTION`, `GITHUB_ID`; empty cells render as `-`), plus a one-line `<org>/<repo>/<classroom>/students.csv: N student(s)` summary on stderr.
+- `--json` — emit the full JSON array of `{username, first_name, last_name, email, section, github_id}` objects (`github_id` is `0` for an unresolved row, not omitted; gate on `github_id == 0`). Takes precedence over `--quiet`.
+- **`--quiet`** — one username per line on stdout, no table and no stderr summary — pipeable into `xargs`, `grep`, or an agent loop.
+
+An empty roster is a clean exit-0: the table shows just the header (or stdout is empty under `--json`/`--quiet`), and stderr notes there are no students. A missing `students.csv` errors and points at `gh teacher classroom add`. Read-only; no commit lands.
 
 ### `gh teacher roster add`
 
