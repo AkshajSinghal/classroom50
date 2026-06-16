@@ -8,6 +8,7 @@ const useGetOrgRepos = (org: string) => {
   return useQuery({
     queryKey: ["orgs", org, "repos"],
     queryFn: () => getOrgRepos(client, org),
+    staleTime: 10 * 60 * 1000,
   })
 }
 

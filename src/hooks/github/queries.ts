@@ -241,6 +241,7 @@ export function rawFileQuery(
       ),
     enabled: Boolean(owner && repo && typeof path === "string"),
     staleTime: 10 * 60 * 1000,
+    retry: false,
   })
 }
 
@@ -268,6 +269,7 @@ export function jsonFileQuery<T>(
     },
     enabled: Boolean(owner && repo && typeof path === "string"),
     staleTime: 10 * 60 * 1000,
+    retry: false,
   })
 }
 
@@ -359,6 +361,24 @@ export async function getRawFile(
 
   if (file.type !== "file") {
     throw new Error(`${path} is not a file`)
+  }
+
+  return decodeBase64Utf8(file.content)
+}
+
+export async function getClassroom50Yaml(
+  client: GitHubClient,
+  org: string,
+  repo: string,
+): Promise<string> {
+  const file = await client.request<{
+    type: "file"
+    encoding: "base64"
+    content: string
+  }>(`/repos/${org}/${repo}/contents/.classroom50.yaml?ref=main`)
+
+  if (file.type !== "file") {
+    throw new Error(`.classroom50.yaml not found in ${repo}`)
   }
 
   return decodeBase64Utf8(file.content)
