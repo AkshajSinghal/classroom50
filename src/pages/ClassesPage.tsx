@@ -2,13 +2,9 @@ import { useParams, Link } from "@tanstack/react-router"
 import {
   BookOpen,
   BookText,
-  Clock,
-  Code2,
   ExternalLink,
-  GitBranch,
-  Lock,
+  GraduationCap,
   Plus,
-  ShieldCheck,
   UsersRound,
 } from "lucide-react"
 import GitHub from "@/assets/github.svg?react"
@@ -30,6 +26,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { acceptPendingOrgInvite } from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import useGetOrgRepos from "@/hooks/useGetMyOrgRepos"
+import useDotClassroom50 from "@/hooks/useDotClassroom50"
 
 const ClassCard = ({ cl, org }: { cl: GitHubFileListing; org: string }) => {
   const { data: classroomData } = useGetClassroom(org, cl.path)
@@ -160,33 +157,13 @@ const JoinOrgCard = ({ org }: { org: string }) => {
   )
 }
 
-const formatRepoName = (name: string) =>
-  name
-    .split("-")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ")
+const RepoCard = ({ org, repo }) => {
+  const cl50Yaml = useDotClassroom50(org, repo.name)
+  const { classroom } = cl50Yaml
 
-const formatRelativeDate = (dateString?: string) => {
-  if (!dateString) return "Unknown"
-
-  const date = new Date(dateString)
-  const diffMs = Date.now() - date.getTime()
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
-
-  if (diffDays === 0) return "Today"
-  if (diffDays === 1) return "Yesterday"
-  if (diffDays < 30) return `${diffDays} days ago`
-
-  const diffMonths = Math.floor(diffDays / 30)
-  if (diffMonths === 1) return "1 month ago"
-  if (diffMonths < 12) return `${diffMonths} months ago`
-
-  const diffYears = Math.floor(diffMonths / 12)
-  return diffYears === 1 ? "1 year ago" : `${diffYears} years ago`
-}
-
-const RepoCard = ({ repo }) => {
-  const title = formatRepoName(repo.name)
+  useEffect(() => {
+    console.log(".classroom50.yaml", cl50Yaml)
+  }, [cl50Yaml])
 
   return (
     <div className="card col-span-12 rounded-2xl border border-base-200 bg-base-100 md:col-span-6 xl:col-span-4">
@@ -214,6 +191,24 @@ const RepoCard = ({ repo }) => {
           {repo.description ||
             "No description provided for this assignment repository."}
         </p>
+
+        {classroom && (
+          <div className="alert alert-outline">
+            <Link
+              to="/$org/$classroom"
+              params={{ org, classroom }}
+              className="group inline-flex w-fit items-center gap-1.5 text-sm text-base-content/60 transition hover:text-primary"
+            >
+              <GraduationCap className="size-4" />
+              <span className="truncate">
+                Classroom:{" "}
+                <span className="font-medium text-base-content/80 group-hover:text-primary">
+                  {classroom}
+                </span>
+              </span>
+            </Link>
+          </div>
+        )}
 
         <div className="card-actions items-center justify-between pt-1">
           <div className="flex flex-wrap gap-2">
@@ -270,7 +265,7 @@ const OrgRepos = ({ org }: { org: string }) => {
   return (
     <div className="grid grid-cols-12 gap-4">
       {maintainRepos.map((repo) => (
-        <RepoCard key={repo.id ?? repo.full_name} repo={repo} />
+        <RepoCard key={repo.id ?? repo.full_name} org={org} repo={repo} />
       ))}
     </div>
   )
