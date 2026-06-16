@@ -65,7 +65,7 @@ Performs these steps in order:
 9. **Reusable-workflow access** — `PUT .../actions/permissions/access` with `access_level: organization` so student-repo shims can `uses:` the autograde-runner workflow. 403/409 is warn-and-continue with manual recovery instructions.
 10. **Collect token** — reads `CLASSROOM50_COLLECT_TOKEN` from env (trimmed), piped stdin, or hidden TTY prompt; libsodium sealbox-encrypts and uploads as a repo-level Actions secret.
 
-**Collect token requirements:** fine-grained PAT with `Contents: read` on all org repos (student repos are created on demand by `gh student accept`, so an "Only select repositories" scope silently misses them).
+**Collect token requirements:** fine-grained PAT with `Contents: read` on all org repos (student repos are created on demand by `gh student accept`, so an "Only select repositories" scope silently misses them). This also covers **group assignments** — `collect-scores` reads a group repo's collaborators via the always-present `Metadata: read` permission (auto-included on every fine-grained PAT), so no extra scope beyond `Contents: read` is needed.
 
 **Skeleton shipped:**
 
@@ -567,7 +567,7 @@ The command reads `<org>/classroom50/<classroom>/students.csv` and `<classroom>/
 2. Probes `GET /repos/<org>/<name>` ([docs](https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#get-a-repository)). A 404 prints `Missing: <username> (not accepted yet?)` and contributes to the per-run summary; a non-404 error surfaces as a per-repo failure.
 3. For repos that exist, shells out to `gh repo clone <org>/<name> <dir>/<name>` so authentication flows through the current `gh` session.
 4. For each cloned repo (and for repos already on disk), refreshes `<repo>/result.json` from the latest submit-tag release. The asset is fetched via `GET /repos/<org>/<repo>/releases/latest` → the asset's API URL with `Accept: application/octet-stream`, and `Authorization` is stripped on the redirect to the signed storage URL so the GitHub token never reaches the storage origin. A repo with no releases, a non-submit tag, or no `result.json` asset is a silent no-op.
-5. After all clones, writes a `scores.csv` summary at the destination root with one row per roster entry. Submitters carry their score columns (`score`, `max_score`, `datetime`, `submission_tag`, `review_url`, `late`, `override`); non-submitters get blank score columns so a teacher can sort by score and immediately see who hasn't submitted yet. Submissions in `scores.json` whose `usernames[0]` isn't on the current roster are dropped from the CSV (the roster is the source of truth for which students are in this class right now).
+5. After all clones, writes a `scores.csv` summary at the destination root with one row per roster entry. Submitters carry their score columns (`score`, `max_score`, `datetime`, `submission_tag`, `review_url`, `late`, `override`); non-submitters get blank score columns so a teacher can sort by score and immediately see who hasn't submitted yet. Each username in a submission's `usernames` is credited (so every member of a group submission gets the row's score); a submission is dropped from the CSV only when **none** of its usernames are on the current roster (the roster is the source of truth for which students are in this class right now).
 
 The command refuses to run when:
 
