@@ -45,6 +45,14 @@ gh teacher init <org>
 
 **Collect token.** Supply a fine-grained PAT with **Contents: read** to all repositories in the org. Store it only via the `CLASSROOM50_COLLECT_TOKEN` environment variable or a hidden stdin prompt — there is no `--collect-token` flag (command-line PATs leak via shell history and process listings). Use an org-owned service account, not a personal teacher account; pass `--service-account-confirm` to silence the reminder. Rotate before expiry (fine-grained PATs support up to 1 year; 90 days is a common rotation interval) with:
 
+> **Group assignments need no extra scope.** A group assignment grades once in
+> the first-accepter's repo; `collect-scores` then reads that repo's collaborators
+> to give every group member the same score row. Listing collaborators
+> (`GET /repos/{owner}/{repo}/collaborators`) requires only `Metadata: read`,
+> which is auto-included on every fine-grained PAT (and already implied by the
+> `Contents: read` you grant above), so the same collect token works for
+> individual and group assignments alike — no scope change needed.
+
 > **Why all repositories, not just `<classroom>-*`?** Student repos are created on
 > demand when students run `gh student accept`, so they don't exist when you mint the
 > token — a PAT scoped to "Only select repositories" can't include them, and
@@ -248,7 +256,7 @@ What it does on each run:
 
 1. Iterates every classroom under `<org>/classroom50/<classroom>/` (or just the one you passed via `-f classroom=`).
 2. For each `(student, assignment)` pair in `students.csv` × `assignments.json`, computes the canonical repo name `<classroom>-<assignment>-<username>` (the same formula `gh student accept` uses) and asks GitHub for that repo's latest release. A `404` from `/releases/latest` means the student hasn't accepted or hasn't submitted yet — the collector counts the gap and moves on.
-3. For each release found, downloads `result.json`, schema-validates it, and checks that the payload's `classroom` / `assignment` / `usernames[0]` match the expected `(classroom, assignment, student)` tuple (defense against a hostile autograder payload trying to land in the wrong scores.json).
+3. For each release found, downloads `result.json`, schema-validates it, and checks the payload's identity against the source repo: `classroom` / `assignment` must match, and the repo's derived owner must be the `usernames` entry for an individual assignment (or present among `usernames` for a group assignment). This defends against a hostile autograder payload trying to land in the wrong scores.json. For a group assignment, the collector then reads the repo's collaborators and rewrites `usernames` to the full rostered member list.
 4. Upserts the validated payload into `<classroom>/scores.json` under that assignment's bucket, dropping the now-redundant `assignment` field from the stored row (it's the bucket key). If the assignment has `due`, the row also gets `"late": true` or `"late": false` by comparing the submission `datetime` against the due timestamp. **Existing entries with `"override": true` are preserved verbatim** -- if you hand-edited a row to grant partial credit, the next collect run leaves it alone.
 5. Logs a per-assignment `cs-principles/hello: 23/30 submitted` line so you see roster coverage at a glance.
 6. Commits the updated `*/scores.json` files back to `<org>/classroom50` on a single `collect: refresh scores.json` commit. A no-op run (no submissions changed) does not produce a commit.
@@ -257,7 +265,7 @@ What it does on each run:
 
 **Override workflow.** To grant partial credit for a flaky test or correct a misgrade, hand-edit `<classroom>/scores.json` in the config repo, change the row's `score`, and add `"override": true`. Commit and push. The next collect run will leave that row alone. A `gh teacher score override` CLI helper is planned for a later release; until then, the JSON edit is the canonical path.
 
-**`scores.json` shape:** `submissions` is an object keyed by assignment slug; each value is that assignment's rows, one per student. A row is the validated `result.json` payload with the redundant `assignment` field dropped (it's the bucket key); everything else, including `schema` and `tests`, is kept.
+**`scores.json` shape:** `submissions` is an object keyed by assignment slug; each value is that assignment's rows. For an individual assignment there is one row per student. For a **group assignment** there is one row per *group*, whose `usernames` lists every member — collect-scores reads the group repo's collaborators and credits all of them with the shared score (see the group note below). A row is the validated `result.json` payload with the redundant `assignment` field dropped (it's the bucket key); everything else, including `schema` and `tests`, is kept.
 
 ```json
 {
@@ -284,7 +292,9 @@ What it does on each run:
 }
 ```
 
-One row per student within each assignment bucket. Re-running collect refreshes each row with the latest release's data unless `override: true` is set. (A scores.json still in the older flat-array layout is migrated to this map on the next collect run.)
+One row per student (individual assignments) or one row per group (group assignments — `usernames` carries all members) within each assignment bucket. Re-running collect refreshes each row with the latest release's data unless `override: true` is set. (A scores.json still in the older flat-array layout is migrated to this map on the next collect run.)
+
+**Group assignments.** A group assignment is graded once, in the first-accepter's repo. `collect-scores` reads that repo's student collaborators (org admins/instructors excluded), **keeps only those on the classroom roster** (the owner is always credited), and rewrites the row's `usernames` to that member list, so every rostered teammate gets the same score — `scores.csv` then has a row per member with the shared score. A non-rostered collaborator added out-of-band (e.g. via the GitHub UI) is **not** credited. Reading collaborators needs only `Metadata: read` (auto-included on every fine-grained PAT and already implied by `Contents: read`), so the existing collect token works as-is. If the collaborator read fails for any reason, the score is credited to the repo owner only and the run logs a warning. Teammates who joined a repo own no repo of their own, so they are not reported as "missing" in `gh teacher download`.
 
 ## 10. Download submissions
 

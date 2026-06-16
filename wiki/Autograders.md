@@ -46,7 +46,7 @@ This is the **only** contract every autograder must satisfy. Whatever produces i
 | `schema` | string | Must be `classroom50/result/v1` exactly |
 | `classroom` | string | Must match `<classroom>` in the repo name |
 | `assignment` | string | Must match `<assignment>` in the repo name |
-| `usernames` | `[string]` | Exactly one element (individual assignments) |
+| `usernames` | `[string]` | The repo owner (one element). The runner always emits the single owner; for a group assignment `collect-scores` expands this at collection time to the repo's collaborators **intersected with the roster** (owner always included, admins excluded) |
 | `submission` | string | The submit-tag name |
 | `commit` | string | URL to the submission commit |
 | `release` | string | URL to the release |
@@ -56,7 +56,7 @@ This is the **only** contract every autograder must satisfy. Whatever produces i
 | `max-score` | int | Sum of test max-scores |
 | `tests` | `[object]` | Per-test breakdown (optional content — `[]` is valid for the "vacuous pass / no tests configured" case) |
 
-`collect-scores.yaml` validates this payload before merging into `scores.json`. Mismatches against the source repo's identity (classroom/assignment/username triple) are rejected with a warning.
+`collect-scores.yaml` validates this payload before merging into `scores.json`. Mismatches against the source repo's identity (classroom/assignment/username triple) are rejected with a warning. For a group assignment the check requires the repo owner to be present in `usernames` (collect-scores then rewrites it to the full member list); for an individual assignment `usernames` must be exactly the one expected student.
 
 ## Declarative tests (no `autograder.py`)
 

@@ -57,7 +57,20 @@ Same device flow as above, but with student-appropriate scopes:
 | Resource owner | your teaching org |
 | Repository access | **All repositories** ("Only select repositories" misses student repos, which `gh student accept` creates on demand after the token is minted) |
 | Contents | **Read** |
+| Metadata | **Read** (mandatory — GitHub auto-includes it on every fine-grained PAT; this is what lets `collect-scores` read group-repo collaborators, so group assignments need no extra scope) |
 | Expiry | 1–366 days (fine-grained PATs support up to 1 year); set a calendar reminder to rotate before it expires |
+
+> **Group assignments need no extra scope.** For a group assignment the
+> autograder runs once in the first-accepter's repo and emits a single score;
+> `collect_scores.py` then reads that repo's **collaborators** to fan the score
+> out to every group member **on the roster** (the owner is always credited; a
+> non-rostered out-of-band collaborator is excluded). Listing collaborators
+> (`GET /repos/{owner}/{repo}/collaborators`) requires only `Metadata: read`,
+> which is auto-included on every fine-grained PAT and already implied by the
+> `Contents: read` grant above — so the same collect token serves individual and
+> group assignments. If the collaborator read fails for any reason, the group
+> submission still scores for the repo owner and `collect-scores` logs a
+> `::warning::` naming the repo.
 
 Supply the PAT to `gh teacher init` via the environment variable (never a flag — command-line PATs leak via shell history):
 
