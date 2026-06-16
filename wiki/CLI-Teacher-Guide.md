@@ -222,6 +222,15 @@ gh teacher remove <org>/<repo> <username>    # remove from one repo
 
 The org form revokes access to every repository in the org, removes the user from all teams, and cancels any pending invitation in one call. Both forms are idempotent — a 404 (user is not a member or collaborator) prints a clear message and exits 0 so re-runs are safe.
 
+**Check who's actually a member:**
+
+```sh
+gh teacher member list <org>         # org members + pending invitations, with role
+gh teacher member list <org>/<repo>  # repo collaborators, with permission level
+```
+
+The roster (`students.csv`) is the *intended* class list; this is *actual* GitHub membership, so the two can drift — e.g. a student who was added to the roster but never accepted their org invite still shows as a pending `invitation`, not a `member`. Default output is a table (`LOGIN`, `KIND`, `ROLE`, `GITHUB_ID`); add `--json` for scripting or `--quiet` for one login per line (pipe into `xargs`/`grep` or diff against the roster to spot who hasn't joined yet). Reading an org's pending invitations needs the `admin:org` scope (the same scope `invite` uses). Read-only.
+
 ## 9. Collect scores
 
 Every student submission publishes a GitHub Release on their own repo carrying a `result.json` asset. The `collect-scores` workflow in `<org>/classroom50` walks every `(student, assignment)` pair in `<classroom>/students.csv` × `<classroom>/assignments.json`, asks GitHub for each expected repo's latest release, and aggregates the results into `<classroom>/scores.json` — the authoritative score record for the class.

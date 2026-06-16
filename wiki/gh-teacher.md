@@ -15,6 +15,8 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | `gh teacher invite <org>/<repo> <user>` | Invite user to a specific repo. Default permission `push`; override with `-p {pull,triage,push,maintain,admin}`. Re-running updates the collaborator in place. |
 | `gh teacher remove <org> <user>` | Remove user from an org. Revokes access to every repo in the org, removes them from all teams, and cancels any pending invitation. Idempotent. |
 | `gh teacher remove <org>/<repo> <user>` | Remove user from a single repo. Idempotent. |
+| `gh teacher member list <org>` | List actual org members + pending invitations, with role. Optional: `--json`, `--quiet` (login-only). Read-only. |
+| `gh teacher member list <org>/<repo>` | List actual repo collaborators, with permission level. Optional: `--json`, `--quiet` (login-only). Read-only. |
 | `gh teacher download <org> <classroom> <assignment>` | Roster-driven by default: clone one repo per `<classroom>/students.csv` row, refresh each repo's `result.json` from the latest submit-tag release, and write a `scores.csv` summary at the destination root. Pass `--by-pattern` to skip the roster lookup and clone by name prefix instead. Default destination is `<classroom>-<assignment>_submissions_<YYYY_MM_DD_T_HH_MM_SS>/`; override with `-d`. |
 | `gh teacher teardown <org>` | Delete every repo in a Classroom 50 org (development reset). Requires `<org>/classroom50` to exist (the marker repo guards against accidental teardown of non-Classroom orgs); prompts for typed org-name confirmation unless `--yes`; deletes `classroom50` last so an interrupted run stays safe to re-run. Requires the `delete_repo` OAuth scope (opt in once via `gh teacher login -s delete_repo`). |
 | `gh teacher init <org>` | Bootstrap `<org>/classroom50` (org member defaults, config repo, Pages, branch protection, collect-token secret). Idempotent; re-runs also refresh stale skeleton files after a confirmation prompt (`--yes` to skip). |
@@ -528,6 +530,22 @@ gh teacher remove <org>/<repo> <username>    # remove from one repository
 - Org targets call `DELETE /orgs/{org}/memberships/{username}` ([docs](https://docs.github.com/en/rest/orgs/members?apiVersion=2026-03-10#remove-organization-membership-for-a-user)). Revokes access to every repository in the org, removes the user from all teams, and cancels any pending invitation in one call.
 - Repo targets call `DELETE /repos/{owner}/{repo}/collaborators/{username}` ([docs](https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#remove-a-repository-collaborator)).
 - Both forms are idempotent: a `204` prints `removed <username>`; a `404` (user is not a member or collaborator) prints a clear message and exits 0 so re-runs are safe.
+
+## `gh teacher member list`
+
+```sh
+gh teacher member list <org>         # org members + pending invitations, with role
+gh teacher member list <org>/<repo>  # repo collaborators, with permission level
+gh teacher member list <org> --json
+gh teacher member list <org> --quiet
+```
+
+The Read counterpart to `invite` / `remove`. The roster (`students.csv`) is the *intended* membership; this command shows *actual* GitHub membership, so the two can be reconciled when they drift (a student who never accepted their invite, or a collaborator added out of band).
+
+- **Org target** lists active members and pending invitations. Active members come from `GET /orgs/{org}/members` ([docs](https://docs.github.com/en/rest/orgs/members?apiVersion=2026-03-10#list-organization-members)) — walked once with `?role=admin` to label admins and once unfiltered — and pending invitations from `GET /orgs/{org}/invitations` ([docs](https://docs.github.com/en/rest/orgs/members?apiVersion=2026-03-10#list-pending-organization-invitations)). Reading pending invitations needs the `admin:org` scope; a `403` surfaces as a clear "scope required" error rather than silently dropping them. Each row's `kind` is `member` or `invitation`; `role` is `admin` or `member`.
+- **Repo target** lists collaborators from `GET /repos/{owner}/{repo}/collaborators` ([docs](https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#list-repository-collaborators)); `kind` is `collaborator` and `role` is the permission level (`read`/`triage`/`write`/`maintain`/`admin`).
+- **Output:** default is an aligned table (`LOGIN`, `KIND`, `ROLE`, `GITHUB_ID`; a missing id or unreported permission renders as `-`) with a one-line `<target>: N member(s)` (or `N collaborator(s)`) summary on stderr. `--json` emits the full array of `{login, kind, role, github_id}` objects (empty target → `[]`, not `null`); `--quiet` prints one login per line with no table or stderr summary. `--json` takes precedence over `--quiet`. In `--json`, `github_id` is always present and is `0` when the source endpoint doesn't report a numeric id (e.g. pending invitations); `role` is `admin`/`member` (or `billing_manager`) for an org and the permission level for a repo, and may be an empty string when GitHub doesn't report it.
+- Both surfaces are paginated (100 per page) so large orgs/repos enumerate fully. Read-only; no write lands.
 
 ## `gh teacher download`
 
