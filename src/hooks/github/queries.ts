@@ -95,7 +95,7 @@ export function getBranchRefRepo(
   )
 }
 
-function sleep(ms: number) {
+export function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
@@ -134,7 +134,7 @@ export async function waitForBranchRefRepo(
       lastError = err
 
       if (!isGitRepositoryEmptyError(err) && !isNotFoundError(err)) {
-        throw error
+        throw err
       }
 
       if (attempt < attempts) {
@@ -529,16 +529,6 @@ export async function fetchAssignmentFromPages(
 
   if (!assignment) {
     throw new Error(`Assignment ${assignmentSlug} was not found.`)
-  }
-
-  // if (assignment.mode === "group") {
-  //   throw new Error("Group assignments are not yet supported.")
-  // }
-
-  if (!assignment.template?.owner || !assignment.template?.repo) {
-    throw new Error(
-      `Assignment "${assignmentSlug}" is missing template.owner or template.repo.`,
-    )
   }
 
   return assignment

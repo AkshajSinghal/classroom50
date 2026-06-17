@@ -18,7 +18,7 @@ const Breadcrumb = ({
 
   return (
     <div className={`[&>a]:text-[#4e80ee] ${className}`}>
-      {org && <Link to={`/${org}`}>Classes</Link>} {classroom && <>&gt; </>}
+      {org && <Link to={`/${org}`}>Classes</Link>} {classroom && <>› </>}
       {classroom && (
         <Link to={`/${org}/${classroom}`}>
           {classData?.name || classData?.short_name || classroom}
@@ -26,14 +26,13 @@ const Breadcrumb = ({
       )}{" "}
       {assignment && (
         <>
-          &gt; <Link to={`/${org}/${classroom}/assignments`}>Assignments</Link>{" "}
-          &gt;{" "}
+          › <Link to={`/${org}/${classroom}/assignments`}>Assignments</Link> ›{" "}
           <Link to={`/${org}/${classroom}/assignments/${assignment}`}>
             {assignment}
           </Link>
         </>
       )}{" "}
-      {endpoint && <>&gt; {endpoint}</>}
+      {endpoint && <>› {endpoint}</>}
     </div>
   )
 }

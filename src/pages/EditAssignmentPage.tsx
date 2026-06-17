@@ -60,12 +60,17 @@ const EditAssignmentFormStudent = ({ org, classroom, assignment }) => {
 
   if (!assignmentRepo) {
     return (
-      <div className="alert alert-warning">
-        You do not have this assignment yet! Do you need to{" "}
-        <Link to={`/${org}/${classroom}/assignments/${assignment}/accept`}>
-          accept it
-        </Link>{" "}
-        first?
+      <div className="alert alert-warning mt-6">
+        <div>
+          You do not have this assignment yet! Do you need to{" "}
+          <Link
+            className="underline"
+            to={`/${org}/${classroom}/assignments/${assignment}/accept`}
+          >
+            accept it
+          </Link>{" "}
+          first?
+        </div>
       </div>
     )
   }
