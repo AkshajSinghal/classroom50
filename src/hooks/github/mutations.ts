@@ -21,6 +21,7 @@ import {
   fetchTextWithFriendlyErrors,
   fetchAssignmentFromPages,
   getRepo,
+  sleep,
 } from "./queries"
 import type { Assignment } from "@/types/classroom"
 import type { AssignmentTestDraft } from "@/util/assignmentTests"
@@ -1213,49 +1214,237 @@ const extractTemplate = (template: string) => {
   if (!/\//.test(template)) return template
   return template.split("/")?.[1] ?? template
 }
-async function createRepoFromTemplate(params: {
+async function createAssignmentRepo(params: {
   client: GitHubClient
-  templateOwner: string
-  templateRepo: string
+  templateOwner?: string
+  templateRepo?: string
   owner: string
   name: string
+  fallbackBranch: string
+  metadataYaml: string
+  autogradeYaml: string
 }) {
-  const { client, templateOwner, templateRepo, owner, name } = params
+  const {
+    client,
+    templateOwner,
+    templateRepo,
+    owner,
+    name,
+    fallbackBranch,
+    metadataYaml,
+    autogradeYaml,
+  } = params
 
-  try {
-    return await client.request<GitHubRepo>(
-      `/repos/${templateOwner}/${extractTemplate(templateRepo)}/generate`,
-      {
-        method: "POST",
-        body: {
-          owner,
-          name,
-          private: true,
-          include_all_branches: false,
+  const cleanTemplateRepo = templateRepo
+    ? extractTemplate(templateRepo)
+    : undefined
+
+  if (templateOwner && cleanTemplateRepo) {
+    try {
+      const repo = await client.request<GitHubRepo>(
+        `/repos/${templateOwner}/${cleanTemplateRepo}/generate`,
+        {
+          method: "POST",
+          body: {
+            owner,
+            name,
+            private: true,
+            include_all_branches: false,
+          },
         },
-      },
-    )
-  } catch (err) {
-    if (err instanceof GitHubAPIError) {
+      )
+
+      return {
+        kind: "generated",
+        repo,
+      }
+    } catch (err) {
+      if (!(err instanceof GitHubAPIError)) {
+        throw err
+      }
+
       if (err.status === 422) {
         const existing = await client.request<GitHubRepo>(
           `/repos/${owner}/${name}`,
         )
 
         return {
+          kind: "already-accepted",
           repo: existing,
-          alreadyAccepted: true,
         }
       }
 
       if (err.status === 404) {
-        throw new Error(
-          `Template ${templateOwner}/${extractTemplate(templateRepo)} is not accessible to you. Ask your instructor to make it public or grant your account access.`,
-        )
+        throw err
+      }
+
+      console.warn(
+        `Template ${templateOwner}/${cleanTemplateRepo} was not accessible; creating empty fallback repo.`,
+      )
+    }
+  }
+
+  return await createEmptyAssignmentRepo({
+    client,
+    owner,
+    name,
+    branch: fallbackBranch,
+    metadataYaml,
+    autogradeYaml,
+  })
+}
+
+async function createRootTreeWithRetry(params: {
+  client: GitHubClient
+  owner: string
+  repo: string
+  metadataYaml: string
+  autogradeYaml: string
+}) {
+  const { client, owner, repo, metadataYaml, autogradeYaml } = params
+
+  for (let i = 0; i < 10; i++) {
+    try {
+      return await client.request<{ sha: string }>(
+        `/repos/${owner}/${repo}/git/trees`,
+        {
+          method: "POST",
+          body: {
+            tree: [
+              {
+                path: ".classroom50.yaml",
+                mode: "100644",
+                type: "blob",
+                content: metadataYaml,
+              },
+              {
+                path: ".github/workflows/autograde.yaml",
+                mode: "100644",
+                type: "blob",
+                content: autogradeYaml,
+              },
+            ],
+          },
+        },
+      )
+    } catch (err) {
+      if (
+        err instanceof GitHubAPIError &&
+        (err.status === 404 || err.status === 409)
+      ) {
+        await sleep(500)
+        continue
       }
 
       throw err
     }
+  }
+
+  throw new Error(`Could not create initial tree for ${owner}/${repo}.`)
+}
+
+async function initializeEmptyRepoWithMetadata(params: {
+  client: GitHubClient
+  owner: string
+  repo: string
+  branch: string
+  metadataYaml: string
+}) {
+  const { client, owner, repo, branch, metadataYaml } = params
+
+  for (let i = 0; i < 10; i++) {
+    try {
+      return await client.request(
+        `/repos/${owner}/${repo}/contents/.classroom50.yaml`,
+        {
+          method: "PUT",
+          body: {
+            message: "Initialize classroom50 assignment",
+            content: btoa(unescape(encodeURIComponent(metadataYaml))),
+            branch,
+          },
+        },
+      )
+    } catch (err) {
+      if (
+        err instanceof GitHubAPIError &&
+        (err.status === 404 || err.status === 409)
+      ) {
+        await sleep(500)
+        continue
+      }
+
+      throw err
+    }
+  }
+
+  throw new Error(`Could not initialize empty repo ${owner}/${repo}.`)
+}
+
+type AcceptRepoCreationResult =
+  | {
+      kind: "generated"
+      repo: GitHubRepo
+    }
+  | {
+      kind: "already-accepted"
+      repo: GitHubRepo
+    }
+  | {
+      kind: "fallback-empty"
+      repo: GitHubRepo
+      branch: string
+    }
+async function createEmptyAssignmentRepo(params: {
+  client: GitHubClient
+  owner: string
+  name: string
+  branch: string
+  metadataYaml: string
+  autogradeYaml: string
+}): Promise<AcceptRepoCreationResult> {
+  const { client, owner, name, branch, metadataYaml } = params
+  let repo: GitHubRepo
+
+  try {
+    repo = await client.request<GitHubRepo>(`/orgs/${owner}/repos`, {
+      method: "POST",
+      body: {
+        name,
+        private: true,
+        auto_init: false,
+      },
+    })
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.status === 422) {
+      const existing = await client.request<GitHubRepo>(
+        `/repos/${owner}/${name}`,
+      )
+
+      return {
+        kind: "already-accepted",
+        repo: existing,
+      }
+    }
+
+    throw err
+  }
+
+  await initializeEmptyRepoWithMetadata({
+    client,
+    owner,
+    repo: name,
+    branch,
+    metadataYaml,
+  })
+
+  return {
+    kind: "fallback-empty",
+    repo: {
+      ...repo,
+      default_branch: branch,
+    },
+    branch,
   }
 }
 
@@ -1341,9 +1530,9 @@ export async function acceptAssignment(params: {
     assignmentSlug,
   )
 
-  const sourceOwner = assignment.template.owner
-  const sourceRepo = assignment.template.repo
-  const sourceBranch = assignment.template.branch ?? "main"
+  const sourceOwner = assignment.template?.owner
+  const sourceRepo = assignment.template?.repo
+  const sourceBranch = assignment.template?.branch ?? "main"
 
   console.log("resolving autograder workflow...")
   const autogradeYaml = await resolveAutograderWorkflow(
@@ -1355,28 +1544,36 @@ export async function acceptAssignment(params: {
   const studentRepoName =
     `${classroom}-${assignment.slug}-${username}`.toLowerCase()
 
+  console.log("creating classroom50 yaml...")
+  const metadataYaml = createClassroom50Yaml({
+    classroom,
+    assignment: assignment.slug,
+    sourceOwner,
+    sourceRepo,
+    sourceBranch,
+  })
+
   console.log("creating repo from template...")
-  const generated = await createRepoFromTemplate({
+  const created = await createAssignmentRepo({
     client,
     templateOwner: sourceOwner,
     templateRepo: sourceRepo,
     owner: org,
     name: studentRepoName,
+    fallbackBranch: sourceBranch || "main",
+    metadataYaml,
+    autogradeYaml,
   })
 
-  if (
-    generated &&
-    "alreadyAccepted" in generated &&
-    generated.alreadyAccepted
-  ) {
+  if (created.kind === "already-accepted") {
     return {
       status: "already-accepted",
-      repo: generated.repo,
-      cloneCommand: `git clone ${generated.repo.ssh_url}`,
+      repo: created.repo,
+      cloneCommand: `git clone ${created.repo.ssh_url}`,
     }
   }
 
-  const repo = generated as GitHubRepo
+  const repo = created.repo
 
   console.log("patching repo surface...")
   await patchRepoSurface(client, org, repo.name)
@@ -1389,7 +1586,10 @@ export async function acceptAssignment(params: {
     username,
   })
 
-  const targetBranch = repo.default_branch || sourceBranch
+  const targetBranch =
+    created.kind === "fallback-empty"
+      ? created.branch
+      : repo.default_branch || sourceBranch
 
   console.log("getting branch ref...")
   const ref = await waitForBranchRefRepo(client, org, repo.name, targetBranch)
@@ -1401,15 +1601,6 @@ export async function acceptAssignment(params: {
     repo.name,
     ref.object.sha,
   )
-
-  console.log("creating classroom50 yaml...")
-  const metadataYaml = createClassroom50Yaml({
-    classroom,
-    assignment: assignment.slug,
-    sourceOwner,
-    sourceRepo,
-    sourceBranch,
-  })
 
   console.log("creating assignment tree...", {
     owner: org,
@@ -1423,6 +1614,7 @@ export async function acceptAssignment(params: {
     metadataYaml,
     autogradeYamlPreview: autogradeYaml.slice(0, 200),
   })
+
   const tree = await createTreeForAssignment({
     client,
     owner: org,
