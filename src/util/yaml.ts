@@ -6,7 +6,7 @@ const Classroom50YamlSchema = z.object({
   assignment: z.string().min(1),
   source: z.object({
     owner: z.string().min(1),
-    repo: z.string().min(1),
+    repo: z.string().optional(),
     branch: z.string().optional(),
   }),
 })
@@ -14,6 +14,7 @@ const Classroom50YamlSchema = z.object({
 export type Classroom50Yaml = z.infer<typeof Classroom50YamlSchema>
 
 export function parseClassroom50Yaml(source: string): Classroom50Yaml {
+  console.log("source string", source)
   const doc = parseDocument(source, {
     schema: "core",
     prettyErrors: true,
