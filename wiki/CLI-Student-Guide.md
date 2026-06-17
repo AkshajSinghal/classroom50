@@ -55,7 +55,7 @@ If you've already accepted this assignment, the command short-circuits with `Ass
 - _"autograder `<name>` not published yet"_ — the assignment references an autograder workflow whose YAML isn't on the Pages site. Ask your instructor to confirm `<classroom>/autograders/<name>.yaml` exists in the config repo and that `publish-pages.yaml` has run.
 - _"autograder `<name>` is malformed YAML"_ — the teacher's autograder workflow has a YAML syntax error. Ask them to fix the file in the config repo before retrying.
 - _"template `<owner>/<repo>` is not accessible to you"_ — the template repo is private and not shared with you; ask your instructor to make it public or grant your account access.
-- _"group assignments are not yet supported"_ — your instructor registered the assignment with `--mode group`. Group mode is not yet available.
+- _"assignment `<X>` has unsupported mode `<mode>`"_ — the assignment's `mode` in the manifest is neither `individual` nor `group` (likely a hand-edited `assignments.json`). Ask your instructor to fix it. (Both `individual` and `group` assignments accept normally — see the group-assignment note below.)
 
 ## 3. Clone and work
 
@@ -68,6 +68,21 @@ gh student invite <org>/<repo> <username>
 ```
 
 That adds them with `push` permission.
+
+### Group assignments
+
+If your instructor registered the assignment with `--mode group`, teammates share **one** repo instead of each getting their own:
+
+1. **One teammate accepts first.** Whoever runs `gh student accept <org> <classroom> <assignment>` first creates the shared repo, named after them (`<classroom>-<assignment>-<their-username>`).
+2. **Everyone else joins it** — don't run `accept`; instead run:
+
+```sh
+gh student group join <org> <classroom> <assignment> <owner-username>
+```
+
+`<owner-username>` is the teammate who accepted first (the repo is named after them). You're added as a `push` collaborator, up to the group size your instructor set. Re-running once you're already a member is a clean no-op; if the group is already full, the command refuses and exits non-zero. Pass `--json` to get a `{action, org, repo, login, member_count, max_group_size}` object instead of prose.
+
+The whole group works in the one repo and submits from it like any other assignment (below). At grading time everyone on the roster who is a collaborator on the repo is credited with the same score.
 
 ## 4. Submit
 
