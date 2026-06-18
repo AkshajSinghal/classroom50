@@ -13,6 +13,8 @@ import type {
 import type { Assignment } from "@/types/classroom"
 import { GitHubAPIError } from "./errors"
 import { createTeam, getErrorMessage } from "./mutations"
+import { decodeBase64Utf8 } from "@/util/github"
+import type { GetAssignmentsFileInput } from "@/api/mutations/queries"
 
 export const githubKeys = {
   all: ["github"] as const,
@@ -77,11 +79,6 @@ export function orgMembershipQuery(client: GitHubClient, org: string) {
     staleTime: 5 * 60 * 1000,
     retry: false,
   })
-}
-export function getBranchRef(client: GitHubClient, org: string) {
-  return client.request<GitHubBranchRef>(
-    `/repos/${org}/classroom50/git/ref/heads/main`,
-  )
 }
 
 export function getBranchRefRepo(
@@ -158,16 +155,6 @@ export function branchRefQuery(client: GitHubClient, org: string) {
     staleTime: 60 * 1000,
     retry: false,
   })
-}
-
-export function getCommit(
-  client: GitHubClient,
-  org: string,
-  branchSha: string,
-) {
-  return client.request<GitHubCommitRef>(
-    `/repos/${org}/classroom50/git/commits/${branchSha}`,
-  )
 }
 
 export function getCommitByRepo(
@@ -306,44 +293,6 @@ export function csvFileQuery<T>(
     staleTime: 10 * 60 * 1000,
     retry: false,
   })
-}
-
-export function decodeBase64Utf8(base64: string) {
-  const binary = atob(base64.replace(/\n/g, ""))
-  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
-  return new TextDecoder().decode(bytes)
-}
-
-export type GetAssignmentsFileInput = {
-  org: string
-  path: string
-  ref: string
-}
-export type AssignmentsFile = {
-  schema: "classroom50/assignments/v1"
-  assignments: Assignment[]
-}
-export async function getAssignmentsFile(
-  client: GitHubClient,
-  input: GetAssignmentsFileInput,
-): Promise<AssignmentsFile> {
-  const { org, path, ref } = input
-
-  const file = await client.request<{
-    type: "file"
-    encoding: "base64"
-    content: string
-  }>(
-    `/repos/${org}/classroom50/contents/${path}?ref=${encodeURIComponent(ref)}`,
-  )
-
-  if (file.type !== "file") {
-    throw new Error(`${path} is not a file`)
-  }
-
-  const json = decodeBase64Utf8(file.content)
-
-  return JSON.parse(json) as AssignmentsFile
 }
 
 export async function getRawFile(
