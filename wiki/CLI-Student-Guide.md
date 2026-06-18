@@ -20,7 +20,7 @@ gh student login
 
 ![Demo: gh student login](images/gh_student_auth.gif)
 
-This runs `gh auth login` with the `read:org` and `repo` scopes that the classroom commands need. If you skip this step, the next command you run will trigger the login flow automatically.
+This runs `gh auth login` with the `read:org`, `repo`, and `workflow` scopes that the classroom commands need. If you skip this step, the next command you run will trigger the login flow automatically.
 
 `gh student logout` mirrors `gh auth logout`.
 
