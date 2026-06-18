@@ -64,6 +64,8 @@ export function createGitHubClient(args: {
         body = text
       }
 
+      console.log("body when request fail", body)
+
       const message =
         typeof body === "object" &&
         body !== null &&

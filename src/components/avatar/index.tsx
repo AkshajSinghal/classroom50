@@ -13,7 +13,7 @@ const Avatar = ({
     <div className="flex gap-3">
       <div className="avatar avatar-placeholder">
         <div className="bg-base-200 text-primary rounded-full w-12">
-          <span>{initials || github.at(0)?.toUpperCase()}</span>
+          <span>{initials || github?.at(0)?.toUpperCase()}</span>
         </div>
       </div>
 

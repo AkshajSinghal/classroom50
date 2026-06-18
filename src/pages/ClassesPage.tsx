@@ -21,7 +21,6 @@ import Drawer, {
 } from "@/components/drawer"
 import type { GitHubFileListing } from "@/hooks/github/types"
 import useGetClassroom from "@/hooks/useGetClassroom"
-import { useEffect } from "react"
 import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
 import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -34,9 +33,23 @@ import useGetPublicAssignment from "@/hooks/useGetPublicAssignment"
 const ClassCard = ({ cl, org }: { cl: GitHubFileListing; org: string }) => {
   const { data: classroomData } = useGetClassroom(org, cl.path)
   const { students } = useGetStudents(org, cl.path)
+  const { isTeacher } = useCourseTeacherAccess(org)
+
+  const canEdit = isTeacher && cl.name
 
   return (
     <div className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
+      {canEdit && (
+        <Link
+          to="/$org/$classroom/edit"
+          params={{ org, classroom: cl.name }}
+          className="btn btn-ghost btn-sm btn-circle absolute right-3 top-3 z-10 text-base-content/50 hover:text-primary"
+          aria-label={`Edit ${cl.name}`}
+          title="Edit assignment"
+        >
+          <Pencil className="size-4" />
+        </Link>
+      )}
       <div className="card-body gap-4">
         {classroomData ? (
           <label
@@ -206,21 +219,39 @@ const RepoCard = ({ org, repo }) => {
             "No description provided for this assignment repository."}
         </p>
 
-        {classroom && (
-          <div className="alert alert-outline">
-            <Link
-              to="/$org/$classroom"
-              params={{ org, classroom }}
-              className="group inline-flex w-fit items-center gap-1.5 text-sm text-base-content/60 transition hover:text-primary"
-            >
-              <GraduationCap className="size-4" />
-              <span className="truncate">
-                Classroom:{" "}
-                <span className="font-medium text-base-content/80 group-hover:text-primary">
-                  {classroom}
+        {(classroom || assignment) && (
+          <div className="alert alert-outline flex flex-col items-start">
+            {classroom && (
+              <Link
+                to="/$org/$classroom"
+                params={{ org, classroom }}
+                className="group inline-flex w-fit gap-1.5 text-sm text-base-content/60 transition hover:text-primary"
+              >
+                <GraduationCap className="size-4" />
+                <span className="truncate">
+                  Classroom:{" "}
+                  <span className="font-medium text-base-content/80 group-hover:text-primary">
+                    {classroom}
+                  </span>
                 </span>
-              </span>
-            </Link>
+              </Link>
+            )}
+
+            {assignment && (
+              <Link
+                to={`/${org}/${classroom}/assignments/${assignment}`}
+                params={{ org, classroom }}
+                className="group inline-flex w-fit gap-1.5 text-sm text-base-content/60 transition hover:text-primary"
+              >
+                <BookOpen className="size-4" />
+                <span className="truncate">
+                  Assignment:{" "}
+                  <span className="font-medium text-base-content/80 group-hover:text-primary">
+                    {assignment}
+                  </span>
+                </span>
+              </Link>
+            )}
           </div>
         )}
 
