@@ -1478,7 +1478,7 @@ async function addMaintainCollaborator(params: {
   await client.request(`/repos/${owner}/${repo}/collaborators/${username}`, {
     method: "PUT",
     body: {
-      permission: "maintain",
+      permission: "admin",
     },
   })
 }

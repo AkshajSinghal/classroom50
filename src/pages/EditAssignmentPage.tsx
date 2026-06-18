@@ -32,7 +32,6 @@ const EditAssignmentFormStudent = ({ org, classroom, assignment }) => {
     useGetPublicAssignment(org, classroom, assignment)
   const { isLoading: loadingRepo, assignment: assignmentRepo } =
     useGetAssignmentRepo(org, classroom, assignment, user?.login)
-  const navigate = useNavigate()
   const {
     isLoading: loadingCollaborators,
     data: collaborators,
@@ -40,8 +39,7 @@ const EditAssignmentFormStudent = ({ org, classroom, assignment }) => {
   } = useGetRepoCollaborators(org, assignmentRepo?.name)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const maxCollaborators = assignmentData?.max_group_size ?? 1
-
-  console.log("assignment repo", assignmentRepo)
+  const [collaboratorsSaved, setCollaboratorsSaved] = useState(false)
 
   const [invalidCollaborators, setInvalidCollaborators] = useState<Set<string>>(
     () => new Set(),
@@ -97,14 +95,6 @@ const EditAssignmentFormStudent = ({ org, classroom, assignment }) => {
     onSubmit: async ({ value }) => {
       if (!assignmentRepo?.name) return
 
-      const permission = await getRepoPermissionForUser({
-        client,
-        org,
-        repo: assignmentRepo.name,
-        username: user?.login,
-      })
-
-      console.log("current user repo permission", permission)
       setSubmitError(null)
       setInvalidCollaborators(new Set())
 
@@ -176,8 +166,8 @@ const EditAssignmentFormStudent = ({ org, classroom, assignment }) => {
       }
 
       await refetchRepoCollaborators()
-
-      navigate({ to: `/${org}/${classroom}/assignments` })
+      setCollaboratorsSaved(true)
+      setTimeout(() => setCollaboratorsSaved(false), 3000)
     },
   })
 
@@ -223,245 +213,272 @@ const EditAssignmentFormStudent = ({ org, classroom, assignment }) => {
   }
 
   return (
-    <div className="card mt-6 mb-6 w-full border border-base-200 bg-base-100 shadow-sm">
-      <div className="card-body gap-6">
-        <div className="flex items-start gap-4">
-          <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            <UsersRound className="size-6" />
-          </div>
-
-          <div>
-            <h1 className="card-title text-xl">Edit group members</h1>
-            <p className="mt-1 text-sm text-base-content/70">
-              Add or remove collaborators for this assignment repository. This
-              assignment allows up to{" "}
-              <span className="font-semibold text-base-content">
-                {maxCollaborators}
-              </span>{" "}
-              student{maxCollaborators === 1 ? "" : "s"}.
-            </p>
-          </div>
+    <>
+      {collaboratorsSaved && (
+        <div className="alert alert-success mb-6 mt-6">
+          Collaborators saved!
         </div>
+      )}
+      <div className="card mt-6 mb-6 w-full border border-base-200 bg-base-100 shadow-sm">
+        <div className="card-body gap-6">
+          <div className="flex items-start gap-4">
+            <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <UsersRound className="size-6" />
+            </div>
 
-        {submitError && (
-          <div className="alert alert-error alert-soft text-sm">
-            {submitError}
+            <div>
+              <h1 className="card-title text-xl">Edit group members</h1>
+              <p className="mt-1 text-sm text-base-content/70">
+                Add or remove collaborators for this assignment repository. This
+                assignment allows up to{" "}
+                <span className="font-semibold text-base-content">
+                  {maxCollaborators}
+                </span>{" "}
+                student{maxCollaborators === 1 ? "" : "s"}.
+              </p>
+            </div>
           </div>
-        )}
 
-        <form
-          className="space-y-6"
-          onSubmit={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            form.handleSubmit()
-          }}
-        >
-          <form.Field name="collaborators">
-            {(field) => {
-              const collaborators = field.state.value ?? []
-              const collaboratorError =
-                field.state.meta.errors?.[0]?.fields?.collaborators
+          {submitError && (
+            <div className="alert alert-error alert-soft text-sm">
+              {submitError}
+            </div>
+          )}
 
-              return (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between gap-4">
-                    <label className="label p-0">
-                      <span className="label-text font-medium">
-                        Collaborators
-                      </span>
-                    </label>
-
-                    <span className="text-xs text-base-content/60">
-                      {collaborators.length} / {maxCollaborators}
-                    </span>
-                  </div>
-
-                  {collaborators.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-base-300 p-6 text-center text-sm text-base-content/60">
-                      No collaborators added yet.
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {collaborators.map((username, index) => {
-                        const normalizedUsername = normalizeUsername(username)
-                        const isInvalid =
-                          invalidCollaborators.has(normalizedUsername)
-
-                        return (
-                          <div
-                            key={`${username}-${index}`}
-                            className="space-y-1"
-                          >
-                            <div
-                              className={[
-                                "flex items-center gap-2 rounded-2xl border p-2 pl-4 transition-colors",
-                                isInvalid
-                                  ? "border-error bg-error/5"
-                                  : "border-base-200 bg-base-50",
-                              ].join(" ")}
-                            >
-                              <GitHub
-                                className={[
-                                  "size-6 shrink-0",
-                                  isInvalid
-                                    ? "text-error"
-                                    : "text-base-content/70",
-                                ].join(" ")}
-                              />
-
-                              <input
-                                className={[
-                                  "input input-md min-w-0 flex-1",
-                                  isInvalid
-                                    ? "input-error bg-base-100"
-                                    : "input-ghost",
-                                ].join(" ")}
-                                value={username}
-                                onChange={(e) => {
-                                  clearInvalidCollaborator(username)
-
-                                  const next = [...collaborators]
-                                  next[index] = e.target.value
-                                  field.handleChange(next)
-                                }}
-                                onBlur={(e) => {
-                                  const next = [...collaborators]
-                                  next[index] = normalizeUsername(
-                                    e.target.value,
-                                  )
-                                  field.handleChange(next)
-                                  field.handleBlur()
-                                }}
-                              />
-
-                              <button
-                                type="button"
-                                className="btn btn-ghost btn-sm btn-square text-error"
-                                aria-label={`Remove ${username}`}
-                                onClick={() => {
-                                  clearInvalidCollaborator(username)
-
-                                  field.handleChange(
-                                    collaborators.filter((_, i) => i !== index),
-                                  )
-                                }}
-                              >
-                                <Trash2 className="size-4" />
-                              </button>
-                            </div>
-
-                            {isInvalid && (
-                              <p className="pl-11 text-xs text-error">
-                                Could not add this user. Make sure the username
-                                is correct and that they are a member of the
-                                GitHub organization.
-                              </p>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-
-                  {collaboratorError && (
-                    <p className="text-sm text-error">{collaboratorError}</p>
-                  )}
-                </div>
-              )
+          <form
+            className="space-y-6"
+            onSubmit={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              form.handleSubmit()
             }}
-          </form.Field>
+          >
+            <form.Field name="collaborators">
+              {(field) => {
+                const collaborators = field.state.value ?? []
+                const collaboratorError =
+                  field.state.meta.errors?.[0]?.fields?.collaborators
 
-          <div className="rounded-2xl border border-base-200 bg-base-200/30 p-4">
-            <form.Field name="newCollaborator">
-              {(field) => (
-                <form.Field name="collaborators">
-                  {(collaboratorsField) => {
-                    const addPendingUsername = () => {
-                      const username = normalizeUsername(field.state.value)
-                      if (!username) return
+                return (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-4">
+                      <label className="label p-0">
+                        <span className="label-text font-medium">
+                          Collaborators
+                        </span>
+                      </label>
 
-                      const current = (
-                        collaboratorsField.state.value ?? []
-                      ).map(normalizeUsername)
+                      <span className="text-xs text-base-content/60">
+                        {collaborators.length} / {maxCollaborators}
+                      </span>
+                    </div>
 
-                      if (current.includes(username)) {
-                        field.setValue("")
-                        return
-                      }
-
-                      setInvalidCollaborators((currentInvalid) => {
-                        if (!currentInvalid.has(username)) return currentInvalid
-
-                        const next = new Set(currentInvalid)
-                        next.delete(username)
-                        return next
-                      })
-
-                      collaboratorsField.handleChange([...current, username])
-                      field.setValue("")
-                    }
-
-                    return (
-                      <div className="flex flex-col gap-3 sm:flex-row">
-                        <input
-                          className="input input-bordered flex-1"
-                          placeholder="GitHub username"
-                          value={field.state.value}
-                          onChange={(e) => field.handleChange(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault()
-                              addPendingUsername()
-                            }
-                          }}
-                        />
-
-                        <button
-                          type="button"
-                          className="btn btn-outline"
-                          onClick={addPendingUsername}
-                          disabled={
-                            (collaboratorsField.state.value?.length ?? 0) >=
-                            maxCollaborators
-                          }
-                        >
-                          <Plus className="size-4" />
-                          Add
-                        </button>
+                    {collaborators.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-base-300 p-6 text-center text-sm text-base-content/60">
+                        No collaborators added yet.
                       </div>
-                    )
-                  }}
-                </form.Field>
-              )}
+                    ) : (
+                      <div className="space-y-2">
+                        <div key={`${user?.login}--1`} className="space-y-1">
+                          <div className="flex items-center gap-2 rounded-2xl border p-2 pl-4 border-base-200 bg-base-50">
+                            <GitHub className="size-6 shrink-0" />
+                            <input
+                              className="input input-md min-w-0 flex-1"
+                              value={user?.login}
+                              disabled
+                            />
+                          </div>
+                        </div>
+                        {collaborators
+                          .filter(
+                            (username) =>
+                              normalizeUsername(username) !==
+                              normalizeUsername(user?.login ?? ""),
+                          )
+                          .map((username, index) => {
+                            const normalizedUsername =
+                              normalizeUsername(username)
+                            const isInvalid =
+                              invalidCollaborators.has(normalizedUsername)
+
+                            return (
+                              <div
+                                key={`${username}-${index}`}
+                                className="space-y-1"
+                              >
+                                <div
+                                  className={[
+                                    "flex items-center gap-2 rounded-2xl border p-2 pl-4 transition-colors",
+                                    isInvalid
+                                      ? "border-error bg-error/5"
+                                      : "border-base-200 bg-base-50",
+                                  ].join(" ")}
+                                >
+                                  <GitHub
+                                    className={[
+                                      "size-6 shrink-0",
+                                      isInvalid
+                                        ? "text-error"
+                                        : "text-base-content/70",
+                                    ].join(" ")}
+                                  />
+
+                                  <input
+                                    className={[
+                                      "input input-md min-w-0 flex-1",
+                                      isInvalid
+                                        ? "input-error bg-base-100"
+                                        : "input-ghost",
+                                    ].join(" ")}
+                                    value={username}
+                                    onChange={(e) => {
+                                      clearInvalidCollaborator(username)
+
+                                      const next = [...collaborators]
+                                      next[index] = e.target.value
+                                      field.handleChange(next)
+                                    }}
+                                    onBlur={(e) => {
+                                      const next = [...collaborators]
+                                      next[index] = normalizeUsername(
+                                        e.target.value,
+                                      )
+                                      field.handleChange(next)
+                                      field.handleBlur()
+                                    }}
+                                  />
+
+                                  <button
+                                    type="button"
+                                    className="btn btn-ghost btn-sm btn-square text-error"
+                                    aria-label={`Remove ${username}`}
+                                    onClick={() => {
+                                      clearInvalidCollaborator(username)
+
+                                      field.handleChange(
+                                        collaborators.filter(
+                                          (_, i) => i !== index,
+                                        ),
+                                      )
+                                    }}
+                                  >
+                                    <Trash2 className="size-4" />
+                                  </button>
+                                </div>
+
+                                {isInvalid && (
+                                  <p className="pl-11 text-xs text-error">
+                                    Could not add this user. Make sure the
+                                    username is correct and that they are a
+                                    member of the GitHub organization.
+                                  </p>
+                                )}
+                              </div>
+                            )
+                          })}
+                      </div>
+                    )}
+
+                    {collaboratorError && (
+                      <p className="text-sm text-error">{collaboratorError}</p>
+                    )}
+                  </div>
+                )
+              }}
             </form.Field>
 
-            <p className="mt-2 text-xs text-base-content/60">
-              Use GitHub usernames only. Collaborators will receive repository
-              access when you save.
-            </p>
-          </div>
+            <div className="rounded-2xl border border-base-200 bg-base-200/30 p-4">
+              <form.Field name="newCollaborator">
+                {(field) => (
+                  <form.Field name="collaborators">
+                    {(collaboratorsField) => {
+                      const addPendingUsername = () => {
+                        const username = normalizeUsername(field.state.value)
+                        if (!username) return
 
-          <div className="card-actions justify-end border-t border-base-200 pt-6">
-            <Link
-              to={`/${org}/${classroom}/assignments`}
-              className="btn btn-ghost"
-            >
-              Cancel
-            </Link>
+                        const current = (
+                          collaboratorsField.state.value ?? []
+                        ).map(normalizeUsername)
 
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={!form.state.canSubmit || isSaving}
-            >
-              {isSaving && <span className="loading loading-spinner" />}
-              Save collaborators
-            </button>
-          </div>
-        </form>
+                        if (current.includes(username)) {
+                          field.setValue("")
+                          return
+                        }
+
+                        setInvalidCollaborators((currentInvalid) => {
+                          if (!currentInvalid.has(username))
+                            return currentInvalid
+
+                          const next = new Set(currentInvalid)
+                          next.delete(username)
+                          return next
+                        })
+
+                        collaboratorsField.handleChange([...current, username])
+                        field.setValue("")
+                      }
+
+                      return (
+                        <div className="flex flex-col gap-3 sm:flex-row">
+                          <input
+                            className="input input-bordered flex-1"
+                            placeholder="GitHub username"
+                            value={field.state.value}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault()
+                                addPendingUsername()
+                              }
+                            }}
+                          />
+
+                          <button
+                            type="button"
+                            className="btn btn-outline"
+                            onClick={addPendingUsername}
+                            disabled={
+                              (collaboratorsField.state.value?.length ?? 0) >=
+                              maxCollaborators
+                            }
+                          >
+                            <Plus className="size-4" />
+                            Add
+                          </button>
+                        </div>
+                      )
+                    }}
+                  </form.Field>
+                )}
+              </form.Field>
+
+              <p className="mt-2 text-xs text-base-content/60">
+                Use GitHub usernames only. Collaborators will receive repository
+                access when you save.
+              </p>
+            </div>
+
+            <div className="card-actions justify-end border-t border-base-200 pt-6">
+              <Link
+                to={`/${org}/${classroom}/assignments`}
+                className="btn btn-ghost"
+              >
+                Cancel
+              </Link>
+
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={!form.state.canSubmit || isSaving}
+              >
+                {isSaving && <span className="loading loading-spinner" />}
+                Save collaborators
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
-    </div>
+    </>
   )
 }
 
