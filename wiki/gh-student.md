@@ -86,7 +86,7 @@ The hardcoded `main` push target means templates whose default branch is `master
 ## `gh student whoami` / `login` / `logout`
 
 - `gh student whoami` — prints the authenticated GitHub user.
-- `gh student login` — runs `gh auth login -s read:org -s repo -s workflow`, optionally with additional scopes via `-s/--scope`.
+- `gh student login` — runs `gh auth login -s read:org -s repo -s workflow`, optionally with additional scopes via `-s/--scopes`.
 - `gh student logout` — runs `gh auth logout`.
 
 ## Contributing

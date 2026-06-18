@@ -615,7 +615,7 @@ Delete every repository in `<org>` after confirming the org is a Classroom 50 se
 ## `gh teacher whoami` / `login` / `logout`
 
 - `gh teacher whoami` — prints the authenticated GitHub user (a thin wrapper around `gh api user`).
-- `gh teacher login` — runs `gh auth login -s admin:org -s workflow`, optionally with additional scopes via `-s/--scope`.
+- `gh teacher login` — runs `gh auth login -s admin:org -s workflow`, optionally with additional scopes via `-s/--scopes`.
 - `gh teacher logout` — runs `gh auth logout`.
 
 ## Contributing
