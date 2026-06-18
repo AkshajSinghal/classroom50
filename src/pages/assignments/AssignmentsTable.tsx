@@ -1,8 +1,9 @@
 import { useNavigate } from "@tanstack/react-router"
-import { UserRound, UsersRound } from "lucide-react"
+import { Pencil, UserRound, UsersRound } from "lucide-react"
 
 import useGetScores from "@/hooks/useGetScores"
 import { formatDueDate } from "@/util/formatDate"
+import { Link } from "@tanstack/react-router"
 
 const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
   const { data: scoresData } = useGetScores(org, classroom)
@@ -17,6 +18,7 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
             <th>Type</th>
             <th>Due Date</th>
             <th>Submissions</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -30,7 +32,7 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
           {assignments?.map((assignment) => (
             <tr
               key={assignment.slug}
-              className="hover:cursor-pointer hover:bg-[#fafafa]"
+              className="hover:cursor-pointer hover:bg-[#fafafa] h-14"
               onClick={() =>
                 navigate({
                   to: `/${org}/${classroom}/assignments/${assignment.slug}/submissions`,
@@ -40,7 +42,7 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
               <td className="font-bold link link-info no-underline">
                 {assignment.name}
               </td>
-              <td className="flex">
+              <td className="flex align-middle items-center h-14">
                 {assignment.mode === "individual" && (
                   <div className="flex gap-2">
                     <UserRound /> Individual
@@ -53,8 +55,10 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
                 )}
               </td>
               <td>
-                <span className="badge badge-soft">
-                  {assignment.due ? formatDueDate(assignment.due) : "No due date"}
+                <span className="badge badge-soft max-xl:text-xs xl:text-sm">
+                  {assignment.due
+                    ? formatDueDate(assignment.due)
+                    : "No due date"}
                 </span>
               </td>
               <td>
@@ -73,6 +77,14 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
                   }
                   max="100"
                 ></progress>
+              </td>
+              <td>
+                <Link
+                  className="btn btn-circle btn-sm btn-ghost"
+                  to={`/${org}/${classroom}/assignments/${assignment.slug}/edit`}
+                >
+                  <Pencil className="size-4" />
+                </Link>
               </td>
             </tr>
           ))}

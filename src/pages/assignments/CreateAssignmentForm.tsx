@@ -35,18 +35,19 @@ const FormErrors = ({ form }) => (
 const CreateAssignmentForm = ({
   defaultValues,
   onSubmit,
+  edit = false,
   loading = false,
 }: CreateAssignmentFormProps) => {
   const form = useForm({
     defaultValues: {
-      name: defaultValues?.name ?? "",
-      description: defaultValues?.description ?? "",
-      mode: defaultValues?.mode ?? "individual",
-      template_repo: defaultValues?.template_repo ?? "",
+      name: defaultValues?.name || "",
+      description: defaultValues?.description || "",
+      mode: defaultValues?.mode || "individual",
+      template_repo: defaultValues?.template_repo || "",
       due_date:
-        defaultValues?.due_date ?? new Date().toISOString().slice(0, 10),
-      max_group_size: defaultValues?.max_group_size ?? 2,
-      tests: defaultValues?.tests ?? [],
+        defaultValues?.due_date || new Date().toISOString().slice(0, 10),
+      max_group_size: defaultValues?.max_group_size || 2,
+      tests: defaultValues?.tests || [],
     } satisfies CreateAssignmentFormValues,
     validators: {
       onSubmit: ({ value }) => {
@@ -273,7 +274,7 @@ const CreateAssignmentForm = ({
               {isSubmitting || loading ? (
                 <span className="loading loading-spinner" />
               ) : (
-                "Create Assignment"
+                `${edit ? "Edit" : "Create"} Assignment`
               )}
             </button>
           )}

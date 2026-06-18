@@ -16,12 +16,10 @@ import useAddRepoCollaborator from "@/hooks/useAddRepoCollaborator"
 import useRemoveRepoCollaborator from "@/hooks/useRemoveRepoCollaborator"
 
 import GitHub from "@/assets/github.svg?react"
-import { getRepoPermissionForUser } from "@/hooks/github/queries"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useGithubAuth } from "@/auth/useGithubAuth"
-const EditAssignmentFormTeacher = () => {
-  return <div></div>
-}
+import EditAssignmentForm from "./assignments/EditAssignmentForm"
+import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 
 const normalizeUsername = (username: string) => username.trim().toLowerCase()
 
@@ -219,7 +217,7 @@ const EditAssignmentFormStudent = ({ org, classroom, assignment }) => {
           Collaborators saved!
         </div>
       )}
-      <div className="card mt-6 mb-6 w-full border border-base-200 bg-base-100 shadow-sm">
+      <div className="card mb-6 w-full border border-base-200 bg-base-100 shadow-sm">
         <div className="card-body gap-6">
           <div className="flex items-start gap-4">
             <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
@@ -485,6 +483,12 @@ const EditAssignmentFormStudent = ({ org, classroom, assignment }) => {
 const EditAssignmentPage = () => {
   const { org, classroom, assignment } = useParams({ strict: false })
   const { isTeacher, isStudent } = useCourseTeacherAccess(org)
+  const { data: assignments } = useGetClassroomAssignments(org, classroom)
+  const [editSuccess, setEditSuccess] = useState(false)
+
+  const assignmentData = assignments?.assignments.find(
+    (a) => a.slug === assignment,
+  )
 
   return (
     <div className="min-h-screen">
@@ -496,9 +500,26 @@ const EditAssignmentPage = () => {
             isTeacher={isTeacher}
             classroom={classroom}
           />
-          <h1 className="text-2xl font-bold mt-4">Edit Assignment</h1>
-          {isTeacher && <EditAssignmentFormTeacher />}
-          {(isStudent || isTeacher) && (
+          {editSuccess && (
+            <div className="alert alert-success mt-6">
+              Your assignment has been edited successfully!
+            </div>
+          )}
+          <h1 className="text-2xl font-bold mt-4 mb-6">Edit Assignment</h1>
+          {isTeacher && (
+            <EditAssignmentForm
+              org={org}
+              classroom={classroom}
+              assignment={assignment}
+              defaultData={assignmentData}
+              onSuccess={() => {
+                setEditSuccess(true)
+                window.scrollTo({ top: 0, behavior: "smooth" })
+                setTimeout(() => setEditSuccess(false), 3000)
+              }}
+            />
+          )}
+          {isStudent && (
             <EditAssignmentFormStudent
               org={org}
               classroom={classroom}
