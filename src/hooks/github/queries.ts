@@ -746,3 +746,16 @@ export async function getCollectTokenStatus(
     }
   }
 }
+
+export async function getRepoPermissionForUser(params: {
+  client: GitHubClient
+  org: string
+  repo: string
+  username: string
+}) {
+  const { client, org, repo, username } = params
+
+  return client.request(
+    `/repos/${org}/${repo}/collaborators/${username}/permission`,
+  )
+}

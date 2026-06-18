@@ -173,15 +173,19 @@ export function createTreeForAssignment(params: {
 
 export function createCommit(
   client: GitHubClient,
-  input: CreateClassroomInput & { parents: [string]; tree_sha: string },
+  input: CreateClassroomInput & {
+    parents: [string]
+    tree_sha: string
+    message?: string
+  },
 ) {
-  const { classroom, tree_sha, org, parents } = input
+  const { classroom, tree_sha, org, parents, message } = input
   return client.request<GitHubCreateCommit>(
     `/repos/${org}/classroom50/git/commits`,
     {
       method: "POST",
       body: {
-        message: `Create init files for new classroom: ${classroom}`,
+        message: message || `Create init files for new classroom: ${classroom}`,
         tree: tree_sha,
         parents,
       },
@@ -329,7 +333,7 @@ export async function withGitConflictRetry<T>(
 
 export type CreateClassroomInput = {
   org: string
-  name: string
+  name?: string
   classroom: string
   term: string
 }
@@ -2690,5 +2694,212 @@ export async function initClassroom50({
     repo: "classroom50",
     ...results,
     pagesUrl: `https://${org}.github.io/classroom50/`,
+  }
+}
+
+export async function addRepoCollaborator(params: {
+  client: GitHubClient
+  org: string
+  repo: string
+  username: string
+  permission?: "pull" | "triage" | "push" | "maintain" | "admin"
+}) {
+  const { client, org, repo, username, permission = "push" } = params
+
+  const userReq = await client.requestRaw(`/orgs/${org}/members/${username}`)
+  console.log("user req for " + username, userReq)
+
+  const res = await client.requestRaw(
+    `/repos/${org}/${repo}/collaborators/${username}`,
+    {
+      method: "PUT",
+      body: {
+        permission,
+      },
+    },
+  )
+
+  console.log("request raw for add repo member", res)
+  return res
+}
+
+export async function removeRepoCollaborator(params: {
+  client: GitHubClient
+  org: string
+  repo: string
+  username: string
+}) {
+  const { client, org, repo, username } = params
+
+  return client.request(`/repos/${org}/${repo}/collaborators/${username}`, {
+    method: "DELETE",
+  })
+}
+
+export async function createBlob(
+  client: GitHubClient,
+  input: {
+    org: string
+    content: string
+  },
+) {
+  return client.request<GitHubBlob>(
+    `/repos/${input.org}/classroom50/git/blobs`,
+    {
+      method: "POST",
+      body: {
+        content: input.content,
+        encoding: "utf-8",
+      },
+    },
+  )
+}
+
+export async function createTreeFromEntries(
+  client: GitHubClient,
+  input: {
+    org: string
+    base_tree: string
+    tree: Array<{
+      path: string
+      mode: "100644"
+      type: "blob"
+      sha: string
+    }>
+  },
+) {
+  return client.request<GitHubTree>(
+    `/repos/${input.org}/classroom50/git/trees`,
+    {
+      method: "POST",
+      body: {
+        base_tree: input.base_tree,
+        tree: input.tree,
+      },
+    },
+  )
+}
+
+export async function getClassroomJson(
+  client: GitHubClient,
+  input: {
+    org: string
+    classroom: string
+    ref?: string
+  },
+): Promise<Classroom> {
+  const path = `${input.classroom}/classroom.json`
+  const query = input.ref ? `?ref=${encodeURIComponent(input.ref)}` : ""
+
+  const raw = await client.requestRaw(
+    `/repos/${input.org}/classroom50/contents/${path}${query}`,
+  )
+
+  return JSON.parse(raw)
+}
+
+export type UpdateClassroomMetadataInput = {
+  org: string
+  slug: string
+  name: string
+  term: string
+}
+
+export type Classroom = {
+  name: string
+  short_name: string
+  slug: string
+  schema: string
+  term: string
+}
+export type UpdateClassroomMetadataResult = {
+  previousCommitSha: string
+  baseTreeSha: string
+  newTreeSha: string
+  newCommitSha: string
+  updatedRef: unknown
+  classroom: Classroom
+}
+export async function editClassroom(
+  client: GitHubClient,
+  input: {
+    org: string
+    slug: string
+    term: string
+    name: string
+  },
+) {
+  console.log("editing classroom...")
+  const { org, slug, term, name } = input
+
+  console.log("fetching ref...")
+  const ref = await getBranchRef(client, org)
+
+  console.log("fetching commit...")
+  const commit = await getCommit(client, org, ref.object.sha)
+
+  console.log("fetching classroom json...")
+  const current = await getClassroomJson(client, {
+    org,
+    classroom: slug,
+    ref: ref.object.sha,
+  })
+
+  console.log("classroom json", current)
+  console.log("current.slug:", current.short_name)
+  console.log("slug:", slug)
+
+  if (current.short_name !== slug) {
+    throw new Error(
+      `classroom.json slug mismatch: expected ${current.short_name}, got ${slug}`,
+    )
+  }
+
+  const next = {
+    ...current,
+    name,
+    term,
+  }
+
+  console.log("creating blob...")
+  const blob = await createBlob(client, {
+    org,
+    content: JSON.stringify(next, null, 2) + "\n",
+  })
+
+  console.log("creating tree...")
+  const tree = await createTreeFromEntries(client, {
+    org,
+    base_tree: commit.tree.sha,
+    tree: [
+      {
+        path: `${slug}/classroom.json`,
+        mode: "100644",
+        type: "blob",
+        sha: blob.sha,
+      },
+    ],
+  })
+
+  console.log("creating new commit...")
+  const newCommit = await createCommit(client, {
+    org,
+    message: `Update classroom ${slug}`,
+    tree_sha: tree.sha,
+    parents: [ref.object.sha],
+    classroom: slug,
+    term,
+  })
+
+  console.log("updating ref...")
+  const updatedRef = await updateRef(client, org, newCommit.sha)
+
+  return {
+    previousCommitSha: ref.object.sha,
+    baseTreeSha: commit.tree.sha,
+    newTreeSha: tree.sha,
+    newCommitSha: newCommit.sha,
+    updatedRef,
+    classroom: next,
   }
 }

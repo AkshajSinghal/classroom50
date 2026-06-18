@@ -109,7 +109,7 @@ function OrgCard({
               )}
 
               {!needsSetup && !hasCollectToken && isAdmin && (
-                <span className="badge badge-warning gap-1">
+                <span className="badge badge-warning gap-1 text-xs">
                   <AlertTriangle className="size-3" />
                   Needs personal access token
                 </span>

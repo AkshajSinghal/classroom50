@@ -69,6 +69,12 @@ export type GitHubUser = {
   name: string | null
   email: string | null
   bio: string | null
+  permissions: {
+    admin: boolean
+    pull: boolean
+    maintain: boolean
+    push: boolean
+  }
 }
 
 export type GitHubFileListing = {
