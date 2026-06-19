@@ -252,3 +252,71 @@ export async function createAssignmentWithConflictRetry(
 ) {
   return withGitConflictRetry(() => createAssignment(client, input))
 }
+
+export type DeleteAssignmentInput = {
+  org: string
+  classroom: string
+  assignment: string
+}
+export async function deleteAssignment(
+  client: GitHubClient,
+  input: DeleteAssignmentInput,
+) {
+  const { org, classroom, assignment: slug } = input
+
+  const ref = await getBranchRef(client, org)
+  const commit = await getCommit(client, org, ref.object.sha)
+
+  const assignmentsFilePath = `${classroom}/assignments.json`
+  const currentAssignments = await getAssignmentsFile(client, {
+    org,
+    path: assignmentsFilePath,
+    ref: ref.object.sha,
+  })
+
+  // find the assignment if it exists already
+  const targetAssignment = currentAssignments.assignments.find(
+    (a) => a.slug === slug,
+  )
+
+  if (!targetAssignment) {
+    throw new Error(`Existing assignment matching ${slug} was not found.`)
+  }
+
+  // expand all but the targeted assignment to filter it out
+  const nextAssignments = {
+    ...currentAssignments,
+    assignments: [
+      ...currentAssignments.assignments.filter((a) => a.slug !== slug),
+    ],
+  }
+
+  const tree = await createGitTree(client, {
+    org: input.org,
+    base_tree: commit.tree.sha,
+    tree: [
+      {
+        path: assignmentsFilePath,
+        mode: "100644",
+        type: "blob",
+        content: JSON.stringify(nextAssignments, null, 2) + "\n",
+      },
+    ],
+  })
+
+  const newCommit = await createGitCommit(client, {
+    org: input.org,
+    message: `Edit assignment: ${input.classroom}/${slug}`,
+    tree_sha: tree.sha,
+    parents: [ref.object.sha],
+  })
+  const updatedRef = await updateRef(client, input.org, newCommit.sha)
+
+  return {
+    previousCommitSha: ref.object.sha,
+    baseTreeSha: commit.tree.sha,
+    newTreeSha: tree.sha,
+    newCommitSha: newCommit.sha,
+    updatedRef,
+  }
+}
