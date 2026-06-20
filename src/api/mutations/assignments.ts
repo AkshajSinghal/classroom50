@@ -1,12 +1,13 @@
 import type { GitHubClient } from "@/hooks/github/client"
 import type { Assignment } from "@/types/classroom"
-import { getBranchRef, getCommit } from "../github/queries"
+import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
 import { GitHubAPIError } from "@/hooks/github/errors"
 
 import type { AssignmentTestDraft } from "@/util/assignmentTests"
 import { draftToTest } from "@/util/assignmentTests"
 import { buildDueFields } from "@/util/formatDate"
 import {
+  addRepositoryToTeam,
   createCommitForAssignment,
   createGitCommit,
   createGitTree,
@@ -24,11 +25,92 @@ import { withGitConflictRetry, type CreateClassroomResult } from "./classrooms"
 import type { GitHubRepo } from "@/hooks/github/types"
 import {
   getCommitByRepo,
+  getRepo,
   sleep,
   waitForBranchRefRepo,
 } from "@/hooks/github/queries"
 import { getAuthenticatedUser } from "../queries/users"
 import { acceptPendingOrgInvite } from "./users"
+
+// Parse a `--template`-style ref: `<owner>/<repo>` or
+// `<owner>/<repo>@<branch>`, or a bare `<repo>` (owner defaults to the
+// classroom's org). Mirrors the CLI's parseTemplateRef so the GUI accepts
+// the same inputs and writes the same template block.
+type ParsedTemplate = { owner: string; repo: string; branch?: string }
+function parseTemplateRef(raw: string, defaultOwner: string): ParsedTemplate {
+  const trimmed = raw.trim()
+  if (!trimmed) {
+    throw new Error("Template repository is required.")
+  }
+
+  const [ownerRepo, branch, ...extraAt] = trimmed.split("@")
+  if (extraAt.length > 0) {
+    throw new Error(
+      `Invalid template "${raw}": branch contains '@' (expected owner/repo[@branch]).`,
+    )
+  }
+  if (trimmed.includes("@") && !branch) {
+    throw new Error(`Invalid template "${raw}": branch is empty after '@'.`)
+  }
+
+  const parts = ownerRepo.split("/")
+  if (parts.length === 1 && parts[0]) {
+    // Bare repo name → owner defaults to the org (the form's hint).
+    return { owner: defaultOwner, repo: parts[0], branch: branch || undefined }
+  }
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    throw new Error(`Invalid template "${raw}": expected owner/repo[@branch].`)
+  }
+  return { owner: parts[0], repo: parts[1], branch: branch || undefined }
+}
+
+// Validate and resolve a template ref against GitHub, mirroring the CLI's
+// validateTemplateRepo + resolveTemplateBranch: the repo must exist and be
+// a template, its default branch fills an omitted @branch, and an
+// out-of-org private template is rejected (students could never be granted
+// access). Returns the resolved template block plus whether it's an in-org
+// private template that needs a classroom-team read grant.
+async function resolveTemplate(
+  client: GitHubClient,
+  org: string,
+  parsed: ParsedTemplate,
+): Promise<{ template: Assignment["template"]; needsTeamGrant: boolean }> {
+  // getRepo returns null on 404 (tolerant), so a missing/invisible template
+  // surfaces as null rather than a throw.
+  const repo = (await getRepo(client, parsed.owner, parsed.repo)) as
+    | (GitHubRepo & { is_template?: boolean; private?: boolean })
+    | null
+  if (!repo) {
+    throw new Error(
+      `Template "${parsed.owner}/${parsed.repo}" is not visible to your account — make it public, or copy it into ${org} and reference the copy.`,
+    )
+  }
+
+  if (!repo.is_template) {
+    throw new Error(
+      `"${parsed.owner}/${parsed.repo}" is not a template repository — toggle Settings → "Template repository" on the repo, then retry.`,
+    )
+  }
+
+  const branch = parsed.branch || repo.default_branch
+  if (!branch) {
+    throw new Error(
+      `Template "${parsed.owner}/${parsed.repo}" has no default branch — specify one as ${parsed.owner}/${parsed.repo}@<branch>.`,
+    )
+  }
+
+  const inOrg = parsed.owner.toLowerCase() === org.toLowerCase()
+  if (repo.private && !inOrg) {
+    throw new Error(
+      `Template "${parsed.owner}/${parsed.repo}" is private and outside ${org} — students can't be granted access, so accept would fail. Copy it into ${org} and reference the copy, or make the template public.`,
+    )
+  }
+
+  return {
+    template: { owner: parsed.owner, repo: parsed.repo, branch },
+    needsTeamGrant: Boolean(repo.private && inOrg),
+  }
+}
 
 // contentsPathExists: 404 -> false, 200 -> true, anything else throws.
 async function contentsPathExists(
@@ -160,6 +242,16 @@ export async function createAssignment(
     )
   }
 
+  // Resolve the template the way the CLI does: parse owner/repo[@branch],
+  // confirm it's a template, fill an omitted branch from the repo's default,
+  // and reject an out-of-org private template up front.
+  const parsedTemplate = parseTemplateRef(input.template_repo, input.org)
+  const { template, needsTeamGrant } = await resolveTemplate(
+    client,
+    input.org,
+    parsedTemplate,
+  )
+
   const ref = await getBranchRef(client, input.org)
   const commit = await getCommit(client, input.org, ref.object.sha)
 
@@ -179,13 +271,12 @@ export async function createAssignment(
   const assignmentBody: Assignment = {
     slug: input.slug,
     name: input.name,
-    template: {
-      owner: input.org,
-      repo: input.template_repo,
-      branch: "main",
-    },
+    template,
     mode: input.mode,
     autograder: "default",
+    // Mirrors the CLI's `--feedback-pr` default of true. Opt the assignment
+    // into the long-lived Feedback PR per student repo unless explicitly off.
+    feedback_pr: input.feedback_pr ?? true,
   }
   if (input.description.trim()) {
     assignmentBody.description = input.description.trim()
@@ -236,6 +327,37 @@ export async function createAssignment(
     parents: [ref.object.sha],
   })
   const updatedRef = await updateRef(client, input.org, newCommit.sha)
+
+  // In-org private template: grant the classroom team read so rostered
+  // students can generate from it (mirrors the CLI's assignment add). The
+  // team slug is read from classroom.json (authoritative); a classroom with
+  // no team gets an actionable error rather than a 404 against a guess.
+  if (needsTeamGrant) {
+    let teamSlug: string | undefined
+    try {
+      const classroomJson = await getClassroomJson(client, {
+        org: input.org,
+        classroom: input.classroom,
+      })
+      teamSlug = classroomJson.team?.slug
+    } catch {
+      teamSlug = undefined
+    }
+
+    if (!teamSlug) {
+      throw new Error(
+        `Assignment "${input.slug}" was created, but classroom "${input.classroom}" has no team to grant read on the private template ${template.owner}/${template.repo}. Recreate the classroom so the team exists, then students can accept.`,
+      )
+    }
+
+    await addRepositoryToTeam(client, {
+      org: input.org,
+      teamSlug,
+      owner: template.owner,
+      repo: template.repo,
+      permission: "pull",
+    })
+  }
 
   return {
     previousCommitSha: ref.object.sha,
@@ -445,6 +567,7 @@ export type CreateAssignmentInput = {
   classroom: string
   org: string
   max_group_size: number
+  feedback_pr?: boolean
   tests: AssignmentTestDraft[]
 }
 export async function createAssignmentWithConflictRetry(
@@ -592,6 +715,10 @@ jobs:
     permissions:
       contents: write
       statuses: write
+      # Lets the runner open the opt-in Feedback PR (issue #86). A reusable
+      # workflow's token is the intersection with the caller's grants, so
+      # this must mirror autograde-runner.yaml's permissions.
+      pull-requests: write
 `
 }
 

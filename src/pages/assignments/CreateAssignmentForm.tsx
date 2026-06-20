@@ -11,6 +11,7 @@ export type CreateAssignmentFormValues = {
   template_repo: string
   due_date: string
   max_group_size: number
+  feedback_pr: boolean
   tests: AssignmentTestDraft[]
 }
 
@@ -72,6 +73,7 @@ const CreateAssignmentForm = ({
         utcIsoToDatetimeLocalValue(defaultValues?.due_date) ||
         toDatetimeLocalValue(new Date()),
       max_group_size: defaultValues?.max_group_size || 2,
+      feedback_pr: defaultValues?.feedback_pr ?? true,
       tests: defaultValues?.tests || [],
     } satisfies CreateAssignmentFormValues,
     validators: {
@@ -100,6 +102,7 @@ const CreateAssignmentForm = ({
         template_repo: value.template_repo.trim(),
         due_date: value.due_date.trim(),
         max_group_size: value.max_group_size,
+        feedback_pr: value.feedback_pr,
         tests: value.tests,
       })
     },
@@ -286,6 +289,29 @@ const CreateAssignmentForm = ({
               )
             }
           </form.Subscribe>
+
+          <form.Field name="feedback_pr">
+            {(field) => (
+              <div className="mt-4">
+                <label className="label cursor-pointer justify-start gap-3 w-fit">
+                  <input
+                    type="checkbox"
+                    className="toggle"
+                    name={field.name}
+                    checked={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.checked)}
+                  />
+                  <span className="font-bold">Feedback pull request</span>
+                </label>
+                <p className="label pt-1">
+                  Opens one long-lived pull request per student repo so you can
+                  leave inline review comments on the full starter→submission
+                  diff.
+                </p>
+              </div>
+            )}
+          </form.Field>
         </div>
         <FormErrors form={form} />
       </div>
