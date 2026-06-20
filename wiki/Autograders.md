@@ -23,17 +23,18 @@ This is the **only** contract every autograder must satisfy. Whatever produces i
 
 ```json
 {
-  "schema":     "classroom50/result/v1",
-  "classroom":  "cs-principles",
-  "assignment": "hello",
-  "usernames":  ["alice"],
-  "submission": "submit/2026-06-01T14-32-05Z-a1b2c3d",
-  "commit":     "https://github.com/.../commit/<sha>",
-  "release":    "https://github.com/.../releases/tag/submit%2F...",
-  "review":     "https://github.com/.../compare/<baseline-sha>...<sha>",
-  "datetime":   "2026-06-01T14:33:11Z",
-  "score":      4,
-  "max-score":  5,
+  "schema":          "classroom50/result/v1",
+  "classroom":       "cs-principles",
+  "assignment":      "hello",
+  "assignment_type": "individual",
+  "owner":           "alice",
+  "submission":      "submit/2026-06-01T14-32-05Z-a1b2c3d",
+  "commit":          "https://github.com/.../commit/<sha>",
+  "release":         "https://github.com/.../releases/tag/submit%2F...",
+  "review":          "https://github.com/.../compare/<baseline-sha>...<sha>",
+  "datetime":        "2026-06-01T14:33:11Z",
+  "score":           4,
+  "max-score":       5,
   "tests": [
     { "test-name": "compiles",       "passed": true,  "score": 4, "max-score": 4 },
     { "test-name": "outputs_correct","passed": false, "score": 0, "max-score": 1 }
@@ -46,7 +47,8 @@ This is the **only** contract every autograder must satisfy. Whatever produces i
 | `schema` | string | Must be `classroom50/result/v1` exactly |
 | `classroom` | string | Must match `<classroom>` in the repo name |
 | `assignment` | string | Must match `<assignment>` in the repo name |
-| `usernames` | `[string]` | The repo owner (one element). The runner always emits the single owner; for a group assignment `collect-scores` expands this at collection time to the repo's collaborators **intersected with the roster** (owner always included, admins excluded) |
+| `assignment_type` | string | `"individual"` or `"group"`, stamped by the runner from the assignment mode. `collect-scores` cross-checks it against `assignments.json` `mode` and warns-and-skips a mismatched submission |
+| `owner` | string | The repo owner login (the `<username>` from `<classroom>-<assignment>-<username>`). The **identity anchor** the validators check; for an individual assignment it is the sole credited student, for a group it is the founder whose repo was graded. There is no `usernames` field — who pushed is `submitted_by`, who is credited (group) is resolved by collection |
 | `submission` | string | The submit-tag name |
 | `commit` | string | URL to the submission commit |
 | `release` | string | URL to the release |
@@ -55,13 +57,18 @@ This is the **only** contract every autograder must satisfy. Whatever produces i
 | `score` | int | Sum of test scores (0 ≤ score ≤ max-score) |
 | `max-score` | int | Sum of test max-scores |
 | `tests` | `[object]` | Per-test breakdown (optional content — `[]` is valid for the "vacuous pass / no tests configured" case) |
+| `submitted_by` | object | Optional. The GitHub actor who pushed this submission: `{"username": <login>, "id": <numeric id\|null>}`, stamped by the runner from `GITHUB_ACTOR`/`GITHUB_ACTOR_ID`. For a **group** submission the score is credited to every member (collection resolves the member list), but `submitted_by` records *who actually pushed* this submission — so teachers can see who did the work even though the grade is shared. Absent on results produced before this field existed |
 
-`collect-scores.yaml` validates this payload before merging into `scores.json`. Mismatches against the source repo's identity (classroom/assignment/username triple) are rejected with a warning. For a group assignment the check requires the repo owner to be present in `usernames` (collect-scores then rewrites it to the full member list); for an individual assignment `usernames` must be exactly the one expected student.
+`collect-scores.yaml` validates this payload before merging into `scores.json`. Mismatches against the source repo's identity (classroom/assignment/`owner` triple) are rejected with a warning, and a submission whose `assignment_type` disagrees with the assignment's configured `mode` is warned-and-skipped. The `owner` must equal the repo-name-derived owner in both modes.
 
-**Group attribution model.** For a group assignment, `collect-scores` credits the shared score to every collaborator on the repo who is **on the classroom roster** (the repo owner is always included; org admins/instructors are excluded). A few consequences worth knowing:
+**scores.json shape.** The gradebook is keyed by assignment slug under a root `assignments` object; each value is `{ "type": "individual"|"group", "entries": [...] }`. An `entry` is one repo's record: `owner` (the stable key), `submissions` (the full history, newest first — each a stored result/v1 payload), and — for a **group** entry — `member_usernames` (the credited members). An individual entry has no member list; its `owner` is the sole credited student.
+
+**Group attribution model.** For a group assignment, `collect-scores` credits the shared score to every collaborator on the repo who is **on the classroom roster** (the repo owner is always included), recorded as the entry's `member_usernames`. Crediting is gated on **roster membership, not on collaborator permission level** — a teammate is credited whether they hold `push` or `admin`. A few consequences worth knowing:
 
 - **Rostered classmates are mutually trusted.** GitHub does not record *how* a collaborator was added, so collection cannot distinguish a teammate the founder added via `gh student invite` from one a student added directly through the GitHub UI. A student could therefore add a rostered classmate as a collaborator and credit them this assignment's score. The roster intersection bounds this to rostered classmates — a non-roster account can never be credited — and this "students in a classroom are mutually trusted" model is intentional. If you need stricter control, review the collaborator list on each group repo.
-- **The owner is always credited**, even if they also happen to hold an org-admin role. The admin exclusion only drops *non-owner* admin collaborators (instructors/TAs); the rare case of a non-owner teammate who is also an org admin is not credited, because collection can't tell them apart from a grading TA.
+- **Permission level does not gate crediting.** Crediting is decided by the roster, not by whether a collaborator is `push` or `admin`. This matters because a teammate who is *also an org owner* is `admin` on every repo, and the founder is kept `admin` so they can invite teammates (issue #112) — an earlier version excluded all admins and silently credited only the repo owner. Instructors/TAs are excluded automatically because they are **not on the student roster**, so dropping the admin filter loses no protection. (Permission level is still used by `gh student invite` when *counting* members against `max_group_size` — but that is an advisory limit, separate from crediting.)
+- **If only the owner is credited, collection warns.** When a group submission resolves to the owner alone (no other rostered collaborator found), `collect-scores` emits a `::warning::` pointing you to check that each teammate is both on `students.csv` and a collaborator on the repo — so the silent "team submission scored as solo" case is visible.
+- **`submitted_by` records the pusher.** Each submission carries who pushed it (see the `submitted_by` field above), so even though the grade is shared across the team you can see who submitted each push.
 - **Rows are keyed by the repo owner.** In `scores.json` each row carries an `owner` field (the repo owner login) and the bucket is keyed on it, so re-collecting a group repo whose member set changed (e.g. a teammate joined, or a transient read degraded attribution to owner-only) **updates the same row in place** rather than leaving a stale duplicate.
 
 ## Declarative tests (no `autograder.py`)
@@ -172,7 +179,8 @@ The runner provides:
 
 - **Environment variables**:
   - `CLASSROOM`, `ASSIGNMENT`, `SUBMISSION_TAG`, `PAGES_BASE_URL`
-  - `USERNAME` (derived from the repo name)
+  - `USERNAME` / `OWNER` (the repo owner, derived from the repo name; identical value)
+  - `ASSIGNMENT_TYPE` (`individual` or `group`)
   - `COMMIT_URL`, `RELEASE_URL`, `REVIEW_URL` (full diff from the starter code to the graded commit; equals `COMMIT_URL` when history is unavailable or there is nothing to compare)
   - All standard `GITHUB_*` (REPOSITORY, SHA, ACTOR, OUTPUT, etc.)
 - **Working directory**: the student's repo checkout (relative paths resolve to student code).
@@ -248,7 +256,8 @@ result = {
     "schema":     "classroom50/result/v1",
     "classroom":  os.environ["CLASSROOM"],
     "assignment": os.environ["ASSIGNMENT"],
-    "usernames":  [os.environ["USERNAME"]],
+    # owner + assignment_type are stamped authoritatively by the runner —
+    # you may omit them (or set them from OWNER / ASSIGNMENT_TYPE env).
     "submission": os.environ["SUBMISSION_TAG"],
     "commit":     os.environ["COMMIT_URL"],
     "release":    os.environ["RELEASE_URL"],
@@ -284,7 +293,8 @@ result = {
     "schema":     "classroom50/result/v1",
     "classroom":  os.environ["CLASSROOM"],
     "assignment": os.environ["ASSIGNMENT"],
-    "usernames":  [os.environ["USERNAME"]],
+    # owner + assignment_type are stamped authoritatively by the runner —
+    # you may omit them (or set them from OWNER / ASSIGNMENT_TYPE env).
     "submission": os.environ["SUBMISSION_TAG"],
     "commit":     os.environ["COMMIT_URL"],
     "release":    os.environ["RELEASE_URL"],
