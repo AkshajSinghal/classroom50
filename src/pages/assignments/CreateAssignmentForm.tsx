@@ -2,7 +2,7 @@ import { useForm } from "@tanstack/react-form"
 import GitHub from "@/assets/github.svg?react"
 import AutogradingTestsPane from "./AutogradingTestsPane"
 import type { AssignmentTestDraft } from "@/util/assignmentTests"
-import { testToDraft, validateTestDrafts } from "@/util/assignmentTests"
+import { testToDraft, validateTestDrafts, SETUP_TEST_NAME } from "@/util/assignmentTests"
 import type { Assignment } from "@/types/classroom"
 
 export type CreateAssignmentFormValues = {
@@ -95,17 +95,16 @@ export const assignmentToFormValues = (
   assignment: Assignment,
 ): Partial<CreateAssignmentFormValues> => {
   const allTests = (assignment.tests ?? []).map(testToDraft)
-  // The setup command is stored as a leading run-test named "setup"
-  // (see createAssignment). Lift it back into its own field and hide it
-  // from the autograding-tests list so a round-trip doesn't duplicate it.
-  const setupIndex = allTests.findIndex(
-    (t) => t.name === "setup" && t.type === "run",
-  )
-  const setupCommand = setupIndex >= 0 ? allTests[setupIndex].run : ""
-  const tests =
-    setupIndex >= 0
-      ? allTests.filter((_, i) => i !== setupIndex)
-      : allTests
+  // The setup command is stored as the LEADING run-test named "setup" with
+  // 0 points (see makeSetupTest). Only lift index 0 when it matches that
+  // full signature — never a later or graded test — so a round-trip can't
+  // swallow a user-authored test. The name is reserved at write time, but
+  // this guards assignments created before that reservation.
+  const head = allTests[0]
+  const setupIsLeading =
+    head?.name === SETUP_TEST_NAME && head.type === "run" && head.points === 0
+  const setupCommand = setupIsLeading ? head.run : ""
+  const tests = setupIsLeading ? allTests.slice(1) : allTests
 
   return {
     name: assignment.name,

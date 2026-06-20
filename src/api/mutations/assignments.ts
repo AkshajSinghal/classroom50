@@ -4,7 +4,7 @@ import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
 import { GitHubAPIError } from "@/hooks/github/errors"
 
 import type { AssignmentTestDraft } from "@/util/assignmentTests"
-import { draftToTest } from "@/util/assignmentTests"
+import { draftToTest, makeSetupTest } from "@/util/assignmentTests"
 import { buildDueFields } from "@/util/formatDate"
 import {
   addRepositoryToTeam,
@@ -255,13 +255,10 @@ async function buildAssignmentEntry(
   // `run`-type test named "setup" — the CLI-blessed idiom for a
   // pre-grading step (there is no runtime.setup field; the runner runs
   // tests in order and a non-zero exit fails the step). Kept out of the
-  // graded point total by using points: 0.
+  // graded point total by using points: 0. See makeSetupTest/isSetupTest.
   const setupCommand = input.setup_command?.trim()
   const tests = setupCommand
-    ? [
-        { name: "setup", type: "run" as const, run: setupCommand, points: 0 },
-        ...userTests,
-      ]
+    ? [makeSetupTest(setupCommand), ...userTests]
     : userTests
 
   if (tests.length > 0) {
