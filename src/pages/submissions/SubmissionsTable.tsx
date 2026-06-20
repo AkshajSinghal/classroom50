@@ -52,7 +52,9 @@ const SubmissionsTable = ({ scores, students }) => {
                   />
                 </td>
                 <td>
-                  <label className="badge">1 Submission</label>
+                  <label className="badge max-xl:text-xs whitespace-nowrap">
+                    1 Submission
+                  </label>
                 </td>
                 <td>
                   <label
@@ -68,7 +70,7 @@ const SubmissionsTable = ({ scores, students }) => {
                   })}
                 </td>
                 <td>
-                  <div className="flex gap-4">
+                  <div className="flex gap-4 max-xl:[&>div>a]:flex-col">
                     <div>
                       <a
                         className="flex gap-2"
