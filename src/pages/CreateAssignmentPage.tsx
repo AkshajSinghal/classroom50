@@ -63,9 +63,8 @@ const CreateAssignmentPage = () => {
           `${classroom}/assignments.json`,
         ),
       })
-      // The assignment was created. If the follow-up template team grant
-      // failed, keep the teacher on the page to show the non-fatal warning
-      // rather than silently navigating away; otherwise go to the list.
+      // Assignment created. If the template team grant failed, stay on the
+      // page to show the warning instead of navigating away.
       if (result.templateGrantWarning) {
         setWarningMessage(result.templateGrantWarning)
         window.scrollTo({ top: 0, behavior: "smooth" })

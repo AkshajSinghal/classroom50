@@ -20,9 +20,9 @@ export type CreateAssignmentFormValues = {
   tests: AssignmentTestDraft[]
 }
 
-// GitHub-hosted runner labels the CLI allow-lists for runtime.runs-on
-// (cli/gh-teacher/runtime.go). Self-hosted is intentionally unsupported.
-// "" = leave it out (runner defaults to ubuntu-latest).
+// GitHub-hosted runner labels the CLI allow-lists for runtime.runs-on.
+// Self-hosted is intentionally unsupported. "" = omit (defaults to
+// ubuntu-latest).
 const RUNNER_LABELS = [
   "ubuntu-latest",
   "ubuntu-24.04",
@@ -87,19 +87,18 @@ const utcIsoToDatetimeLocalValue = (value?: string) => {
 }
 
 // Map a stored classroom50/assignments/v1 entry back into the form's value
-// shape so the edit form pre-populates every field — template as
-// `owner/repo`, due as a datetime-local string, the runtime block split into
+// shape: template as `owner/repo`, due as datetime-local, runtime split into
 // runner/container fields, and the leading 0-point "setup" run-test lifted
-// back into the setup command (the rest stay as test drafts).
+// back into the setup command.
 export const assignmentToFormValues = (
   assignment: Assignment,
 ): Partial<CreateAssignmentFormValues> => {
   const allTests = (assignment.tests ?? []).map(testToDraft)
-  // The setup command is stored as the LEADING run-test named "setup" with
-  // 0 points (see makeSetupTest). Only lift index 0 when it matches that
-  // full signature — never a later or graded test — so a round-trip can't
-  // swallow a user-authored test. The name is reserved at write time, but
-  // this guards assignments created before that reservation.
+  // The setup command is the LEADING run-test named "setup" with 0 points
+  // (see makeSetupTest). Only lift index 0 when it matches that full
+  // signature — never a later or graded test — so a round-trip can't swallow
+  // a user-authored test. (The name is reserved at write time; this also
+  // guards pre-reservation assignments.)
   const head = allTests[0]
   const setupIsLeading =
     head?.name === SETUP_TEST_NAME && head.type === "run" && head.points === 0

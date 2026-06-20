@@ -23,14 +23,13 @@ export type AssignmentTestDraft = {
   points: number
 }
 
-// A setup command is encoded as a leading 0-point `run`-type test with
-// this reserved name — the CLI-blessed idiom for a pre-grading step (there
-// is no runtime.setup field; the runner runs tests in order and a non-zero
-// exit fails the step). The name is reserved for user-authored tests
-// (validateTestDraft) so a graded test named "setup" can never be confused
-// with the synthesized one on an edit round-trip. Centralized here so the
-// write (buildAssignmentEntry) and read-back (assignmentToFormValues) can't
-// drift.
+// A setup command is encoded as a leading 0-point `run` test with this
+// reserved name — the CLI-blessed pre-grading idiom (no runtime.setup field;
+// the runner runs tests in order, non-zero exit fails the step). The name is
+// reserved for user-authored tests (validateTestDraft) so a graded "setup"
+// test can't be confused with the synthesized one on an edit round-trip.
+// Centralized so the write (buildAssignmentEntry) and read-back
+// (assignmentToFormValues) can't drift.
 export const SETUP_TEST_NAME = "setup"
 
 export const makeSetupTest = (command: string): AssignmentTest => ({
@@ -40,9 +39,8 @@ export const makeSetupTest = (command: string): AssignmentTest => ({
   points: 0,
 })
 
-// Identifies the synthesized setup test by its full signature, not just the
-// name: reserved name, `run` type, and 0 points. Position is checked by the
-// caller (it is always written leading).
+// Identifies the synthesized setup test by full signature (reserved name,
+// `run` type, 0 points). Position is checked by the caller (always leading).
 export const isSetupTest = (test: AssignmentTest): boolean =>
   test.name === SETUP_TEST_NAME && test.type === "run" && test.points === 0
 

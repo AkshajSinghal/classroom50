@@ -45,9 +45,8 @@ const AddByGithubUsername = ({
         last_name,
       }),
     onSuccess: (result) => {
-      // The roster commit landed. A failed team-add is non-fatal — surface
-      // it inline (the student is enrolled but lacks private-template read
-      // until it's retried).
+      // Surface a non-fatal team-add failure inline (the student is enrolled
+      // but lacks private-template read until retried).
       setTeamWarning(result?.teamWarning ?? "")
       queryClient.invalidateQueries({
         queryKey: githubKeys.csvFile(

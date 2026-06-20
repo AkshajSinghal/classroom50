@@ -13,11 +13,10 @@ import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
 import type { Student } from "@/types/classroom"
 
 // The classroom team slug is authoritative in classroom.json: on a name
-// collision GitHub may assign a slug that differs from `classroom50-<slug>`,
-// so re-deriving it can 404. Read the persisted slug (mirroring the CLI's
-// resolveClassroomTeam) and fall back to the derived form only when no team
-// block exists (pre-feature classrooms) or the read fails — the derived form
-// is correct for every canonically-slugged classroom the GUI creates.
+// collision GitHub may assign a slug other than `classroom50-<slug>`, so
+// re-deriving it can 404. Read the persisted slug (mirrors the CLI), falling
+// back to the derived form only for pre-feature classrooms or a read failure
+// (correct for every canonically-slugged classroom the GUI creates).
 async function resolveClassroomTeamSlug(
   client: GitHubClient,
   org: string,
@@ -37,10 +36,8 @@ async function resolveClassroomTeamSlug(
 export type AddStudentToClassroomResult = CreateClassroomResult & {
   student: StudentCsvRow
   // Set when the student was added to the roster (committed) but the
-  // follow-up classroom-team add failed. The enroll succeeded; this is a
-  // non-fatal warning (the student won't have read on private templates
-  // until the team add is retried), mirroring the bulk path's teamResults
-  // and deleteClassroom's teamDeleteWarning.
+  // follow-up team add failed — a non-fatal warning (no private-template read
+  // until retried). Mirrors the bulk path's teamResults / teamDeleteWarning.
   teamWarning?: string
 }
 
@@ -227,9 +224,8 @@ export async function enrollStudentInClassroom(
 
   const teamSlug = await resolveClassroomTeamSlug(client, org, classroom)
 
-  // The roster commit already landed. A team-add failure must not be
-  // reported as a failed enroll — surface it as a non-fatal warning instead,
-  // matching the fault-tolerant bulk path (teamResults).
+  // The roster commit already landed, so a team-add failure is surfaced as a
+  // non-fatal warning instead of failing the enroll (matches the bulk path).
   let teamWarning: string | undefined
   try {
     await addUserToTeam(client, {
@@ -637,10 +633,9 @@ export async function unenrollStudent(
 
   const updatedRef = await updateRef(client, org, newCommit.sha)
 
-  // Symmetric with enroll: drop the student from the classroom team so
-  // they lose read on the classroom's private templates. Idempotent
-  // (404 = not a member / team gone). Org membership is untouched. Uses
-  // the authoritative persisted slug. Mirrors the CLI's roster remove.
+  // Symmetric with enroll: drop the student from the classroom team so they
+  // lose read on its private templates. Idempotent (404 = not a member / team
+  // gone); org membership is untouched. Mirrors the CLI's roster remove.
   const teamSlug = await resolveClassroomTeamSlug(client, org, classroom)
   await removeUserFromTeam(client, {
     org,

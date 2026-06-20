@@ -33,10 +33,9 @@ import {
 import { getAuthenticatedUser } from "../queries/users"
 import { acceptPendingOrgInvite } from "./users"
 
-// Parse a `--template`-style ref: `<owner>/<repo>` or
-// `<owner>/<repo>@<branch>`, or a bare `<repo>` (owner defaults to the
-// classroom's org). Mirrors the CLI's parseTemplateRef so the GUI accepts
-// the same inputs and writes the same template block.
+// Parse a `--template` ref — `<owner>/<repo>[@<branch>]` or a bare `<repo>`
+// (owner defaults to the org). Mirrors the CLI's parseTemplateRef so the GUI
+// accepts the same inputs and writes the same template block.
 type ParsedTemplate = { owner: string; repo: string; branch?: string }
 function parseTemplateRef(raw: string, defaultOwner: string): ParsedTemplate {
   const trimmed = raw.trim()
@@ -75,19 +74,19 @@ function parseTemplateRef(raw: string, defaultOwner: string): ParsedTemplate {
   }
 }
 
-// Validate and resolve a template ref against GitHub, mirroring the CLI's
-// validateTemplateRepo + resolveTemplateBranch: the repo must exist and be
-// a template, its default branch fills an omitted @branch, and an
-// out-of-org private template is rejected (students could never be granted
-// access). Returns the resolved template block plus whether it's an in-org
-// private template that needs a classroom-team read grant.
+// Resolve a template ref against GitHub, mirroring the CLI's
+// validateTemplateRepo + resolveTemplateBranch: must be a template repo, an
+// omitted @branch falls back to its default, and an out-of-org private
+// template is rejected (students could never be granted access). Returns the
+// resolved block plus whether it's an in-org private template needing a
+// classroom-team read grant.
 async function resolveTemplate(
   client: GitHubClient,
   org: string,
   parsed: ParsedTemplate,
 ): Promise<{ template: Assignment["template"]; needsTeamGrant: boolean }> {
-  // getRepo returns null on 404 (tolerant), so a missing/invisible template
-  // surfaces as null rather than a throw.
+  // getRepo is 404-tolerant (returns null), so a missing/invisible template
+  // surfaces as null.
   const repo = (await getRepo(client, parsed.owner, parsed.repo)) as
     | (GitHubRepo & { is_template?: boolean; private?: boolean })
     | null
@@ -123,11 +122,10 @@ async function resolveTemplate(
   }
 }
 
-// True when a parsed form template ref still points at the same template
-// already stored on the assignment, so an edit can reuse the stored block
-// instead of re-resolving it live. Owner/repo compared case-insensitively
-// (GitHub is case-insensitive there); an omitted @branch is treated as "keep
-// the stored branch", a specified branch must match. Used by edit only.
+// True when a parsed ref still points at the assignment's stored template, so
+// an edit can reuse the stored block instead of re-resolving live. Owner/repo
+// are case-insensitive (per GitHub); an omitted @branch means "keep the
+// stored branch". Edit only.
 function templateRefUnchanged(
   parsed: ParsedTemplate,
   existing: Assignment["template"] | undefined,
@@ -184,11 +182,10 @@ export async function editAssignment(
     throw new Error(`Existing assignment matching ${slug} was not found.`)
   }
 
-  // Build a fully normalized entry from the form input — same path as
-  // create — so editing never leaves stray non-schema keys (org, classroom,
-  // tests drafts, …) in assignments.json that the CLI would reject. Pass the
-  // stored template so an unchanged template ref is reused without a live
-  // resolution (lets non-template edits save even if the template moved).
+  // Normalize the edit the same way as create so it never leaves stray
+  // non-schema keys the CLI rejects. Pass the stored template so an unchanged
+  // ref is reused without a live lookup (non-template edits save even if the
+  // template moved).
   const { entry: editedAssignment, needsTeamGrant } =
     await buildAssignmentEntry(client, input, targetAssignment.template)
 
@@ -221,10 +218,8 @@ export async function editAssignment(
   })
   const updatedRef = await updateRef(client, input.org, newCommit.sha)
 
-  // If the (possibly changed) template is an in-org private repo, ensure the
-  // classroom team can still read it — same grant create applies. A grant
-  // failure is surfaced as a non-fatal warning (the edit already committed),
-  // never thrown, so a saved edit isn't reported as a failure.
+  // Grant the (possibly changed) in-org private template a team read. Surfaced
+  // as a non-fatal warning, never thrown — the edit already committed.
   let templateGrantWarning: string | undefined
   if (needsTeamGrant) {
     templateGrantWarning = await tryGrantTeamTemplateRead(
@@ -272,26 +267,22 @@ async function ensureDeclarativeTestsWritable(
 }
 
 export type CreateAssignmentResult = CreateClassroomResult & {
-  // Set when the assignment was saved but the follow-up classroom-team read
-  // grant on a private in-org template failed. The save succeeded; this is a
-  // non-fatal warning the UI should surface (students can't accept until the
-  // grant is fixed), mirroring deleteClassroom's teamDeleteWarning.
+  // Set when the assignment saved but the follow-up team read grant on a
+  // private in-org template failed — a non-fatal warning the UI surfaces
+  // (students can't accept until fixed). Mirrors teamDeleteWarning.
   templateGrantWarning?: string
 }
 
 // Assemble the normalized classroom50/assignments/v1 entry from form input,
 // resolving + validating the template the way the CLI does. Shared by create
-// and edit so both write the exact same schema-valid shape (no stray keys),
-// and both apply the in-org-private-template team grant. Returns the entry
-// plus whether the resolved template needs a classroom-team read grant.
+// and edit so both write the same schema-valid shape and apply the
+// in-org-private-template team grant.
 //
-// `existingTemplate` (edit only) is the template already stored on the
-// assignment. When the form's template ref still points at the same
-// owner/repo (and the branch is unchanged or omitted), the stored block is
-// reused WITHOUT a live GitHub resolution — so editing an unrelated field
-// (due date, tests, …) doesn't hard-fail just because the template was since
-// deleted, un-templated, or made private-out-of-org. A genuinely changed
-// template ref is always re-resolved.
+// `existingTemplate` (edit only): when the ref still points at the same
+// owner/repo (branch unchanged or omitted), the stored block is reused
+// WITHOUT a live lookup — so an unrelated-field edit doesn't hard-fail when
+// the template was since deleted/un-templated/made private-out-of-org. A
+// changed ref is always re-resolved.
 async function buildAssignmentEntry(
   client: GitHubClient,
   input: CreateAssignmentInput,
@@ -299,11 +290,10 @@ async function buildAssignmentEntry(
 ): Promise<{ entry: Assignment; needsTeamGrant: boolean }> {
   const userTests = input.tests.map(draftToTest)
 
-  // A setup command (e.g. compile-once) is written as a leading 0-point
-  // `run`-type test named "setup" — the CLI-blessed idiom for a
-  // pre-grading step (there is no runtime.setup field; the runner runs
-  // tests in order and a non-zero exit fails the step). Kept out of the
-  // graded point total by using points: 0. See makeSetupTest/isSetupTest.
+  // A setup command is written as a leading 0-point `run` test named "setup"
+  // — the CLI-blessed pre-grading idiom (no runtime.setup field exists; the
+  // runner runs tests in order, non-zero exit fails the step). See
+  // makeSetupTest/isSetupTest.
   const setupCommand = input.setup_command?.trim()
   const tests = setupCommand
     ? [makeSetupTest(setupCommand), ...userTests]
@@ -318,11 +308,9 @@ async function buildAssignmentEntry(
     )
   }
 
-  // Resolve the template the way the CLI does: parse owner/repo[@branch],
-  // confirm it's a template, fill an omitted branch from the repo's default,
-  // and reject an out-of-org private template up front. On edit, skip this
-  // live resolution when the ref is unchanged from the stored template (see
-  // the function doc) so non-template edits still save.
+  // Resolve the template like the CLI (parse, confirm template, default
+  // branch, reject out-of-org private). On edit, reuse an unchanged stored
+  // ref instead of re-resolving so non-template edits still save.
   const parsedTemplate = parseTemplateRef(input.template_repo, input.org)
   const { template, needsTeamGrant } = templateRefUnchanged(
     parsedTemplate,
@@ -331,10 +319,9 @@ async function buildAssignmentEntry(
     ? { template: existingTemplate!, needsTeamGrant: false }
     : await resolveTemplate(client, input.org, parsedTemplate)
 
-  // The entry must match classroom50/assignments/v1 exactly — the CLI
-  // parses the file with unknown fields rejected, so stray keys would
-  // break `gh teacher` for the whole classroom. Optional fields are
-  // omitted (not written empty), the same normalized form the CLI writes.
+  // Must match classroom50/assignments/v1 exactly — the CLI rejects unknown
+  // fields, so a stray key breaks `gh teacher` for the whole classroom.
+  // Optional fields are omitted (not written empty), as the CLI writes them.
   const entry: Assignment = {
     slug: input.slug,
     name: input.name,
@@ -385,9 +372,9 @@ async function buildAssignmentEntry(
 }
 
 // Grant the classroom team read on an in-org private template so rostered
-// students can generate from it (mirrors the CLI's assignment add). The
-// team slug is read from classroom.json (authoritative); a classroom with
-// no team gets an actionable error rather than a 404 against a guess.
+// students can generate from it (mirrors the CLI's assignment add). The team
+// slug comes from classroom.json (authoritative); a teamless classroom gets
+// an actionable error, not a 404 against a guess.
 async function grantTeamTemplateRead(
   client: GitHubClient,
   org: string,
@@ -418,12 +405,10 @@ async function grantTeamTemplateRead(
   })
 }
 
-// Run grantTeamTemplateRead but never throw: the assignments.json commit has
-// already landed by the time this is called, so a grant failure must not be
-// reported as a failed save. Returns an actionable warning string when the
-// grant didn't go through (the assignment is usable for everything except
-// student accept against the private template until it's fixed), or undefined
-// on success. Mirrors deleteClassroom's teamDeleteWarning handling.
+// Grant the template read but never throw: the commit has already landed, so
+// a grant failure can't be reported as a failed save. Returns an actionable
+// warning on failure (the assignment works except for student accept against
+// the private template), or undefined on success. Mirrors teamDeleteWarning.
 async function tryGrantTeamTemplateRead(
   client: GitHubClient,
   org: string,
@@ -586,15 +571,12 @@ export async function createAssignmentRepo(params: {
         }
       }
 
-      // A template WAS specified but generation failed. Do NOT silently
-      // fall back to an empty repo — that produced broken repos (missing
-      // the template content AND the metadata/shim) that look "accepted"
-      // but can never be re-generated. The most common cause for a private
-      // in-org template is the classroom team lacking read access (the
-      // grant `gh teacher assignment add` / the GUI applies). Surface an
-      // actionable error so the teacher fixes access instead of leaving a
-      // dead repo behind. 403 = access denied; 404 = template not visible
-      // to the actor (a private template the team can't read reads as 404).
+      // A template was specified but generation failed. Do NOT fall back to
+      // an empty repo — that produced broken repos (no template content, no
+      // metadata/shim) that look "accepted" but can't be regenerated. For a
+      // private in-org template the usual cause is the classroom team lacking
+      // read access. Surface an actionable error instead. 403 = denied; 404 =
+      // template not visible (a private template the team can't read).
       if (err.status === 403 || err.status === 404) {
         throw new Error(
           `Couldn't generate your repository from the template ` +
@@ -606,15 +588,14 @@ export async function createAssignmentRepo(params: {
         )
       }
 
-      // Any other unexpected status is a real failure too — surface it
-      // rather than masking it with an empty repo.
+      // Any other status is a real failure too — don't mask it with an empty
+      // repo.
       throw err
     }
   }
 
-  // No template was specified — an empty starter repo is the intended
-  // outcome here (e.g. a from-scratch assignment), so seed it with the
-  // metadata + shim.
+  // No template specified — an empty starter repo is intended here; seed it
+  // with the metadata + shim.
   return await createEmptyAssignmentRepo({
     client,
     owner,

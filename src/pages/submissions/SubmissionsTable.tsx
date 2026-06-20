@@ -14,8 +14,8 @@ import type { Student } from "@/types/classroom"
 // <= 50% = red
 // >= 60% = yellow
 // >= 70% = green
-// A vacuous/ungraded result (no autograder configured) has max === 0;
-// show it neutral rather than letting NaN% fall through to green.
+// A vacuous/ungraded result (no autograder) has max === 0; show it neutral
+// rather than letting NaN% fall through to green.
 const scoreToBadgeType = (score: number, max: number) => {
   if (!max) return "badge-ghost"
 
@@ -26,16 +26,12 @@ const scoreToBadgeType = (score: number, max: number) => {
   return "badge-success"
 }
 
-// The student/group repo name follows the cross-binary formula
-// `<classroom>-<assignment>-<owner>` (lowercased) — see studentRepo.ts for
-// the shared single source of truth. The owner is the repo-name component,
-// so the URL is stable regardless of which member pushed last.
+// Repo name/URL follow the shared cross-binary formula — see studentRepo.ts.
 const repoName = studentRepoName
 const repoUrl = studentRepoUrl
 
-// A small initials bubble with a tooltip naming the member — the compact
-// stand-in for the full Avatar card so a multi-member group row stays tight
-// and member identity moves into hover.
+// A compact initials bubble with a tooltip naming the member — keeps a
+// multi-member group row tight, moving identity into hover.
 const MiniAvatar = ({
   username,
   students,
@@ -58,10 +54,9 @@ const MiniAvatar = ({
   )
 }
 
-// A group submission credits every rostered collaborator (member_usernames).
-// Compact layout: the shared repo (the real group identity) on top, then an
-// overlapping avatar stack — member identities live in per-avatar tooltips so
-// the row stays tight.
+// A group submission credits every rostered collaborator. Compact layout: the
+// shared repo (the real group identity) on top, then an overlapping avatar
+// stack with member names in per-avatar tooltips.
 const GroupMembers = ({
   usernames,
   students,

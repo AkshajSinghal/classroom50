@@ -519,8 +519,7 @@ const EditAssignmentPage = () => {
               assignment={assignment}
               defaultData={assignmentData}
               onMutate={() => {
-                // Clear any prior banner so a re-edit never shows a stale
-                // success/warning/error from the previous attempt.
+                // Clear prior banners so a re-edit never shows stale state.
                 setEditSuccess(false)
                 setEditWarning("")
                 setEditError("")
@@ -530,9 +529,8 @@ const EditAssignmentPage = () => {
                 window.scrollTo({ top: 0, behavior: "smooth" })
               }}
               onSuccess={(result) => {
-                // The edit committed. Surface a non-fatal template-grant
-                // warning inline if present; otherwise show the success
-                // banner.
+                // Surface a non-fatal template-grant warning inline if
+                // present; otherwise show the success banner.
                 if (result?.templateGrantWarning) {
                   setEditWarning(result.templateGrantWarning)
                 } else {

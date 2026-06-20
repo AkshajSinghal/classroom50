@@ -29,9 +29,8 @@ const createClassroomMetadata = (
   short_name: classroom,
   term,
   org,
-  // Written only when a team was provisioned, matching the CLI's
-  // `omitempty` team field. Grants rostered students read on private,
-  // org-owned assignment templates.
+  // Written only when a team was provisioned, matching the CLI's `omitempty`
+  // team field. Grants rostered students read on private org templates.
   ...(team ? { team } : {}),
 })
 
@@ -358,31 +357,27 @@ export function createTeam(client: GitHubClient, input: CreateTeamInput) {
   })
 }
 
-// The minimal team identity persisted in classroom.json. The slug is
-// authoritative for every team operation (GitHub may assign a slug that
-// differs from the name on a collision); the id is the immutable handle.
-// Mirrors the CLI's teamRef (cli/gh-teacher/team.go).
+// Minimal team identity persisted in classroom.json. The slug is
+// authoritative for team ops (GitHub may slugify a name differently on
+// collision); the id is the immutable handle. Mirrors the CLI's teamRef.
 export type ClassroomTeamRef = {
   id: number
   slug: string
 }
 
-// GitHub slugifies team names by collapsing hyphen runs and trimming
-// trailing hyphens, so a short-name with consecutive/trailing hyphens
-// would yield slug != `classroom50-<short>` and break later team ops that
-// re-derive the slug. The GUI's slugify already produces canonical slugs,
-// but guard defensively to match the CLI's canonicalTeamSlugShortName.
+// A short-name with consecutive/trailing hyphens would slugify to something
+// other than `classroom50-<short>` and break team ops that re-derive the
+// slug. The GUI's slugify already produces canonical slugs; guard defensively
+// to match the CLI's canonicalTeamSlugShortName.
 function isCanonicalTeamShortName(shortName: string): boolean {
   return !shortName.endsWith("-") && !shortName.includes("--")
 }
 
-// Create (or adopt) the per-classroom GitHub team — privacy `secret`,
-// least-privilege — and return its { id, slug } for classroom.json.
-// This is what later grants rostered students read on private, org-owned
-// assignment templates so `gh student accept` can generate their repo.
-// Mirrors the CLI's ensureClassroomTeam (cli/gh-teacher/team.go):
-// idempotent, adopting an existing same-named team on 422 rather than
-// failing, and reconciling its privacy to `secret`.
+// Create (or adopt) the per-classroom team (privacy `secret`) and return its
+// { id, slug } for classroom.json — this is what later grants rostered
+// students read on private org templates so `gh student accept` can generate
+// their repo. Mirrors the CLI's ensureClassroomTeam: idempotent, adopting an
+// existing same-named team on 422 and reconciling its privacy to `secret`.
 export async function ensureClassroomTeam(
   client: GitHubClient,
   org: string,
@@ -400,12 +395,10 @@ export async function ensureClassroomTeam(
     const created = await createTeam(client, { org, name, privacy: "secret" })
     return { id: created.id, slug: created.slug, created: true }
   } catch (err) {
-    // 422 = a team with this name already exists. Adopt it in place
-    // (read its id/slug, reconcile privacy to secret) so a re-create
-    // reconciles cleanly instead of failing. `created: false` tells the
-    // caller this team pre-existed — it must NOT be deleted as part of a
-    // create-failure rollback (that would destroy a team and its grants
-    // the caller never created).
+    // 422 = a same-named team already exists. Adopt it (read id/slug,
+    // reconcile privacy). `created: false` tells the caller it pre-existed
+    // and must NOT be deleted on a create-failure rollback (that would
+    // destroy a team and grants we never created).
     if (err instanceof GitHubAPIError && err.status === 422) {
       const adopted = await adoptClassroomTeam(client, org, classroom)
       return { ...adopted, created: false }
@@ -434,12 +427,10 @@ async function adoptClassroomTeam(
   return { id: existing.id, slug: existing.slug }
 }
 
-// Delete the per-classroom team by its persisted slug, mirroring the
-// CLI's deleteClassroomTeam (cli/gh-teacher/team.go). As defense-in-depth
-// against a slug later reused by an unrelated team, the live team's id is
-// confirmed to match the persisted id before deletion (skipped when no id
-// was recorded). A 404 (already gone) is treated as success so deletion
-// is idempotent; an empty ref is a no-op.
+// Delete the per-classroom team by its persisted slug (mirrors the CLI). As
+// defense against a reused slug, the live team's id is confirmed against the
+// persisted id before deletion (skipped when no id was recorded). 404 =
+// already gone (success); an empty ref is a no-op.
 export async function deleteClassroomTeam(
   client: GitHubClient,
   org: string,
@@ -518,11 +509,9 @@ export function addUserToTeam(
   )
 }
 
-// Remove a user from a team, mirroring the CLI's removeTeamMembership
-// (cli/gh-teacher/team.go). A 404 (not a member, or the team is gone) is
-// treated as success so roster removal is idempotent. Org membership is
-// untouched — only the team grant (and the template read it confers) is
-// dropped.
+// Remove a user from a team (mirrors the CLI). 404 = not a member / team gone
+// (success), so removal is idempotent. Org membership is untouched — only the
+// team grant (and the template read it confers) is dropped.
 export async function removeUserFromTeam(
   client: GitHubClient,
   input: {
@@ -727,9 +716,8 @@ const SKELETON_PATHS = [
   // tests.json bundles during publish-pages — without it, declarative
   // autograding tests silently never grade.
   "scripts/materialize_tests.py",
-  // Drives the opt-in Feedback PR (issue #86); autograde-runner.yaml
-  // fetches it from Pages. Without it, feedback_pr assignments can't
-  // open their review PR.
+  // Drives the opt-in Feedback PR (issue #86); autograde-runner.yaml fetches
+  // it from Pages. Without it, feedback_pr assignments can't open their PR.
   "scripts/ensure_feedback_pr.py",
 ]
 
@@ -1542,19 +1530,16 @@ type OrgWorkflowPermissions = {
 }
 
 // The opt-in Feedback PR (issue #86) is opened by each student repo's
-// autograde workflow using GITHUB_TOKEN. Even when the calling workflow
-// grants `pull-requests: write`, GitHub rejects the PR creation unless the
-// org-level "Allow GitHub Actions to create and approve pull requests"
-// toggle (can_approve_pull_request_reviews) is on — and it defaults off.
-// Student repos inherit this from the org at creation time, and a
-// `maintain` collaborator can't set it per-repo, so the org is the only
-// place to enable it. Mirrors the CLI's ensureOrgCanCreatePRs
-// (cli/gh-teacher/init_repo.go); without it a GUI-initialized org hits the
-// exact "requesting 'pull-requests: write', but is only allowed
-// 'pull-requests: none'" failure students reported in discussion #33.
+// autograde workflow via GITHUB_TOKEN. Even with `pull-requests: write` on the
+// workflow, GitHub rejects the PR unless the org-level "Allow GitHub Actions to
+// create and approve pull requests" toggle is on — and it defaults off. Student
+// repos inherit it at creation and a `maintain` collaborator can't set it
+// per-repo, so the org is the only place to enable it. Mirrors the CLI's
+// ensureOrgCanCreatePRs; without it a GUI-initialized org hits the
+// `pull-requests: none` failure from discussion #33.
 //
-// Only the PR toggle is ours to change: default_workflow_permissions is
-// preserved (skeleton workflows declare their own workflow-level scopes).
+// Only the PR toggle is ours to change; default_workflow_permissions is
+// preserved (skeleton workflows declare their own scopes).
 export async function ensureOrgCanCreatePullRequests(
   client: GitHubClient,
   org: string,
