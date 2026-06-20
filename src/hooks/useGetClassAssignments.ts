@@ -3,10 +3,9 @@ import { jsonFileQuery } from "./github/queries"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import type { Assignment } from "@/types/classroom"
 
-// Mirrors classroom50/assignments/v1: a `schema` sentinel plus the
-// assignment list. `runtime`, `max_group_size`, `tests`, `due`, etc. are
-// all optional — a minimal assignment (as `gh teacher assignment add`
-// writes) carries only slug/name/template/mode/autograder.
+// Mirrors classroom50/assignments/v1: a `schema` sentinel plus the list.
+// `runtime`, `max_group_size`, `tests`, `due`, etc. are all optional — a
+// minimal assignment carries only slug/name/template/mode/autograder.
 type AssignmentsSchema = {
   schema: string
   assignments: Assignment[]

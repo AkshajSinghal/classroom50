@@ -158,8 +158,7 @@ const AssignmentsTable = ({ org, classroom, assignments, students = [] }) => {
                     scoresData?.submissions?.[assignment.slug]?.length || 0
 
                   // Group assignments submit per-repo, not per-student, so a
-                  // roster-size denominator (and its progress bar) is
-                  // meaningless — show the group count on its own.
+                  // roster-size denominator is meaningless — show the count.
                   if (assignment.mode === "group") {
                     return (
                       <span className="whitespace-nowrap">

@@ -3,17 +3,14 @@ import { useQuery } from "@tanstack/react-query"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { jsonFileQuery } from "./github/queries"
 
-// === Canonical <classroom>/scores.json shape (classroom50/scores/v1) ===
-// Written by the CLI's collect_scores.py and described by
-// schemas/scores-v1.schema.json in foundation50/classroom50. The GUI is a
-// pure consumer of this contract — it does not share code with the CLI, so
-// the only thing that must agree is this JSON shape.
+// Canonical <classroom>/scores.json shape (classroom50/scores/v1), written by
+// the CLI's collect_scores.py. The GUI is a pure consumer — the only thing
+// that must agree is this JSON shape.
 //
-// scores.json is keyed by assignment slug under `assignments`; each value
-// is a bucket `{ type, entries[] }`. An entry is one student repo's
-// gradebook record (keyed by repo `owner`) holding the full submission
-// history (newest first). Each submission is a result/v1 payload minus the
-// bucket-key `assignment`.
+// Keyed by assignment slug under `assignments`; each value is a bucket
+// `{ type, entries[] }`. An entry is one student repo's gradebook record
+// (keyed by `owner`) with its submission history (newest first); each
+// submission is a result/v1 payload minus the bucket-key `assignment`.
 type SubmissionRecord = {
   schema: string
   classroom: string
@@ -51,11 +48,9 @@ type ScoresSchema = {
   assignments: Record<string, AssignmentBucket>
 }
 
-// The flattened row the submissions UI renders: one row per student repo,
-// carrying the latest submission's fields plus a credited-username list and
-// the total submission count. Keeping the legacy field names (`usernames`,
-// `score`, `datetime`, `commit`, `release`, `review`, `max-score`) lets the
-// table/CSV consumers stay simple while we read the new nested shape.
+// The flattened row the submissions UI renders: one per student repo, with
+// the latest submission's fields, credited usernames, and submission count.
+// Keeps the legacy field names so table/CSV consumers stay simple.
 export type SubmissionRow = {
   usernames: string[]
   owner: string
@@ -75,9 +70,8 @@ export type NormalizedScores = {
 }
 
 // Collapse a bucket's entries to one row each (latest submission first).
-// `member_usernames` credits the whole group; individual entries fall back
-// to the sole `owner`. submissions[0] is the newest per the schema, but we
-// sort defensively in case a hand-edit reordered them.
+// `member_usernames` credits the whole group; individual entries fall back to
+// `owner`. We sort defensively in case a hand-edit reordered submissions.
 function bucketToRows(bucket: AssignmentBucket): SubmissionRow[] {
   return bucket.entries
     .filter((entry) => entry.submissions && entry.submissions.length > 0)

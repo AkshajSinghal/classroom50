@@ -22,24 +22,22 @@ export async function createClassroomFiles(
   client: GitHubClient,
   input: CreateClassroomInput,
 ): Promise<CreateClassroomResult> {
-  // Create (or adopt) the per-classroom GitHub team BEFORE scaffolding so
-  // its { id, slug } can be recorded in classroom.json — mirrors the CLI's
-  // addClassroom ordering. The team is what later grants rostered students
-  // read on private, org-owned assignment templates.
+  // Create (or adopt) the per-classroom team BEFORE scaffolding so its
+  // { id, slug } can be recorded in classroom.json (mirrors the CLI's
+  // ordering). The team later grants rostered students read on private org
+  // templates.
   const { created: teamCreated, ...team } = await ensureClassroomTeam(
     client,
     input.org,
     input.classroom,
   )
 
-  // If scaffolding fails after the team exists, a team we CREATED this call
-  // would be orphaned (no classroom.json references it). Best-effort delete
-  // it before re-throwing so a retry starts clean. Only delete a team we
-  // created — never one we ADOPTED (it pre-existed; deleting it would
-  // destroy a team and its grants we didn't make). A 409 (concurrent
-  // commit) is re-thrown untouched so withGitConflictRetry can re-run — and
-  // on that re-run ensureClassroomTeam adopts the just-created team rather
-  // than failing, so the team is not deleted out from under a retry.
+  // If scaffolding fails after the team exists, a team we CREATED would be
+  // orphaned — best-effort delete it before re-throwing. Never delete an
+  // ADOPTED team (it pre-existed). A 409 (concurrent commit) is re-thrown
+  // untouched so withGitConflictRetry can re-run; the re-run's
+  // ensureClassroomTeam then adopts the just-created team rather than
+  // deleting it out from under the retry.
   let ref, commit, tree, newCommit, updatedRef
   try {
     ref = await getBranchRef(client, input.org)
@@ -119,9 +117,8 @@ export async function deleteClassroom(
   const prefix = `${classroom}/`
 
   // Resolve the team ref from classroom.json BEFORE the deletion commit
-  // removes the file. A classroom with no team block (pre-feature) or a
-  // read failure yields no ref — the team delete below is then a no-op.
-  // Mirrors the CLI's classroom remove ordering.
+  // removes the file. No team block (pre-feature) or a read failure yields no
+  // ref, making the delete below a no-op. Mirrors the CLI's ordering.
   let team: { id: number; slug: string } | undefined
   try {
     const classroomJson = await getClassroomJson(client, {
@@ -201,9 +198,9 @@ export async function deleteClassroom(
     },
   })
 
-  // Delete the per-classroom team (idempotent; 404 = already gone). A
-  // delete failure must NOT undo the config removal that already
-  // committed — surface it as a non-fatal warning, matching the CLI.
+  // Delete the per-classroom team (idempotent; 404 = already gone). A delete
+  // failure must NOT undo the already-committed config removal — surface it
+  // as a non-fatal warning, matching the CLI.
   let teamDeleteWarning: string | undefined
   if (team?.slug) {
     try {
