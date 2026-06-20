@@ -164,7 +164,7 @@ async function contentsPathExists(
 export async function editAssignment(
   client: GitHubClient,
   input: CreateAssignmentInput,
-) {
+): Promise<CreateAssignmentResult> {
   const { org, classroom, slug } = input
 
   const ref = await getBranchRef(client, org)

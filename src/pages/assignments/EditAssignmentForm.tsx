@@ -2,7 +2,11 @@ import { useMutation } from "@tanstack/react-query"
 import CreateAssignmentForm, {
   assignmentToFormValues,
 } from "./CreateAssignmentForm"
-import { editAssignment } from "@/api/mutations/assignments"
+import {
+  editAssignment,
+  type CreateAssignmentInput,
+  type CreateAssignmentResult,
+} from "@/api/mutations/assignments"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 
 const EditAssignmentForm = ({
@@ -11,9 +15,19 @@ const EditAssignmentForm = ({
   assignment,
   defaultData,
   onSuccess,
+}: {
+  org: string
+  classroom: string
+  assignment: string
+  defaultData: Parameters<typeof assignmentToFormValues>[0] | undefined
+  onSuccess: (result: CreateAssignmentResult) => void
 }) => {
   const client = useGitHubClient()
-  const editAssignmentMutation = useMutation({
+  const editAssignmentMutation = useMutation<
+    CreateAssignmentResult,
+    Error,
+    CreateAssignmentInput
+  >({
     mutationFn: (input) => editAssignment(client, input),
     onSuccess,
   })

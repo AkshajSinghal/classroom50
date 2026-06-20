@@ -2,6 +2,7 @@ import { UserRound } from "lucide-react"
 import GitHub from "@/assets/github.svg?react"
 import { useForm } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useState } from "react"
 import useEnsureTeam from "@/hooks/useEnsureTeam"
 import { githubKeys } from "@/hooks/github/queries"
 import { enrollStudentInClassroom } from "@/hooks/github/mutations"
@@ -32,6 +33,7 @@ const AddByGithubUsername = ({
   const { team } = useEnsureTeam(org, classroom)
   const queryClient = useQueryClient()
   const githubClient = useGitHubClient()
+  const [teamWarning, setTeamWarning] = useState("")
 
   const addStudentMutation = useMutation({
     mutationFn: ({ username, first_name, last_name }) =>
@@ -43,9 +45,10 @@ const AddByGithubUsername = ({
         last_name,
       }),
     onSuccess: (result) => {
-      if (result?.teamWarning) {
-        console.warn(result.teamWarning)
-      }
+      // The roster commit landed. A failed team-add is non-fatal — surface
+      // it inline (the student is enrolled but lacks private-template read
+      // until it's retried).
+      setTeamWarning(result?.teamWarning ?? "")
       queryClient.invalidateQueries({
         queryKey: githubKeys.csvFile(
           org,
@@ -72,6 +75,7 @@ const AddByGithubUsername = ({
       },
     },
     onSubmit: async ({ value }) => {
+      setTeamWarning("")
       const nameParts = value.name.split(" ")
       const first_name = nameParts.at(0)
       const last_name = nameParts.at(-1)
@@ -90,6 +94,12 @@ const AddByGithubUsername = ({
       >
         <div className="card-body">
           <p className="font-bold mb-2">Add by GitHub Username</p>
+
+          {teamWarning && (
+            <div className="alert alert-warning alert-soft mb-2 text-sm">
+              {teamWarning}
+            </div>
+          )}
 
           <form.Field name="name">
             {(field) => (
