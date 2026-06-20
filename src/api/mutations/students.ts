@@ -36,6 +36,12 @@ async function resolveClassroomTeamSlug(
 
 export type AddStudentToClassroomResult = CreateClassroomResult & {
   student: StudentCsvRow
+  // Set when the student was added to the roster (committed) but the
+  // follow-up classroom-team add failed. The enroll succeeded; this is a
+  // non-fatal warning (the student won't have read on private templates
+  // until the team add is retried), mirroring the bulk path's teamResults
+  // and deleteClassroom's teamDeleteWarning.
+  teamWarning?: string
 }
 
 const STUDENT_CSV_FIELDS = [
@@ -221,14 +227,26 @@ export async function enrollStudentInClassroom(
 
   const teamSlug = await resolveClassroomTeamSlug(client, org, classroom)
 
-  await addUserToTeam(client, {
-    org,
-    teamSlug,
-    username: result.student.username,
-    role: "member",
-  })
+  // The roster commit already landed. A team-add failure must not be
+  // reported as a failed enroll — surface it as a non-fatal warning instead,
+  // matching the fault-tolerant bulk path (teamResults).
+  let teamWarning: string | undefined
+  try {
+    await addUserToTeam(client, {
+      org,
+      teamSlug,
+      username: result.student.username,
+      role: "member",
+    })
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
+    teamWarning =
+      `${result.student.username} was added to the roster, but adding them to ` +
+      `the classroom team "${teamSlug}" failed (${detail}); they won't have ` +
+      `read on private templates until it's retried.`
+  }
 
-  return result
+  return { ...result, teamWarning }
 }
 
 type BulkImportProgress = {

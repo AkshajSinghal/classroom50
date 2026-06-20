@@ -6,6 +6,7 @@ import { GitHubAPIError } from "@/hooks/github/errors"
 import type { AssignmentTestDraft } from "@/util/assignmentTests"
 import { draftToTest, makeSetupTest } from "@/util/assignmentTests"
 import { buildDueFields } from "@/util/formatDate"
+import { studentRepoName } from "@/util/studentRepo"
 import {
   addRepositoryToTeam,
   createCommitForAssignment,
@@ -49,19 +50,29 @@ function parseTemplateRef(raw: string, defaultOwner: string): ParsedTemplate {
       `Invalid template "${raw}": branch contains '@' (expected owner/repo[@branch]).`,
     )
   }
-  if (trimmed.includes("@") && !branch) {
+  // A branch given as `@<whitespace>` is empty after trimming.
+  const trimmedBranch = branch?.trim()
+  if (trimmed.includes("@") && !trimmedBranch) {
     throw new Error(`Invalid template "${raw}": branch is empty after '@'.`)
   }
 
-  const parts = ownerRepo.split("/")
+  const parts = ownerRepo.split("/").map((part) => part.trim())
   if (parts.length === 1 && parts[0]) {
     // Bare repo name → owner defaults to the org (the form's hint).
-    return { owner: defaultOwner, repo: parts[0], branch: branch || undefined }
+    return {
+      owner: defaultOwner,
+      repo: parts[0],
+      branch: trimmedBranch || undefined,
+    }
   }
   if (parts.length !== 2 || !parts[0] || !parts[1]) {
     throw new Error(`Invalid template "${raw}": expected owner/repo[@branch].`)
   }
-  return { owner: parts[0], repo: parts[1], branch: branch || undefined }
+  return {
+    owner: parts[0],
+    repo: parts[1],
+    branch: trimmedBranch || undefined,
+  }
 }
 
 // Validate and resolve a template ref against GitHub, mirroring the CLI's
@@ -112,6 +123,22 @@ async function resolveTemplate(
   }
 }
 
+// True when a parsed form template ref still points at the same template
+// already stored on the assignment, so an edit can reuse the stored block
+// instead of re-resolving it live. Owner/repo compared case-insensitively
+// (GitHub is case-insensitive there); an omitted @branch is treated as "keep
+// the stored branch", a specified branch must match. Used by edit only.
+function templateRefUnchanged(
+  parsed: ParsedTemplate,
+  existing: Assignment["template"] | undefined,
+): boolean {
+  if (!existing) return false
+  const sameOwner = parsed.owner.toLowerCase() === existing.owner.toLowerCase()
+  const sameRepo = parsed.repo.toLowerCase() === existing.repo.toLowerCase()
+  const sameBranch = !parsed.branch || parsed.branch === existing.branch
+  return sameOwner && sameRepo && sameBranch
+}
+
 // contentsPathExists: 404 -> false, 200 -> true, anything else throws.
 async function contentsPathExists(
   client: GitHubClient,
@@ -159,9 +186,11 @@ export async function editAssignment(
 
   // Build a fully normalized entry from the form input — same path as
   // create — so editing never leaves stray non-schema keys (org, classroom,
-  // tests drafts, …) in assignments.json that the CLI would reject.
+  // tests drafts, …) in assignments.json that the CLI would reject. Pass the
+  // stored template so an unchanged template ref is reused without a live
+  // resolution (lets non-template edits save even if the template moved).
   const { entry: editedAssignment, needsTeamGrant } =
-    await buildAssignmentEntry(client, input)
+    await buildAssignmentEntry(client, input, targetAssignment.template)
 
   const nextAssignments = {
     ...currentAssignments,
@@ -193,9 +222,12 @@ export async function editAssignment(
   const updatedRef = await updateRef(client, input.org, newCommit.sha)
 
   // If the (possibly changed) template is an in-org private repo, ensure the
-  // classroom team can still read it — same grant create applies.
+  // classroom team can still read it — same grant create applies. A grant
+  // failure is surfaced as a non-fatal warning (the edit already committed),
+  // never thrown, so a saved edit isn't reported as a failure.
+  let templateGrantWarning: string | undefined
   if (needsTeamGrant) {
-    await grantTeamTemplateRead(
+    templateGrantWarning = await tryGrantTeamTemplateRead(
       client,
       input.org,
       input.classroom,
@@ -210,6 +242,7 @@ export async function editAssignment(
     newTreeSha: tree.sha,
     newCommitSha: newCommit.sha,
     updatedRef,
+    templateGrantWarning,
   }
 }
 
@@ -238,16 +271,31 @@ async function ensureDeclarativeTestsWritable(
   }
 }
 
-export type CreateAssignmentResult = CreateClassroomResult
+export type CreateAssignmentResult = CreateClassroomResult & {
+  // Set when the assignment was saved but the follow-up classroom-team read
+  // grant on a private in-org template failed. The save succeeded; this is a
+  // non-fatal warning the UI should surface (students can't accept until the
+  // grant is fixed), mirroring deleteClassroom's teamDeleteWarning.
+  templateGrantWarning?: string
+}
 
 // Assemble the normalized classroom50/assignments/v1 entry from form input,
 // resolving + validating the template the way the CLI does. Shared by create
 // and edit so both write the exact same schema-valid shape (no stray keys),
 // and both apply the in-org-private-template team grant. Returns the entry
 // plus whether the resolved template needs a classroom-team read grant.
+//
+// `existingTemplate` (edit only) is the template already stored on the
+// assignment. When the form's template ref still points at the same
+// owner/repo (and the branch is unchanged or omitted), the stored block is
+// reused WITHOUT a live GitHub resolution — so editing an unrelated field
+// (due date, tests, …) doesn't hard-fail just because the template was since
+// deleted, un-templated, or made private-out-of-org. A genuinely changed
+// template ref is always re-resolved.
 async function buildAssignmentEntry(
   client: GitHubClient,
   input: CreateAssignmentInput,
+  existingTemplate?: Assignment["template"],
 ): Promise<{ entry: Assignment; needsTeamGrant: boolean }> {
   const userTests = input.tests.map(draftToTest)
 
@@ -272,13 +320,16 @@ async function buildAssignmentEntry(
 
   // Resolve the template the way the CLI does: parse owner/repo[@branch],
   // confirm it's a template, fill an omitted branch from the repo's default,
-  // and reject an out-of-org private template up front.
+  // and reject an out-of-org private template up front. On edit, skip this
+  // live resolution when the ref is unchanged from the stored template (see
+  // the function doc) so non-template edits still save.
   const parsedTemplate = parseTemplateRef(input.template_repo, input.org)
-  const { template, needsTeamGrant } = await resolveTemplate(
-    client,
-    input.org,
+  const { template, needsTeamGrant } = templateRefUnchanged(
     parsedTemplate,
+    existingTemplate,
   )
+    ? { template: existingTemplate!, needsTeamGrant: false }
+    : await resolveTemplate(client, input.org, parsedTemplate)
 
   // The entry must match classroom50/assignments/v1 exactly — the CLI
   // parses the file with unknown fields rejected, so stray keys would
@@ -367,6 +418,34 @@ async function grantTeamTemplateRead(
   })
 }
 
+// Run grantTeamTemplateRead but never throw: the assignments.json commit has
+// already landed by the time this is called, so a grant failure must not be
+// reported as a failed save. Returns an actionable warning string when the
+// grant didn't go through (the assignment is usable for everything except
+// student accept against the private template until it's fixed), or undefined
+// on success. Mirrors deleteClassroom's teamDeleteWarning handling.
+async function tryGrantTeamTemplateRead(
+  client: GitHubClient,
+  org: string,
+  classroom: string,
+  slug: string,
+  template: Assignment["template"],
+): Promise<string | undefined> {
+  try {
+    await grantTeamTemplateRead(client, org, classroom, slug, template)
+    return undefined
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
+    return (
+      `Assignment "${slug}" was saved, but granting the classroom team read on ` +
+      `the private template ${template.owner}/${template.repo} failed (${detail}). ` +
+      `Students can't accept it until an instructor grants the ` +
+      `classroom50-${classroom} team read on that repo (re-saving the ` +
+      `assignment retries the grant).`
+    )
+  }
+}
+
 export async function createAssignment(
   client: GitHubClient,
   input: CreateAssignmentInput,
@@ -419,8 +498,9 @@ export async function createAssignment(
   })
   const updatedRef = await updateRef(client, input.org, newCommit.sha)
 
+  let templateGrantWarning: string | undefined
   if (needsTeamGrant) {
-    await grantTeamTemplateRead(
+    templateGrantWarning = await tryGrantTeamTemplateRead(
       client,
       input.org,
       input.classroom,
@@ -435,6 +515,7 @@ export async function createAssignment(
     newTreeSha: tree.sha,
     newCommitSha: newCommit.sha,
     updatedRef,
+    templateGrantWarning,
   }
 }
 
@@ -875,8 +956,11 @@ export async function acceptAssignment(params: {
     assignment.autograder,
   )
 
-  const studentRepoName =
-    `${classroom}-${assignment.slug}-${username}`.toLowerCase()
+  const studentRepoNameValue = studentRepoName(
+    classroom,
+    assignment.slug,
+    username,
+  )
 
   console.log("creating classroom50 yaml...")
   const metadataYaml = createClassroom50Yaml({
@@ -893,7 +977,7 @@ export async function acceptAssignment(params: {
     templateOwner: sourceOwner,
     templateRepo: sourceRepo,
     owner: org,
-    name: studentRepoName,
+    name: studentRepoNameValue,
     fallbackBranch: sourceBranch || "main",
     metadataYaml,
     autogradeYaml,
