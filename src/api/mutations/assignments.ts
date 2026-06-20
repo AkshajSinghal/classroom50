@@ -432,16 +432,35 @@ export async function createAssignmentRepo(params: {
         }
       }
 
-      if (err.status === 404) {
-        throw err
+      // A template WAS specified but generation failed. Do NOT silently
+      // fall back to an empty repo — that produced broken repos (missing
+      // the template content AND the metadata/shim) that look "accepted"
+      // but can never be re-generated. The most common cause for a private
+      // in-org template is the classroom team lacking read access (the
+      // grant `gh teacher assignment add` / the GUI applies). Surface an
+      // actionable error so the teacher fixes access instead of leaving a
+      // dead repo behind. 403 = access denied; 404 = template not visible
+      // to the actor (a private template the team can't read reads as 404).
+      if (err.status === 403 || err.status === 404) {
+        throw new Error(
+          `Couldn't generate your repository from the template ` +
+            `${templateOwner}/${cleanTemplateRepo} (HTTP ${err.status}). ` +
+            `If it's a private template, the classroom team may not have read ` +
+            `access to it yet — ask your instructor to re-run the assignment ` +
+            `setup (which grants the team read on the template), then accept again.`,
+          { cause: err },
+        )
       }
 
-      console.warn(
-        `Template ${templateOwner}/${cleanTemplateRepo} was not accessible; creating empty fallback repo.`,
-      )
+      // Any other unexpected status is a real failure too — surface it
+      // rather than masking it with an empty repo.
+      throw err
     }
   }
 
+  // No template was specified — an empty starter repo is the intended
+  // outcome here (e.g. a from-scratch assignment), so seed it with the
+  // metadata + shim.
   return await createEmptyAssignmentRepo({
     client,
     owner,
