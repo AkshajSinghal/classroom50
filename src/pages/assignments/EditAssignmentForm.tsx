@@ -38,6 +38,7 @@ const EditAssignmentForm = ({
           description: values.description,
           due_date: values.due_date,
           max_group_size: values.max_group_size,
+          feedback_pr: values.feedback_pr,
           classroom,
           tests: values.tests,
           slug: assignment,

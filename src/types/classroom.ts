@@ -31,6 +31,7 @@ export type Assignment = {
   mode: string
   autograder: string
   max_group_size?: number
+  feedback_pr?: boolean
   runtime?: {
     container?: {
       image: string
