@@ -6,6 +6,7 @@ import {
 
 import GitHub from "@/assets/github.svg?react"
 import { getName, getInitials } from "@/util/students"
+import { studentRepoName, studentRepoUrl } from "@/util/studentRepo"
 import Avatar from "@/components/avatar"
 import type { SubmissionRow } from "@/hooks/useGetScores"
 import type { Student } from "@/types/classroom"
@@ -26,18 +27,11 @@ const scoreToBadgeType = (score: number, max: number) => {
 }
 
 // The student/group repo name follows the cross-binary formula
-// `<classroom>-<assignment>-<owner>` (lowercased), the same one the CLI
-// and `gh student accept` use. The owner is the repo-name component, so
-// the URL is stable regardless of which member pushed last.
-const repoName = (classroom: string, assignment: string, owner: string) =>
-  `${classroom}-${assignment}-${owner}`.toLowerCase()
-
-const repoUrl = (
-  org: string,
-  classroom: string,
-  assignment: string,
-  owner: string,
-) => `https://github.com/${org}/${repoName(classroom, assignment, owner)}`
+// `<classroom>-<assignment>-<owner>` (lowercased) — see studentRepo.ts for
+// the shared single source of truth. The owner is the repo-name component,
+// so the URL is stable regardless of which member pushed last.
+const repoName = studentRepoName
+const repoUrl = studentRepoUrl
 
 // A small initials bubble with a tooltip naming the member — the compact
 // stand-in for the full Avatar card so a multi-member group row stays tight

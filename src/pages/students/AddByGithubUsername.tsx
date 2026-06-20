@@ -1,7 +1,6 @@
 import { UserRound } from "lucide-react"
 import GitHub from "@/assets/github.svg?react"
 import { useForm } from "@tanstack/react-form"
-import useGetOrgMembers from "@/hooks/useGetOrgMembers"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import useEnsureTeam from "@/hooks/useEnsureTeam"
 import { githubKeys } from "@/hooks/github/queries"
@@ -30,7 +29,6 @@ const AddByGithubUsername = ({
   org,
   classroom,
 }: AddByGithubUsernameProps) => {
-  const { members } = useGetOrgMembers(org)
   const { team } = useEnsureTeam(org, classroom)
   const queryClient = useQueryClient()
   const githubClient = useGitHubClient()
@@ -44,7 +42,10 @@ const AddByGithubUsername = ({
         first_name,
         last_name,
       }),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      if (result?.teamWarning) {
+        console.warn(result.teamWarning)
+      }
       queryClient.invalidateQueries({
         queryKey: githubKeys.csvFile(
           org,

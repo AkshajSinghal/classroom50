@@ -28,20 +28,38 @@ export async function createClassroomFiles(
   // read on private, org-owned assignment templates.
   const team = await ensureClassroomTeam(client, input.org, input.classroom)
 
-  const ref = await getBranchRef(client, input.org)
-  const commit = await getCommit(client, input.org, ref.object.sha)
-  const tree = await createTree(client, {
-    ...input,
-    base_tree: commit.tree.sha,
-    term: input.term,
-    team,
-  })
-  const newCommit = await createCommit(client, {
-    ...input,
-    tree_sha: tree.sha,
-    parents: [ref.object.sha],
-  })
-  const updatedRef = await updateRef(client, input.org, newCommit.sha)
+  // If scaffolding fails after the team exists, the team would be orphaned
+  // (no classroom.json references it). Best-effort delete it before
+  // re-throwing so a retry starts clean; a 409 (concurrent commit) is
+  // re-thrown untouched so withGitConflictRetry can re-run — and on that
+  // re-run ensureClassroomTeam adopts the just-created team rather than
+  // failing, so the team is not deleted out from under a retry.
+  let ref, commit, tree, newCommit, updatedRef
+  try {
+    ref = await getBranchRef(client, input.org)
+    commit = await getCommit(client, input.org, ref.object.sha)
+    tree = await createTree(client, {
+      ...input,
+      base_tree: commit.tree.sha,
+      term: input.term,
+      team,
+    })
+    newCommit = await createCommit(client, {
+      ...input,
+      tree_sha: tree.sha,
+      parents: [ref.object.sha],
+    })
+    updatedRef = await updateRef(client, input.org, newCommit.sha)
+  } catch (err) {
+    if (!(err instanceof GitHubAPIError && err.status === 409)) {
+      try {
+        await deleteClassroomTeam(client, input.org, team)
+      } catch {
+        // Best-effort cleanup; surface the original scaffolding error.
+      }
+    }
+    throw err
+  }
 
   return {
     previousCommitSha: ref.object.sha,

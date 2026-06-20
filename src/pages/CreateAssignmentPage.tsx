@@ -25,6 +25,7 @@ const CreateAssignmentPage = () => {
   const { org, classroom } = useParams({ strict: false })
   const queryClient = useQueryClient()
   const [errorMessage, setErrorMessage] = useState("")
+  const [warningMessage, setWarningMessage] = useState("")
 
   const createClassroomMutation = useMutation<
     CreateAssignmentResult,
@@ -54,7 +55,7 @@ const CreateAssignmentPage = () => {
       setErrorMessage(err.message)
       window.scrollTo({ top: 0, behavior: "smooth" })
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({
         queryKey: githubKeys.jsonFile(
           org,
@@ -62,6 +63,14 @@ const CreateAssignmentPage = () => {
           `${classroom}/assignments.json`,
         ),
       })
+      // The assignment was created. If the follow-up template team grant
+      // failed, keep the teacher on the page to show the non-fatal warning
+      // rather than silently navigating away; otherwise go to the list.
+      if (result.templateGrantWarning) {
+        setWarningMessage(result.templateGrantWarning)
+        window.scrollTo({ top: 0, behavior: "smooth" })
+        return
+      }
       navigate({ to: `/${org}/${classroom}/assignments` })
     },
   })
@@ -83,12 +92,29 @@ const CreateAssignmentPage = () => {
           ) : (
             <></>
           )}
+          {warningMessage ? (
+            <div className="alert alert-warning mb-6 flex flex-col items-start gap-2">
+              <span>{warningMessage}</span>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() =>
+                  navigate({ to: `/${org}/${classroom}/assignments` })
+                }
+              >
+                Go to assignments
+              </button>
+            </div>
+          ) : (
+            <></>
+          )}
           <div className="flex flex-col">
             <div className="mb-8">
               <CreateAssignmentForm
                 loading={createClassroomMutation.isPending}
                 onSubmit={(values) => {
                   setErrorMessage("")
+                  setWarningMessage("")
                   createClassroomMutation.mutateAsync({
                     name: values.name,
                     slug: slugify(values.name),

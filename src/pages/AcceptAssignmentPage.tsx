@@ -16,6 +16,7 @@ import { useMutation } from "@tanstack/react-query"
 import { acceptAssignment } from "@/api/mutations/assignments"
 import usePagesAssignments from "@/hooks/usePagesAssignments"
 import { formatDueDate } from "@/util/formatDate"
+import { studentRepoName } from "@/util/studentRepo"
 import useGetRepo from "@/hooks/useGetRepo"
 import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
 
@@ -235,8 +236,8 @@ const AcceptAssignmentPage = () => {
   const assignmentData = assignmentsData?.find((a) => a.slug === assignment)
 
   const expectedRepoName = username
-    ? `${classroom}-${assignment}-${username}`.toLowerCase()
-    : `${classroom}-${assignment}-{your-github-username}`.toLowerCase()
+    ? studentRepoName(classroom, assignment, username)
+    : studentRepoName(classroom, assignment, "{your-github-username}")
 
   const { data: checkedRepo, isLoading: isLoadingRepo } = useGetRepo(
     org,
