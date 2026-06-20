@@ -484,6 +484,7 @@ const EditAssignmentPage = () => {
   const { data: assignments } = useGetClassroomAssignments(org, classroom)
   const [editSuccess, setEditSuccess] = useState(false)
   const [editWarning, setEditWarning] = useState("")
+  const [editError, setEditError] = useState("")
 
   const assignmentData = assignments?.assignments.find(
     (a) => a.slug === assignment,
@@ -499,6 +500,9 @@ const EditAssignmentPage = () => {
             isTeacher={isTeacher}
             classroom={classroom}
           />
+          {editError && (
+            <div className="alert alert-error mt-6">{editError}</div>
+          )}
           {editSuccess && (
             <div className="alert alert-success mt-6">
               Your assignment has been edited successfully!
@@ -514,15 +518,24 @@ const EditAssignmentPage = () => {
               classroom={classroom}
               assignment={assignment}
               defaultData={assignmentData}
+              onMutate={() => {
+                // Clear any prior banner so a re-edit never shows a stale
+                // success/warning/error from the previous attempt.
+                setEditSuccess(false)
+                setEditWarning("")
+                setEditError("")
+              }}
+              onError={(error) => {
+                setEditError(error.message)
+                window.scrollTo({ top: 0, behavior: "smooth" })
+              }}
               onSuccess={(result) => {
                 // The edit committed. Surface a non-fatal template-grant
                 // warning inline if present; otherwise show the success
-                // banner. (Re-saving retries the grant.)
+                // banner.
                 if (result?.templateGrantWarning) {
-                  setEditSuccess(false)
                   setEditWarning(result.templateGrantWarning)
                 } else {
-                  setEditWarning("")
                   setEditSuccess(true)
                   setTimeout(() => setEditSuccess(false), 3000)
                 }

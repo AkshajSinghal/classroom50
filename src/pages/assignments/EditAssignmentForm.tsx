@@ -7,6 +7,7 @@ import {
   type CreateAssignmentInput,
   type CreateAssignmentResult,
 } from "@/api/mutations/assignments"
+import { GitHubAPIError } from "@/hooks/github/errors"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 
 const EditAssignmentForm = ({
@@ -15,21 +16,27 @@ const EditAssignmentForm = ({
   assignment,
   defaultData,
   onSuccess,
+  onError,
+  onMutate,
 }: {
   org: string
   classroom: string
   assignment: string
   defaultData: Parameters<typeof assignmentToFormValues>[0] | undefined
   onSuccess: (result: CreateAssignmentResult) => void
+  onError?: (error: GitHubAPIError) => void
+  onMutate?: () => void
 }) => {
   const client = useGitHubClient()
   const editAssignmentMutation = useMutation<
     CreateAssignmentResult,
-    Error,
+    GitHubAPIError,
     CreateAssignmentInput
   >({
     mutationFn: (input) => editAssignment(client, input),
+    onMutate,
     onSuccess,
+    onError,
   })
 
   if (!defaultData) {
@@ -46,7 +53,7 @@ const EditAssignmentForm = ({
       loading={editAssignmentMutation.isPending}
       defaultValues={assignmentToFormValues(defaultData)}
       onSubmit={(values) => {
-        editAssignmentMutation.mutateAsync({
+        editAssignmentMutation.mutate({
           name: values.name,
           mode: values.mode,
           org,
