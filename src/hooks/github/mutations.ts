@@ -387,7 +387,7 @@ export async function ensureClassroomTeam(
   client: GitHubClient,
   org: string,
   classroom: string,
-): Promise<ClassroomTeamRef> {
+): Promise<ClassroomTeamRef & { created: boolean }> {
   if (!isCanonicalTeamShortName(classroom)) {
     throw new Error(
       `Classroom slug "${classroom}" can't back a GitHub team — remove consecutive or trailing hyphens (GitHub would rewrite the team slug, breaking membership and template grants).`,
@@ -398,13 +398,17 @@ export async function ensureClassroomTeam(
 
   try {
     const created = await createTeam(client, { org, name, privacy: "secret" })
-    return { id: created.id, slug: created.slug }
+    return { id: created.id, slug: created.slug, created: true }
   } catch (err) {
     // 422 = a team with this name already exists. Adopt it in place
     // (read its id/slug, reconcile privacy to secret) so a re-create
-    // reconciles cleanly instead of failing.
+    // reconciles cleanly instead of failing. `created: false` tells the
+    // caller this team pre-existed — it must NOT be deleted as part of a
+    // create-failure rollback (that would destroy a team and its grants
+    // the caller never created).
     if (err instanceof GitHubAPIError && err.status === 422) {
-      return adoptClassroomTeam(client, org, classroom)
+      const adopted = await adoptClassroomTeam(client, org, classroom)
+      return { ...adopted, created: false }
     }
     throw err
   }

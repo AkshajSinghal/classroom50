@@ -435,13 +435,16 @@ async function tryGrantTeamTemplateRead(
     await grantTeamTemplateRead(client, org, classroom, slug, template)
     return undefined
   } catch (err) {
+    // Log the raw error so a dev-time bug isn't fully hidden behind the
+    // user-facing warning string.
+    console.error("grantTeamTemplateRead failed (assignment saved):", err)
     const detail = err instanceof Error ? err.message : String(err)
     return (
       `Assignment "${slug}" was saved, but granting the classroom team read on ` +
       `the private template ${template.owner}/${template.repo} failed (${detail}). ` +
-      `Students can't accept it until an instructor grants the ` +
-      `classroom50-${classroom} team read on that repo (re-saving the ` +
-      `assignment retries the grant).`
+      `Students can't accept it until the classroom50-${classroom} team is granted ` +
+      `read on that repo — grant the team read on ${template.owner}/${template.repo} ` +
+      `directly in GitHub (Settings -> Collaborators and teams), then students can accept.`
     )
   }
 }

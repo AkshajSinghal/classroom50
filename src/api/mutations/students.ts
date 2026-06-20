@@ -239,6 +239,7 @@ export async function enrollStudentInClassroom(
       role: "member",
     })
   } catch (err) {
+    console.error("addUserToTeam failed (student enrolled):", err)
     const detail = err instanceof Error ? err.message : String(err)
     teamWarning =
       `${result.student.username} was added to the roster, but adding them to ` +
