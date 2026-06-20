@@ -84,7 +84,10 @@ function bucketToRows(bucket: AssignmentBucket): SubmissionRow[] {
     .map((entry) => {
       const latest = entry.submissions
         .slice()
-        .sort((a, b) => (a.datetime < b.datetime ? 1 : -1))[0]
+        .sort(
+          (a, b) =>
+            new Date(b.datetime).getTime() - new Date(a.datetime).getTime(),
+        )[0]
 
       const usernames =
         entry.member_usernames && entry.member_usernames.length > 0
