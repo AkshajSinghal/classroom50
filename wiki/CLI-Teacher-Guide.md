@@ -282,7 +282,7 @@ The roster (`students.csv`) is the *intended* class list; this is *actual* GitHu
 
 ## 9. Collect scores
 
-Every student submission publishes a GitHub Release on their own repo carrying a `result.json` asset. The `collect-scores` workflow in `<org>/classroom50` walks every `(student, assignment)` pair in `<classroom>/students.csv` × `<classroom>/assignments.json`, asks GitHub for each expected repo's latest release, and aggregates the results into `<classroom>/scores.json` — the authoritative score record for the class.
+Every student submission publishes a GitHub Release on their own repo carrying a `result.json` asset. The `collect-scores` workflow in `<org>/classroom50` walks every `(student, assignment)` pair in `<classroom>/students.csv` × `<classroom>/assignments.json`, collects **every** `submit/*` release for each expected repo, and aggregates the results into `<classroom>/scores.json` — the authoritative score record for the class.
 
 Run it from the Actions tab on `<org>/classroom50`, or trigger it from your shell:
 
@@ -296,46 +296,56 @@ The skeleton committed by `gh teacher init` ships the workflow with a nightly cr
 What it does on each run:
 
 1. Iterates every classroom under `<org>/classroom50/<classroom>/` (or just the one you passed via `-f classroom=`).
-2. For each `(student, assignment)` pair in `students.csv` × `assignments.json`, computes the canonical repo name `<classroom>-<assignment>-<username>` (the same formula `gh student accept` uses) and asks GitHub for that repo's latest release. A `404` from `/releases/latest` means the student hasn't accepted or hasn't submitted yet — the collector counts the gap and moves on.
-3. For each release found, downloads `result.json`, schema-validates it, and checks the payload's identity against the source repo: `classroom` / `assignment` must match, and the repo's derived owner must be the `usernames` entry for an individual assignment (or present among `usernames` for a group assignment). This defends against a hostile autograder payload trying to land in the wrong scores.json. For a group assignment, the collector then reads the repo's collaborators and rewrites `usernames` to the full rostered member list.
-4. Upserts the validated payload into `<classroom>/scores.json` under that assignment's bucket, dropping the now-redundant `assignment` field from the stored row (it's the bucket key). If the assignment has `due`, the row also gets `"late": true` or `"late": false` by comparing the submission `datetime` against the due timestamp. **Existing entries with `"override": true` are preserved verbatim** -- if you hand-edited a row to grant partial credit, the next collect run leaves it alone.
+2. For each `(student, assignment)` pair in `students.csv` × `assignments.json`, computes the canonical repo name `<classroom>-<assignment>-<username>` (the same formula `gh student accept` uses) and walks that repo's `submit/*` releases. No releases (or a `404`) means the student hasn't accepted or hasn't submitted yet — the collector counts the gap and moves on.
+3. For every `submit/*` release found, downloads `result.json`, schema-validates it, and checks the payload's identity against the source repo: `classroom` / `assignment` must match, the payload's `owner` must equal the repo-name-derived owner, and the payload's `assignment_type` must match the assignment's configured `mode` (a mismatch is warned-and-skipped). This defends against a hostile autograder payload trying to land in the wrong scores.json. For a group assignment, the collector then reads the repo's collaborators and records the rostered member list on the entry's `member_usernames`.
+4. Upserts the validated payloads into `<classroom>/scores.json` under that assignment's bucket as one entry per repo (keyed by `owner`), with every collected submission retained newest-first in the entry's `submissions` list (each a stored `result.json` minus the redundant `assignment` bucket key). If the assignment has `due`, each submission record gets `"late": true|false` by comparing its `datetime` against the due timestamp. **Existing entries with `"override": true` are preserved verbatim** -- if you hand-edited an entry to grant partial credit, the next collect run leaves it alone.
 5. Logs a per-assignment `cs-principles/hello: 23/30 submitted` line so you see roster coverage at a glance.
 6. Commits the updated `*/scores.json` files back to `<org>/classroom50` on a single `collect: refresh scores.json` commit. A no-op run (no submissions changed) does not produce a commit.
 
 **Token requirements.** The workflow reads the `CLASSROOM50_SERVICE_TOKEN` secret provisioned by `gh teacher init` (a fine-grained PAT with `Contents: read` on all org repos; see the service-token note in the setup section above). If that token expires mid-semester, the workflow run fails loudly with a 401 — rotate with `gh teacher rotate-service-token <org>`.
 
-**Override workflow.** To grant partial credit for a flaky test or correct a misgrade, hand-edit `<classroom>/scores.json` in the config repo, change the row's `score`, and add `"override": true`. Commit and push. The next collect run will leave that row alone. A `gh teacher score override` CLI helper is planned for a later release; until then, the JSON edit is the canonical path.
+**Override workflow.** To grant partial credit for a flaky test or correct a misgrade, hand-edit `<classroom>/scores.json` in the config repo, change the entry's submission `score`, and add `"override": true` to the entry. Commit and push. The next collect run will leave that entry alone. A `gh teacher score override` CLI helper is planned for a later release; until then, the JSON edit is the canonical path.
 
-**`scores.json` shape:** `submissions` is an object keyed by assignment slug; each value is that assignment's rows. For an individual assignment there is one row per student. For a **group assignment** there is one row per *group*, whose `usernames` lists every member — collect-scores reads the group repo's collaborators and credits all of them with the shared score (see the group note below). A row is the validated `result.json` payload with the redundant `assignment` field dropped (it's the bucket key); everything else, including `schema` and `tests`, is kept.
+**`scores.json` shape:** the root `assignments` object is keyed by assignment slug; each value is `{ "type": "individual"|"group", "entries": [...] }`. An `entry` is one repo's gradebook record, keyed by `owner` (the repo owner). For an **individual** assignment, `owner` is the sole credited student. For a **group** assignment, the entry also carries `member_usernames` — every credited member (collect-scores reads the group repo's collaborators and intersects them with the roster; see the group note below). Each entry's `submissions` list holds every collected submission (newest first); each is the validated `result.json` payload with the redundant `assignment` field dropped (it's the bucket key) — carrying `owner`, `assignment_type`, and optionally `submitted_by` (who pushed) and `late`.
 
 ```json
 {
   "schema": "classroom50/scores/v1",
-  "submissions": {
-    "hello": [
-      {
-        "schema": "classroom50/result/v1",
-        "classroom": "cs-principles",
-        "usernames": ["alice"],
-        "submission": "submit/2026-06-01T14-32-05Z-a1b2c3d",
-        "commit": "https://github.com/cs50-fall-2026/cs-principles-hello-alice/commit/...",
-        "release": "https://github.com/cs50-fall-2026/cs-principles-hello-alice/releases/tag/submit%2F2026-06-01T14-32-05Z-a1b2c3d",
-        "review": "https://github.com/cs50-fall-2026/cs-principles-hello-alice/compare/...",
-        "datetime": "2026-06-01T14:33:11Z",
-        "score": 18,
-        "max-score": 30,
-        "tests": [
-          { "test-name": "compiles", "passed": true, "score": 10, "max-score": 10 }
-        ]
-      }
-    ]
+  "assignments": {
+    "hello": {
+      "type": "individual",
+      "entries": [
+        {
+          "owner": "alice",
+          "submissions": [
+            {
+              "schema": "classroom50/result/v1",
+              "classroom": "cs-principles",
+              "assignment_type": "individual",
+              "owner": "alice",
+              "submission": "submit/2026-06-01T14-32-05Z-a1b2c3d",
+              "commit": "https://github.com/cs50-fall-2026/cs-principles-hello-alice/commit/...",
+              "release": "https://github.com/cs50-fall-2026/cs-principles-hello-alice/releases/tag/submit%2F2026-06-01T14-32-05Z-a1b2c3d",
+              "review": "https://github.com/cs50-fall-2026/cs-principles-hello-alice/compare/...",
+              "datetime": "2026-06-01T14:33:11Z",
+              "score": 18,
+              "max-score": 30,
+              "tests": [
+                { "test-name": "compiles", "passed": true, "score": 10, "max-score": 10 }
+              ],
+              "submitted_by": { "username": "alice", "id": 12345 }
+            }
+          ]
+        }
+      ]
+    }
   }
 }
 ```
 
-One row per student (individual assignments) or one row per group (group assignments — `usernames` carries all members) within each assignment bucket. Re-running collect refreshes each row with the latest release's data unless `override: true` is set. (A scores.json still in the older flat-array layout is migrated to this map on the next collect run.)
+One entry per repo within each assignment bucket: per student for individual assignments, per group (`member_usernames` carries all members) for group assignments. Re-running collect appends new submissions to each entry's `submissions` history and refreshes the entry unless `override: true` is set. (Pre-canonical scores.json shapes are **not** migrated — a non-canonical file fails the run loudly.)
 
-**Group assignments.** A group assignment is graded once, in the first-accepter's repo. `collect-scores` reads that repo's student collaborators (org admins/instructors excluded), **keeps only those on the classroom roster** (the owner is always credited), and rewrites the row's `usernames` to that member list, so every rostered teammate gets the same score — `scores.csv` then has a row per member with the shared score. A non-rostered collaborator added out-of-band (e.g. via the GitHub UI) is **not** credited. Reading collaborators needs only `Metadata: read` (auto-included on every fine-grained PAT and already implied by `Contents: read`), so the existing service token works as-is. If the collaborator read fails for any reason, the score is credited to the repo owner only and the run logs a warning. Teammates who joined a repo own no repo of their own, so they are not reported as "missing" in `gh teacher download`.
+**Group assignments.** A group assignment is graded once, in the first-accepter's repo. `collect-scores` reads that repo's collaborators, **keeps only those on the classroom roster** (the owner is always credited), and records that member list as the entry's `member_usernames`, so every rostered teammate gets the same score — `scores.csv` then has a line per member per submission with the shared score. Crediting is gated on roster membership, **not** on collaborator permission (a teammate who is also an org owner / admin is still credited). A non-rostered collaborator added out-of-band (e.g. via the GitHub UI) is **not** credited. Reading collaborators needs only `Metadata: read` (auto-included on every fine-grained PAT and already implied by `Contents: read`), so the existing service token works as-is. If the collaborator read fails, or only the owner is found, the score is credited to the repo owner only and the run logs a warning. Teammates who joined a repo own no repo of their own, so they are not reported as "missing" in `gh teacher download`.
 
 ## 10. Download submissions
 
@@ -351,9 +361,9 @@ By default the command is **roster-driven**: it reads `<classroom>/students.csv`
 
 1. Probes whether the expected `<classroom>-<assignment>-<username>` repo exists in the org.
 2. Clones it if it does, or reports `Missing: <username> (not accepted yet?)` if it doesn't.
-3. After each clone, refreshes `<repo>/result.json` from the latest submit-tag release on that repo — so the autograded payload lands alongside the code.
+3. After each clone, refreshes `<repo>/result.json` (the latest submit-tag submission) **and** `<repo>/results.json` (every submission, newest first) from that repo's submit-tag releases — so the autograded payloads land alongside the code.
 
-After all clones, the command writes a `scores.csv` summary at the destination root: one row per roster entry (`username,score,max_score,datetime,submission_tag,review_url,late,override`). Submitters carry their scores; non-submitters get blank score columns so you can sort the spreadsheet by score and immediately see who hasn't submitted yet.
+After all clones, the command writes a `scores.csv` summary at the destination root: **one line per submission**, grouped by roster entry in roster order (`username,score,max_score,datetime,submission_tag,submitted_by,review_url,late,override`). A student who pushed N times contributes N lines (newest first); for a group assignment each credited member gets the team's submission lines. Non-submitters get a single blank-score line so you can sort the spreadsheet by score and immediately see who hasn't submitted yet.
 
 Each run produces a fresh timestamped folder named `<classroom>-<assignment>_submissions_YYYY_MM_DD_T_HH_MM_SS/` (24-hour local time), so re-running picks up newer submissions without overwriting earlier downloads. Override the destination with `-d`:
 
