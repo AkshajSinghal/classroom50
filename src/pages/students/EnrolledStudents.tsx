@@ -16,13 +16,17 @@ const UnenrollStudentButton = ({
   classroom,
   student,
   onRemoveStudent,
+}: {
+  org: string
+  classroom: string
+  student: Student
+  onRemoveStudent: (teamWarning?: string) => void
 }) => {
   const client = useGitHubClient()
   const unenrollStudentMutation = useMutation({
     mutationFn: (input: UnenrollStudentInput) => unenrollStudent(client, input),
   })
   const [open, setOpen] = useState(false)
-  const [teamWarning, setTeamWarning] = useState("")
 
   return (
     <>
@@ -32,12 +36,6 @@ const UnenrollStudentButton = ({
       >
         <Trash />
       </button>
-
-      {teamWarning && (
-        <div role="alert" className="alert alert-warning alert-soft mt-2">
-          <span className="text-sm">{teamWarning}</span>
-        </div>
-      )}
 
       <ConfirmModal
         open={open}
@@ -65,8 +63,9 @@ const UnenrollStudentButton = ({
             classroom,
             student,
           })
-          setTeamWarning(result.teamWarning ?? "")
-          onRemoveStudent()
+          // Hand the warning to the list; this button unmounts once the
+          // student leaves the refetched roster, so it can't display it itself.
+          onRemoveStudent(result.teamWarning)
         }}
         onClose={() => setOpen(false)}
       />
@@ -84,6 +83,8 @@ const EnrolledStudents = ({
   classroom: string
 }) => {
   const queryClient = useQueryClient()
+  const [teamWarning, setTeamWarning] = useState("")
+
   return (
     <div className="card card-border w-full bg-base-100 overflow-hidden shadow-sm">
       <div className="flex items-center justify-between px-6 py-4 border-b border-base-300">
@@ -93,6 +94,12 @@ const EnrolledStudents = ({
           {students.length}
         </div>
       </div>
+
+      {teamWarning && (
+        <div role="alert" className="alert alert-warning alert-soft mx-6 mt-4">
+          <span className="text-sm">{teamWarning}</span>
+        </div>
+      )}
 
       <ul className="divide-y divide-base-300">
         {students?.map((student) => (
@@ -109,7 +116,8 @@ const EnrolledStudents = ({
               org={org}
               classroom={classroom}
               student={student}
-              onRemoveStudent={() =>
+              onRemoveStudent={(warning?: string) => {
+                setTeamWarning(warning ?? "")
                 queryClient.invalidateQueries({
                   queryKey: githubKeys.csvFile(
                     org,
@@ -117,7 +125,7 @@ const EnrolledStudents = ({
                     `${classroom}/students.csv`,
                   ),
                 })
-              }
+              }}
             />
           </li>
         ))}

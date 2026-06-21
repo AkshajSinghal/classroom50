@@ -165,6 +165,30 @@ async function contentsPathExists(
   }
 }
 
+// Like contentsPathExists, but for an arbitrary repo (to check whether an
+// existing student repo was actually provisioned). 404 -> false, 200 -> true.
+async function repoContentsPathExists(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+  path: string,
+): Promise<boolean> {
+  try {
+    await client.request(
+      `/repos/${owner}/${repo}/contents/${path
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/")}`,
+    )
+    return true
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.status === 404) {
+      return false
+    }
+    throw err
+  }
+}
+
 export async function editAssignment(
   client: GitHubClient,
   input: CreateAssignmentInput,
@@ -385,9 +409,11 @@ async function buildAssignmentEntry(
 }
 
 // Grant the classroom team read on an in-org private template so rostered
-// students can generate from it (mirrors the CLI's assignment add). The team
-// slug comes from classroom.json (authoritative); a teamless classroom gets
-// an actionable error, not a 404 against a guess.
+// students can generate from it (mirrors the CLI's assignment add). The slug
+// comes from classroom.json (authoritative). A genuinely teamless classroom
+// (404, or a read with no team block) gets "recreate the classroom" advice; a
+// transient read failure must NOT — that could push a teacher to destroy a
+// healthy classroom — so it gets a retry message instead.
 async function grantTeamTemplateRead(
   client: GitHubClient,
   org: string,
@@ -399,7 +425,15 @@ async function grantTeamTemplateRead(
   try {
     const classroomJson = await getClassroomJson(client, { org, classroom })
     teamSlug = classroomJson.team?.slug
-  } catch {
+  } catch (err) {
+    // 404 = no classroom.json (pre-feature) is a genuine "no team"; fall
+    // through. Anything else is transient and must not be misread as "no team".
+    if (!(err instanceof GitHubAPIError && err.isNotFound)) {
+      throw new Error(
+        `Assignment "${slug}" was saved, but checking classroom "${classroom}" for its team failed (${getErrorMessage(err)}). The classroom team read on the private template ${template.owner}/${template.repo} could not be granted — retry the save; if it keeps failing, grant the team read on ${template.owner}/${template.repo} directly in GitHub (Settings -> Collaborators and teams).`,
+        { cause: err },
+      )
+    }
     teamSlug = undefined
   }
 
@@ -741,6 +775,17 @@ export async function createAssignmentWithConflictRetry(
   return withGitConflictRetry(() => createAssignment(client, input))
 }
 
+// editAssignment writes to the same classroom50 main branch as createAssignment
+// and the roster commits, so a concurrent write 409s non-fast-forward. It
+// re-reads the ref + assignments.json each call, so it's safe to retry — mirror
+// the create path.
+export async function editAssignmentWithConflictRetry(
+  client: GitHubClient,
+  input: CreateAssignmentInput,
+) {
+  return withGitConflictRetry(() => editAssignment(client, input))
+}
+
 function createClassroom50Yaml(params: {
   classroom: string
   assignment: string
@@ -1001,6 +1046,46 @@ type AcceptAssignmentResult = {
   repo: GitHubRepo
   cloneCommand: string
 }
+
+// Provision a just-created (or partially-provisioned) student repo: patch its
+// surface, grant the student admin, and land the .classroom50.yaml + autograde
+// shim through GitHub's post-generate lag. Every step is idempotent, so it's
+// safe to re-run when healing a repo whose earlier accept failed mid-flow.
+async function provisionAcceptedRepo(params: {
+  client: GitHubClient
+  org: string
+  repo: GitHubRepo
+  username: string
+  branch: string
+  metadataYaml: string
+  autogradeYaml: string
+}) {
+  const { client, org, repo, username, branch, metadataYaml, autogradeYaml } =
+    params
+
+  console.log("patching repo surface...")
+  await patchRepoSurface(client, org, repo.name)
+
+  console.log("adding admin collaborator...")
+  await addAdminCollaborator({
+    client,
+    owner: org,
+    repo: repo.name,
+    username,
+  })
+
+  // Land the metadata + autograde shim, retrying through GitHub's post-generate
+  // git-data lag (see commitAcceptFilesWithFreshRepoRetry).
+  console.log("committing accept files (with fresh-repo retry)...")
+  await commitAcceptFilesWithFreshRepoRetry({
+    client,
+    owner: org,
+    repo: repo.name,
+    branch,
+    metadataYaml,
+    autogradeYaml,
+  })
+}
 export async function acceptAssignment(params: {
   client: GitHubClient
   org: string
@@ -1061,6 +1146,37 @@ export async function acceptAssignment(params: {
   })
 
   if (created.kind === "already-accepted") {
+    // The repo exists, but a prior accept may have failed AFTER creating it but
+    // BEFORE committing the metadata/workflow (seeding lag, transient 5xx),
+    // leaving a repo that looks accepted but never autogrades. Heal it: if
+    // .classroom50.yaml is missing, re-run the idempotent provisioning;
+    // otherwise it's genuinely already accepted — leave it untouched.
+    const provisioned = await repoContentsPathExists(
+      client,
+      org,
+      created.repo.name,
+      ".classroom50.yaml",
+    )
+
+    if (provisioned) {
+      return {
+        status: "already-accepted",
+        repo: created.repo,
+        cloneCommand: `git clone ${created.repo.ssh_url}`,
+      }
+    }
+
+    console.log("healing partially-provisioned repo...")
+    await provisionAcceptedRepo({
+      client,
+      org,
+      repo: created.repo,
+      username,
+      branch: created.repo.default_branch || sourceBranch,
+      metadataYaml,
+      autogradeYaml,
+    })
+
     return {
       status: "already-accepted",
       repo: created.repo,
@@ -1070,29 +1186,16 @@ export async function acceptAssignment(params: {
 
   const repo = created.repo
 
-  console.log("patching repo surface...")
-  await patchRepoSurface(client, org, repo.name)
-
-  console.log("adding admin collaborator...")
-  await addAdminCollaborator({
-    client,
-    owner: org,
-    repo: repo.name,
-    username,
-  })
-
   const targetBranch =
     created.kind === "fallback-empty"
       ? created.branch
       : repo.default_branch || sourceBranch
 
-  // Land the metadata + autograde shim, retrying through GitHub's post-generate
-  // git-data lag (see commitAcceptFilesWithFreshRepoRetry).
-  console.log("committing accept files (with fresh-repo retry)...")
-  await commitAcceptFilesWithFreshRepoRetry({
+  await provisionAcceptedRepo({
     client,
-    owner: org,
-    repo: repo.name,
+    org,
+    repo,
+    username,
     branch: targetBranch,
     metadataYaml,
     autogradeYaml,

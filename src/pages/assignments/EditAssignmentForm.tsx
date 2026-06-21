@@ -3,7 +3,7 @@ import CreateAssignmentForm, {
   assignmentToFormValues,
 } from "./CreateAssignmentForm"
 import {
-  editAssignment,
+  editAssignmentWithConflictRetry,
   type CreateAssignmentInput,
   type CreateAssignmentResult,
 } from "@/api/mutations/assignments"
@@ -33,7 +33,7 @@ const EditAssignmentForm = ({
     GitHubAPIError,
     CreateAssignmentInput
   >({
-    mutationFn: (input) => editAssignment(client, input),
+    mutationFn: (input) => editAssignmentWithConflictRetry(client, input),
     onMutate,
     onSuccess,
     onError,

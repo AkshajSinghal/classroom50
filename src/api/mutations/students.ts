@@ -11,13 +11,16 @@ import {
 import { withGitConflictRetry, type CreateClassroomResult } from "./classrooms"
 import { getRawFile, getUser } from "@/hooks/github/queries"
 import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
+import { GitHubAPIError } from "@/hooks/github/errors"
 import type { Student } from "@/types/classroom"
 
 // The classroom team slug is authoritative in classroom.json: on a name
 // collision GitHub may assign a slug other than `classroom50-<slug>`, so
-// re-deriving it can 404. Read the persisted slug (mirrors the CLI), falling
-// back to the derived form only for pre-feature classrooms or a read failure
-// (correct for every canonically-slugged classroom the GUI creates).
+// re-deriving it can target the wrong team. The derived form is only correct
+// when classroom.json genuinely lacks a team block (a read with no `team`, or a
+// 404 = pre-feature classroom). A transient read failure is NOT "no team" —
+// propagate it so the caller reports an actionable failure instead of silently
+// targeting a possibly-wrong slug.
 async function resolveClassroomTeamSlug(
   client: GitHubClient,
   org: string,
@@ -28,8 +31,12 @@ async function resolveClassroomTeamSlug(
     if (classroomJson.team?.slug) {
       return classroomJson.team.slug
     }
-  } catch {
-    // fall through to the derived slug
+  } catch (err) {
+    // 404 = no classroom.json (pre-feature) is a genuine "no team"; fall
+    // through. Anything else is transient and must not be misread as "no team".
+    if (!(err instanceof GitHubAPIError && err.isNotFound)) {
+      throw err
+    }
   }
   return `classroom50-${classroom}`
 }
@@ -221,16 +228,18 @@ export async function enrollStudentInClassroom(
   input: AddStudentToClassroomInput,
 ) {
   const { org, classroom } = input
-  // The team slug read is independent of the roster commit, so run it
-  // concurrently (resolveClassroomTeamSlug is failure-tolerant).
+  // Resolve the slug concurrently with the roster commit. It can reject on a
+  // transient read; attach a catch to avoid an unhandled rejection and consume
+  // it (rethrowing into the warning path) after the commit lands.
   const teamSlugPromise = resolveClassroomTeamSlug(client, org, classroom)
+  teamSlugPromise.catch(() => {})
   const result = await addStudentToClassroomWithConflictRetry(client, input)
-  const teamSlug = await teamSlugPromise
 
-  // The roster commit already landed, so a team-add failure is surfaced as a
-  // non-fatal warning instead of failing the enroll (matches the bulk path).
+  // The roster commit already landed, so any team-side failure — resolving the
+  // slug OR the team-add — is a non-fatal warning, not a failed enroll.
   let teamWarning: string | undefined
   try {
+    const teamSlug = await teamSlugPromise
     await addUserToTeam(client, {
       org,
       teamSlug,
@@ -238,12 +247,12 @@ export async function enrollStudentInClassroom(
       role: "member",
     })
   } catch (err) {
-    console.error("addUserToTeam failed (student enrolled):", err)
+    console.error("team add failed (student enrolled):", err)
     const detail = getErrorMessage(err)
     teamWarning =
       `${result.student.username} was added to the roster, but adding them to ` +
-      `the classroom team "${teamSlug}" failed (${detail}); they won't have ` +
-      `read on private templates until it's retried.`
+      `the classroom team failed (${detail}); they won't have read on private ` +
+      `templates until it's retried.`
   }
 
   return { ...result, teamWarning }
@@ -504,11 +513,20 @@ export async function bulkEnrollStudentsInClassroom(
     onProgress,
   })
 
-  const teamSlug = await resolveClassroomTeamSlug(
-    client,
-    bulkInput.org,
-    bulkInput.classroom,
-  )
+  // The roster commit already landed. A transient slug-read failure becomes a
+  // per-student team failure (the result still reports the committed adds)
+  // rather than rejecting the whole bulk enroll.
+  let teamSlug: string | undefined
+  let teamSlugError: string | undefined
+  try {
+    teamSlug = await resolveClassroomTeamSlug(
+      client,
+      bulkInput.org,
+      bulkInput.classroom,
+    )
+  } catch (err) {
+    teamSlugError = getErrorMessage(err)
+  }
 
   const teamResults: BulkImportResult["teamResults"] = []
 
@@ -520,6 +538,24 @@ export async function bulkEnrollStudentsInClassroom(
       total: addResult.addedStudents.length,
       message: `Adding ${student.username} to classroom team...`,
     })
+
+    if (teamSlug === undefined) {
+      teamResults.push({
+        username: student.username,
+        status: "failed",
+        message:
+          `Could not read the classroom team to add the student` +
+          (teamSlugError ? ` (${teamSlugError})` : "") +
+          "; retry to add them to the team.",
+      })
+
+      onProgress?.({
+        processed: i + 1,
+        total: addResult.addedStudents.length,
+        message: `Processed ${i + 1} of ${addResult.addedStudents.length} team memberships...`,
+      })
+      continue
+    }
 
     try {
       await addUserToTeam(client, {
@@ -579,9 +615,10 @@ export async function unenrollStudent(
     throw new Error("Student's GitHub username is required")
   }
 
-  // The team slug read is independent of the removal commit and never rejects
-  // (falls back to the derived slug), so run it concurrently with the commit.
+  // Resolve the slug concurrently with the removal commit. It can reject on a
+  // transient read; attach a catch and consume it in the warning path below.
   const teamSlugPromise = resolveClassroomTeamSlug(client, org, classroom)
+  teamSlugPromise.catch(() => {})
 
   const ref = await getBranchRef(client, org)
   const commit = await getCommit(client, org, ref.object.sha)
@@ -640,26 +677,25 @@ export async function unenrollStudent(
 
   const updatedRef = await updateRef(client, org, newCommit.sha)
 
-  // Symmetric with enroll: drop the student from the classroom team so they
-  // lose read on its private templates. Idempotent (404 = not a member / team
-  // gone); org membership is untouched. Mirrors the CLI's roster remove. The
-  // commit already landed, so a non-404 failure is a non-fatal warning, not a
-  // thrown error (matches enrollStudentInClassroom).
-  const teamSlug = await teamSlugPromise
+  // Symmetric with enroll: drop the student from the classroom team. Idempotent
+  // (404 = not a member / team gone); org membership untouched. The commit
+  // already landed, so any team-side failure — resolving the slug OR the
+  // removal — is a non-fatal warning, not a thrown error.
   let teamWarning: string | undefined
   try {
+    const teamSlug = await teamSlugPromise
     await removeUserFromTeam(client, {
       org,
       teamSlug,
       username: normalizedUsername,
     })
   } catch (err) {
-    console.error("removeUserFromTeam failed (student unenrolled):", err)
+    console.error("team removal failed (student unenrolled):", err)
     const detail = getErrorMessage(err)
     teamWarning =
       `${toRemoveStudent.username} was removed from the roster, but removing ` +
-      `them from the classroom team "${teamSlug}" failed (${detail}); they may ` +
-      `keep read on private templates until it's retried.`
+      `them from the classroom team failed (${detail}); they may keep read on ` +
+      `private templates until it's retried.`
   }
 
   return {

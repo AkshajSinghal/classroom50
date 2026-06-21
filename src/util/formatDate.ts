@@ -60,7 +60,17 @@ export const buildDueFields = (dueInput: string): DueFields => {
   }
 
   const local = new Date(year, month - 1, day, hour, minute, 0)
-  if (Number.isNaN(local.getTime())) {
+  // `new Date` rolls over out-of-range components (Feb 30 -> Mar 2) instead of
+  // returning NaN, so reject anything that didn't round-trip: otherwise `due`
+  // (the rolled-over instant) would silently disagree with due_meta.input
+  // (rebuilt from the original components). Store verbatim instead.
+  const rolledOver =
+    local.getFullYear() !== year ||
+    local.getMonth() !== month - 1 ||
+    local.getDate() !== day ||
+    local.getHours() !== hour ||
+    local.getMinutes() !== minute
+  if (Number.isNaN(local.getTime()) || rolledOver) {
     return { due: dueInput }
   }
 
