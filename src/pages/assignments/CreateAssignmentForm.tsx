@@ -2,7 +2,11 @@ import { useForm } from "@tanstack/react-form"
 import GitHub from "@/assets/github.svg?react"
 import AutogradingTestsPane from "./AutogradingTestsPane"
 import type { AssignmentTestDraft } from "@/util/assignmentTests"
-import { testToDraft, validateTestDrafts, isSetupTest } from "@/util/assignmentTests"
+import {
+  testToDraft,
+  validateTestDrafts,
+  isSetupTest,
+} from "@/util/assignmentTests"
 import type { Assignment } from "@/types/classroom"
 
 export type CreateAssignmentFormValues = {
@@ -415,9 +419,7 @@ const CreateAssignmentForm = ({
               (ubuntu-latest + Python 3.12).
             </p>
 
-            <form.Subscribe
-              selector={(state) => state.values.container_image}
-            >
+            <form.Subscribe selector={(state) => state.values.container_image}>
               {(containerImage) => {
                 const usingContainer = Boolean(containerImage.trim())
                 const runnerOptions = usingContainer
@@ -427,27 +429,29 @@ const CreateAssignmentForm = ({
                   <form.Field name="runs_on">
                     {(field) => (
                       <div className="mb-4">
-                        <label
-                          htmlFor={field.name}
-                          className="label font-bold mb-2"
-                        >
-                          GitHub Runner
-                        </label>
-                        <select
-                          id={field.name}
-                          name={field.name}
-                          className="select w-full max-w-xs"
-                          value={field.state.value}
-                          onBlur={field.handleBlur}
-                          onChange={(e) => field.handleChange(e.target.value)}
-                        >
-                          <option value="">Default (ubuntu-latest)</option>
-                          {runnerOptions.map((label) => (
-                            <option key={label} value={label}>
-                              {label}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="flex">
+                          <label
+                            htmlFor={field.name}
+                            className="label font-bold mb-2 mr-4"
+                          >
+                            GitHub Runner
+                          </label>
+                          <select
+                            id={field.name}
+                            name={field.name}
+                            className="select w-full max-w-xs"
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                          >
+                            <option value="">Default (ubuntu-latest)</option>
+                            {runnerOptions.map((label) => (
+                              <option key={label} value={label}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                         {usingContainer && (
                           <p className="label pt-1">
                             A container image runs on Ubuntu hosts only.
@@ -484,30 +488,30 @@ const CreateAssignmentForm = ({
               )}
             </form.Field>
 
-            <form.Subscribe
-              selector={(state) => state.values.container_image}
-            >
+            <form.Subscribe selector={(state) => state.values.container_image}>
               {(containerImage) =>
                 containerImage.trim() ? (
                   <form.Field name="container_user">
                     {(field) => (
                       <div className="mb-4">
-                        <label
-                          htmlFor={field.name}
-                          className="label font-bold mb-2"
-                        >
-                          Container User
-                        </label>
-                        <input
-                          id={field.name}
-                          name={field.name}
-                          type="text"
-                          className="input w-full max-w-xs"
-                          placeholder="e.g., root"
-                          value={field.state.value}
-                          onBlur={field.handleBlur}
-                          onChange={(e) => field.handleChange(e.target.value)}
-                        />
+                        <div className="flex">
+                          <label
+                            htmlFor={field.name}
+                            className="label font-bold mr-4"
+                          >
+                            Container User
+                          </label>
+                          <input
+                            id={field.name}
+                            name={field.name}
+                            type="text"
+                            className="input w-full max-w-xs"
+                            placeholder="e.g., root"
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                          />
+                        </div>
                         <p className="label pt-1">
                           Use <code>root</code> if checkout fails with a
                           permission error in a non-root image.
