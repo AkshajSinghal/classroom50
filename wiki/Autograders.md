@@ -340,10 +340,22 @@ When `runtime` is omitted, the workflow defaults to `ubuntu-latest` with Python 
 
 | Field | Type | Notes |
 |---|---|---|
-| `runs-on` | string | One of `ubuntu-latest`, `ubuntu-24.04`, `ubuntu-22.04`, `ubuntu-20.04`, `macos-latest`, `macos-14`, `macos-13`, `windows-latest`, `windows-2022`, `windows-2019`. Self-hosted labels are rejected at write and runtime. |
+| `runs-on` | string \| `[string]` | Runner selection, exactly like GitHub Actions' own `runs-on`: a single label (`"ubuntu-latest"`) or an array of labels (`["self-hosted", "gpu"]`) for a custom / self-hosted runner. No value allow-list — you own getting the label right; each label is only anti-injection-checked (1–10 labels). Omit for `ubuntu-latest`. |
 | `python` / `node` / `java` / `go` | string | Version strings passed to `actions/setup-python` / `setup-node` / `setup-java` (with `distribution: temurin`) / `setup-go`. `node`, `java`, `go` steps are skipped when their field is unset. `python` defaults to `3.12` on the host path; inside a `container` the image owns Python unless `python` is set explicitly. |
 | `apt` | `[string]` | Each package name must match `^[a-z0-9][a-z0-9.+-]{0,63}$` (Debian/Ubuntu source-package grammar, length-capped). Linux runners only. |
 | `container` | object | Escape hatch — see below. Mutually exclusive with `apt`. |
+
+### Custom / self-hosted runners
+
+`runs-on` works exactly as it does in any GitHub Actions workflow. For a GitHub-hosted runner, give a single label; for CPU/memory-heavy assignments on your own infrastructure, give your self-hosted label(s) (issue #97):
+
+```json
+{ "runs-on": ["self-hosted", "gpu"], "python": "3.12" }
+```
+
+Multiple labels are AND-ed by Actions (a runner must carry all of them). There is no allow-list of valid labels — a misspelled label simply won't match a runner (the job queues until one does), the same behavior as a hand-written workflow, so double-check custom labels. Each label is validated against `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` purely so it can't inject into the workflow YAML. A `container` can be combined with a self-hosted Linux `runs-on`; matching the runner OS to the image is your responsibility (a recognized `macos-*`/`windows-*` label with a container is rejected, since Actions only runs containers on Linux).
+
+> **Security note.** The autograde runner re-validates `assignments.json` on every student submission, but the `runs-on` value comes from your config repo (teacher-authored), never from student input — so a permissive `runs-on` doesn't widen what an untrusted student repo can request.
 
 ### Custom container
 
