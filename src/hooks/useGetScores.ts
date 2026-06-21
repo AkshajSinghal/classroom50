@@ -62,6 +62,19 @@ export type SubmissionRow = {
   "max-score": number
   submissionCount: number
   late?: boolean
+  // Per-attempt history, newest first; the summary fields above mirror submissions[0].
+  submissions: SubmissionAttempt[]
+}
+
+// One past submission, flattened for the per-row history timeline.
+export type SubmissionAttempt = {
+  datetime: string
+  commit: string
+  release: string
+  score: number
+  "max-score": number
+  late?: boolean
+  submittedBy?: string
 }
 
 export type NormalizedScores = {
@@ -76,12 +89,13 @@ function bucketToRows(bucket: AssignmentBucket): SubmissionRow[] {
   return bucket.entries
     .filter((entry) => entry.submissions && entry.submissions.length > 0)
     .map((entry) => {
-      const latest = entry.submissions
+      const sorted = entry.submissions
         .slice()
         .sort(
           (a, b) =>
             new Date(b.datetime).getTime() - new Date(a.datetime).getTime(),
-        )[0]
+        )
+      const latest = sorted[0]
 
       const usernames =
         entry.member_usernames && entry.member_usernames.length > 0
@@ -99,6 +113,15 @@ function bucketToRows(bucket: AssignmentBucket): SubmissionRow[] {
         "max-score": latest["max-score"],
         submissionCount: entry.submissions.length,
         late: latest.late,
+        submissions: sorted.map((s) => ({
+          datetime: s.datetime,
+          commit: s.commit,
+          release: s.release,
+          score: s.score,
+          "max-score": s["max-score"],
+          late: s.late,
+          submittedBy: s.submitted_by?.username,
+        })),
       }
     })
 }
