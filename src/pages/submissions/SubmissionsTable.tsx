@@ -1,17 +1,24 @@
 import {
   ChartColumnIncreasing,
+  ChevronRight,
   MessageCircle,
   SquareArrowOutUpRight,
 } from "lucide-react"
-import { useRef } from "react"
+import { Fragment, useRef, useState } from "react"
 
 import GitHub from "@/assets/github.svg?react"
 import { getName, getInitials } from "@/util/students"
-import { studentRepoName } from "@/util/studentRepo"
+import { studentRepoName, studentRepoUrl } from "@/util/studentRepo"
 import Avatar from "@/components/avatar"
-import type { SubmissionRow } from "@/hooks/useGetScores"
+import type { SubmissionAttempt, SubmissionRow } from "@/hooks/useGetScores"
 import useGetFeedbackPr from "@/hooks/useGetFeedbackPr"
 import type { Student } from "@/types/classroom"
+
+const formatDateTime = (datetime: string) =>
+  new Date(datetime).toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  })
 
 // <= 50% = red
 // >= 60% = yellow
@@ -163,6 +170,73 @@ const ReviewButton = ({ org, repo }: { org: string; repo: string }) => {
   )
 }
 
+// Expanded per-row history: every submission for a repo, newest first.
+const SubmissionHistory = ({
+  submissions,
+  repoHref,
+  isGroup,
+  students,
+}: {
+  submissions: SubmissionAttempt[]
+  repoHref: string
+  isGroup: boolean
+  students: Student[]
+}) => (
+  <ol className="flex flex-col gap-2">
+    {submissions.map((s, i) => (
+      <li
+        key={`${s.datetime}-${s.commit}`}
+        className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-box border border-base-content/5 bg-base-100 px-3 py-2 text-sm"
+      >
+        <span className="text-base-content/50 w-6 shrink-0">
+          #{submissions.length - i}
+        </span>
+        <span className="w-44 shrink-0">{formatDateTime(s.datetime)}</span>
+        <span
+          className={`badge badge-soft badge-sm ${scoreToBadgeType(s.score, s["max-score"])}`}
+        >
+          {s.score}/{s["max-score"]}
+        </span>
+        {s.late ? (
+          <span className="badge badge-sm badge-warning badge-soft">Late</span>
+        ) : null}
+        {isGroup && s.submittedBy ? (
+          <span className="text-base-content/60">
+            by {getName(s.submittedBy, students) || s.submittedBy}
+          </span>
+        ) : null}
+        <span className="ml-auto flex gap-3">
+          <a
+            className="link link-hover inline-flex items-center gap-1"
+            href={s.commit}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <SquareArrowOutUpRight className="size-3.5" />
+            Commit
+          </a>
+          <a
+            className="link link-hover inline-flex items-center gap-1"
+            href={s.release}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <ChartColumnIncreasing className="size-3.5" />
+            Details
+          </a>
+        </span>
+      </li>
+    ))}
+    <li className="text-xs text-base-content/50">
+      Open the{" "}
+      <a className="link" href={repoHref} target="_blank" rel="noreferrer">
+        repository
+      </a>{" "}
+      for the full commit history.
+    </li>
+  </ol>
+)
+
 const SubmissionsTable = ({
   scores,
   students,
@@ -178,6 +252,10 @@ const SubmissionsTable = ({
   classroom: string
   assignment: string
 }) => {
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const toggle = (owner: string) =>
+    setExpanded((prev) => ({ ...prev, [owner]: !prev[owner] }))
+
   return (
     <div className="overflow-x-auto rounded-box border border-base-content/5 bg-base-100">
       <table className="table">
@@ -208,9 +286,12 @@ const SubmissionsTable = ({
             .toReversed()
             .map(({ usernames, score, datetime, submissionCount, ...rest }) => {
               const repo = studentRepoName(classroom, assignment, rest.owner)
-              const repoHref = `https://github.com/${org}/${repo}`
+              const repoHref = studentRepoUrl(org, classroom, assignment, rest.owner)
+              const canExpand = submissionCount > 1
+              const isOpen = !!expanded[rest.owner]
               return (
-              <tr key={rest.owner}>
+              <Fragment key={rest.owner}>
+              <tr>
                 <td>
                   {isGroup ? (
                     <GroupMembers
@@ -240,10 +321,24 @@ const SubmissionsTable = ({
                   )}
                 </td>
                 <td>
-                  <label className="badge max-xl:text-xs whitespace-nowrap">
-                    {submissionCount}{" "}
-                    {submissionCount === 1 ? "Submission" : "Submissions"}
-                  </label>
+                  {canExpand ? (
+                    <button
+                      type="button"
+                      className="badge max-xl:text-xs whitespace-nowrap gap-1 hover:badge-neutral cursor-pointer"
+                      aria-expanded={isOpen}
+                      title={isOpen ? "Hide submissions" : "Show all submissions"}
+                      onClick={() => toggle(rest.owner)}
+                    >
+                      <ChevronRight
+                        className={`size-3.5 transition-transform ${isOpen ? "rotate-90" : ""}`}
+                      />
+                      {submissionCount} Submissions
+                    </button>
+                  ) : (
+                    <label className="badge max-xl:text-xs whitespace-nowrap">
+                      {submissionCount} Submission
+                    </label>
+                  )}
                 </td>
                 <td>
                   <label
@@ -252,12 +347,7 @@ const SubmissionsTable = ({
                     {score}/{rest["max-score"]}
                   </label>
                 </td>
-                <td>
-                  {new Date(datetime).toLocaleString(undefined, {
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  })}
-                </td>
+                <td>{formatDateTime(datetime)}</td>
                 <td>
                   <div className="flex gap-4 max-xl:[&>div>a]:flex-col">
                     <div>
@@ -288,6 +378,19 @@ const SubmissionsTable = ({
                   </div>
                 </td>
               </tr>
+              {canExpand && isOpen && (
+                <tr>
+                  <td colSpan={5} className="bg-base-200/40">
+                    <SubmissionHistory
+                      submissions={rest.submissions}
+                      repoHref={repoHref}
+                      isGroup={isGroup}
+                      students={students}
+                    />
+                  </td>
+                </tr>
+              )}
+              </Fragment>
               )
             })}
         </tbody>
