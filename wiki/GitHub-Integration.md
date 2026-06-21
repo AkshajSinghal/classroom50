@@ -166,8 +166,7 @@ The CLIs call the GitHub REST API through [`go-gh`](https://github.com/cli/go-gh
 | PUT | [`https://api.github.com/repos/{owner}/{repo}/collaborators/{username}`](https://docs.github.com/en/rest/collaborators/collaborators#add-a-repository-collaborator) | Add a repo collaborator (direct invite) |
 | DELETE | [`https://api.github.com/repos/{owner}/{repo}/collaborators/{username}`](https://docs.github.com/en/rest/collaborators/collaborators#remove-a-repository-collaborator) | Remove a repo collaborator |
 | DELETE | [`https://api.github.com/repos/{owner}/{repo}`](https://docs.github.com/en/rest/repos/repos#delete-a-repository) | Delete a repository (`gh teacher teardown`; requires the `delete_repo` OAuth scope, not granted by default — opt in with `gh teacher login -s delete_repo`) |
-| GET | [`https://api.github.com/repos/{owner}/{repo}/releases/latest`](https://docs.github.com/en/rest/releases/releases#get-the-latest-release) | Fetch the latest release for score collection or download |
-| GET | [`https://api.github.com/repos/{owner}/{repo}/releases`](https://docs.github.com/en/rest/releases/releases#list-releases) | List recent releases (fallback when latest isn't a `submit/*` tag) |
+| GET | [`https://api.github.com/repos/{owner}/{repo}/releases`](https://docs.github.com/en/rest/releases/releases#list-releases) | Page through all releases to collect every `submit/*` submission (score collection / download) |
 | GET | [`https://api.github.com/orgs/{org}/repos`](https://docs.github.com/en/rest/repos/repos#list-organization-repositories) | Page through org repos for `--by-pattern` download mode |
 | GET | [`https://api.github.com/repos/{owner}/{repo}/releases/assets/{asset_id}`](https://docs.github.com/en/rest/releases/assets#get-a-release-asset) | Download a `result.json` release asset (`Accept: application/octet-stream`) |
 | GET | [`https://api.github.com/classrooms`](https://docs.github.com/en/rest/classroom/classroom#list-classrooms) | List GitHub Classroom classrooms the user administers (org-name `--source` resolution for `migrate`) |
@@ -202,8 +201,7 @@ The CLIs call the GitHub REST API through [`go-gh`](https://github.com/cli/go-gh
 
 | Method | URL | Purpose |
 |--------|-----|---------|
-| GET | [`https://api.github.com/repos/{owner}/{repo}/releases/latest`](https://docs.github.com/en/rest/releases/releases#get-the-latest-release) | Fetch the latest release for a student's assignment repo |
-| GET | [`https://api.github.com/repos/{owner}/{repo}/releases`](https://docs.github.com/en/rest/releases/releases#list-releases) | List recent releases (fallback when latest isn't a `submit/*` tag) |
+| GET | [`https://api.github.com/repos/{owner}/{repo}/releases`](https://docs.github.com/en/rest/releases/releases#list-releases) | Page through a student's assignment-repo releases to collect every `submit/*` submission |
 | GET | [`https://api.github.com/repos/{owner}/{repo}/releases/assets/{asset_id}`](https://docs.github.com/en/rest/releases/assets#get-a-release-asset) | Download the `result.json` asset from a release |
 
 ### `autograde-runner.yaml` (reusable workflow, runs in student repos)

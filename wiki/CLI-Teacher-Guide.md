@@ -77,7 +77,7 @@ Create a **fine-grained personal access token** at **Settings → Developer sett
 > token — a PAT scoped to "Only select repositories" can't include them, and
 > `collect-scores` silently counts those students as not submitted, logging
 > `0/<N> submitted` for the assignment, since an unreadable repo and one with no
-> release yet both surface as a 404 from `/releases/latest`. Org-wide
+> release yet both surface as a 404 from the `/releases` listing. Org-wide
 > `Contents: read` is broader than strictly necessary, but it avoids that trap;
 > tighten it later if your org policy requires.
 
