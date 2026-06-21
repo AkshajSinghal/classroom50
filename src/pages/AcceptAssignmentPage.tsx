@@ -313,7 +313,9 @@ const AcceptAssignmentPage = () => {
               <div>
                 <div className="font-bold">Assignment already accepted</div>
                 <div className="text-sm">
-                  Your repository already exists. You can open it below.
+                  Your repository already exists. You can open it below. If
+                  autograding isn't running or the setup files are missing, use
+                  "Re-run setup" to repair it.
                 </div>
               </div>
             </div>
@@ -397,6 +399,24 @@ const AcceptAssignmentPage = () => {
                     <GitHubWhite className="size-6" />
                     Accept Assignment & Create Repository
                   </>
+                )}
+              </button>
+            )}
+
+            {repoExistsAlready && !acceptMutation.data && (
+              <button
+                type="button"
+                className="btn btn-outline w-full text-lg p-6"
+                disabled={isBusy || !username}
+                onClick={() => acceptMutation.mutate()}
+              >
+                {acceptMutation.isPending ? (
+                  <>
+                    <span className="loading loading-spinner loading-sm" />
+                    Re-running setup...
+                  </>
+                ) : (
+                  "Re-run setup"
                 )}
               </button>
             )}
