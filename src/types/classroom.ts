@@ -21,7 +21,10 @@ export type Assignment = {
   slug: string
   name: string
   description?: string
-  template: {
+  // Optional starter-code repo. Omitted for a template-less assignment, where
+  // `gh student accept` (and the GUI accept flow) creates an empty repo
+  // carrying only the autograder shim. Mirrors the CLI's optional --template.
+  template?: {
     owner: string
     repo: string
     branch: string
