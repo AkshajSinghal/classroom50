@@ -266,7 +266,8 @@ const CreateAssignmentForm = ({
                       />
                     </div>
                     <p className="label pt-2">
-                      Students will receive a copy of this repository.
+                      Optional. Students receive a copy of this repository.
+                      Leave blank for an empty repo with just the autograder.
                     </p>
                   </>
                 )}

@@ -47,7 +47,9 @@ type ParsedTemplate = { owner: string; repo: string; branch?: string }
 function parseTemplateRef(raw: string, defaultOwner: string): ParsedTemplate {
   const trimmed = raw.trim()
   if (!trimmed) {
-    throw new Error("Template repository is required.")
+    // Callers must gate on a non-empty ref (the template is optional); an
+    // empty value here is an internal invariant violation, not user input.
+    throw new Error("Template ref is empty.")
   }
 
   const [ownerRepo, branch, ...extraAt] = trimmed.split("@")
@@ -226,8 +228,10 @@ export async function editAssignment(
 
   // Grant the (possibly changed) in-org private template a team read. Surfaced
   // as a non-fatal warning, never thrown — the edit already committed.
+  // needsTeamGrant is only set for a resolved private in-org template, so the
+  // template is always present here; the guard also narrows the type.
   let templateGrantWarning: string | undefined
-  if (needsTeamGrant) {
+  if (needsTeamGrant && editedAssignment.template) {
     templateGrantWarning = await tryGrantTeamTemplateRead(
       client,
       input.org,
@@ -315,13 +319,21 @@ async function buildAssignmentEntry(
   // Resolve the template like the CLI (parse, confirm template, default
   // branch, reject out-of-org private). On edit, reuse an unchanged stored
   // ref instead of re-resolving so non-template edits still save.
-  const parsedTemplate = parseTemplateRef(input.template_repo, input.org)
-  const { template, needsTeamGrant } = templateRefUnchanged(
-    parsedTemplate,
-    existingTemplate,
-  )
-    ? { template: existingTemplate!, needsTeamGrant: false }
-    : await resolveTemplate(client, input.org, parsedTemplate)
+  //
+  // The template is OPTIONAL (mirrors the CLI's `--template`): when the form
+  // leaves it blank, the assignment is template-less and the accept flow
+  // creates an empty shim-only repo. Skip the parse/resolve/grant entirely so
+  // an empty input never blocks the save.
+  let template: Assignment["template"] | undefined
+  let needsTeamGrant = false
+  if (input.template_repo.trim()) {
+    const parsedTemplate = parseTemplateRef(input.template_repo, input.org)
+    const resolved = templateRefUnchanged(parsedTemplate, existingTemplate)
+      ? { template: existingTemplate!, needsTeamGrant: false }
+      : await resolveTemplate(client, input.org, parsedTemplate)
+    template = resolved.template
+    needsTeamGrant = resolved.needsTeamGrant
+  }
 
   // Must match classroom50/assignments/v1 exactly — the CLI rejects unknown
   // fields, so a stray key breaks `gh teacher` for the whole classroom.
@@ -329,11 +341,15 @@ async function buildAssignmentEntry(
   const entry: Assignment = {
     slug: input.slug,
     name: input.name,
-    template,
     mode: input.mode,
     autograder: "default",
     // Mirrors the CLI's `--feedback-pr` default of true.
     feedback_pr: input.feedback_pr ?? true,
+  }
+  // Omit the template block entirely for a template-less assignment, matching
+  // how the CLI writes a nil TemplateRef.
+  if (template) {
+    entry.template = template
   }
   if (input.description.trim()) {
     entry.description = input.description.trim()
@@ -384,7 +400,7 @@ async function grantTeamTemplateRead(
   org: string,
   classroom: string,
   slug: string,
-  template: Assignment["template"],
+  template: NonNullable<Assignment["template"]>,
 ) {
   let teamSlug: string | undefined
   try {
@@ -418,7 +434,7 @@ async function tryGrantTeamTemplateRead(
   org: string,
   classroom: string,
   slug: string,
-  template: Assignment["template"],
+  template: NonNullable<Assignment["template"]>,
 ): Promise<string | undefined> {
   try {
     await grantTeamTemplateRead(client, org, classroom, slug, template)
@@ -491,7 +507,7 @@ export async function createAssignment(
   const updatedRef = await updateRef(client, input.org, newCommit.sha)
 
   let templateGrantWarning: string | undefined
-  if (needsTeamGrant) {
+  if (needsTeamGrant && assignmentBody.template) {
     templateGrantWarning = await tryGrantTeamTemplateRead(
       client,
       input.org,
@@ -524,7 +540,7 @@ export async function createAssignmentRepo(params: {
   fallbackBranch: string
   metadataYaml: string
   autogradeYaml: string
-}) {
+}): Promise<AcceptRepoCreationResult> {
   const {
     client,
     templateOwner,
@@ -740,22 +756,31 @@ export async function createAssignmentWithConflictRetry(
 function createClassroom50Yaml(params: {
   classroom: string
   assignment: string
-  sourceOwner: string
-  sourceRepo: string
-  sourceBranch: string
+  // The source block records the template repo so `gh student submit` can
+  // re-fetch the latest instructor .gitignore/.github on each push. Omitted
+  // for a template-less assignment (nothing to re-fetch) — matches the CLI,
+  // which writes no `source:` block in that case.
+  sourceOwner?: string
+  sourceRepo?: string
+  sourceBranch?: string
 }) {
   const { classroom, assignment, sourceOwner, sourceRepo, sourceBranch } =
     params
 
-  return [
+  const lines = [
     `classroom: ${JSON.stringify(classroom)}`,
     `assignment: ${JSON.stringify(assignment)}`,
-    `source:`,
-    `  owner: ${JSON.stringify(sourceOwner)}`,
-    `  repo: ${JSON.stringify(sourceRepo)}`,
-    `  branch: ${JSON.stringify(sourceBranch)}`,
-    ``,
-  ].join("\n")
+  ]
+  if (sourceOwner && sourceRepo) {
+    lines.push(
+      `source:`,
+      `  owner: ${JSON.stringify(sourceOwner)}`,
+      `  repo: ${JSON.stringify(sourceRepo)}`,
+      `  branch: ${JSON.stringify(sourceBranch ?? "main")}`,
+    )
+  }
+  lines.push(``)
+  return lines.join("\n")
 }
 
 export type DeleteAssignmentInput = {
