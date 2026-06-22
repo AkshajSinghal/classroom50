@@ -435,6 +435,46 @@ If you enable `--feedback-pr` on an org that was set up before this feature, **r
 
 **Limitations:** the per-repo limit relies on the org rulesets being in place; on a plan or policy that rejects org rulesets, `init` warns and continues, and the protections silently don't apply. The Feedback PR opens only when there's a diff to show (a submission identical to the baseline produces no PR).
 
+## Restricting which files a submission may contain (`allowed_files`)
+
+An assignment can declare an **`allowed_files`** list in `assignments.json` — an ordered list of **`.gitignore`-style patterns** that defines which files belong to the submission. It is an *allowlist expressed in gitignore syntax*: write `*` to ignore everything, then `!hello.py` to re-include exactly the files you want.
+
+```sh
+gh teacher assignment add cs50-fall-2026 cs-principles hello \
+    --name "Hello" --template cs50/hello-template \
+    --allowed-files '*' --allowed-files '!hello.py'
+```
+
+persists:
+
+```json
+"allowed_files": ["*", "!hello.py"]
+```
+
+- **Syntax is git's own.** Ordering matters, last match wins, and `!` re-includes — exactly like a `.gitignore`. So `["*", "!hello.py"]` allows only `hello.py`, while `["node_modules/", "*.lock"]` just drops that noise and allows everything else.
+- **Repeatable, order-preserving flag.** Pass `--allowed-files` once per pattern (do **not** comma-join them); order is preserved into the manifest because gitignore matching is order-dependent.
+- **Optional and backward-compatible.** Omit it (or pass an empty list) and every file is allowed, exactly as before.
+- **Re-running `add` rewrites the whole entry.** Like `--tests` and `--template`, omitting `--allowed-files` on a re-add drops a previously set allowlist (and warns loudly). Pass `--allowed-files` again to keep it; pass it with no value as a deliberate, silent clear.
+
+### How it is enforced
+
+Enforcement is **two-sided**. The autograde runner is the real enforcement point (a plain `git push` bypasses the submit-side filter, but never the runner) — though it deliberately **fails open**, so it is the *enforcement point*, not a guaranteed security boundary:
+
+1. **`gh student submit`** filters the snapshot it pushes, leaving disallowed files out of the submission. This is best-effort convenience — a plain `git commit && git push` bypasses it.
+2. **The autograde runner** (`runner.py`) is where enforcement actually happens. Immediately after checkout and **before** it runs the autograder, the runner removes every working-tree file the patterns disallow, so — **when git is available** — the autograder only ever sees allowed files, no matter how the student pushed. (On git/resource failure it fails open; see below.)
+
+**Control files are always kept.** `.classroom50.yaml`, the `.github/` workflow shim, and the runner's own outputs are never removed, even under a bare `*` pattern — so enforcement can't break grading.
+
+> **`allowed_files` gates what the autograder *reads*, not just what the student authors.** Removal happens *before* the autograder runs, so any file the grader needs — starter scaffolding, `helpers.py`, data fixtures, `requirements.txt` — must be inside the allowlist too, or it is deleted and grading fails with a confusing "file not found"/import error that looks like the student's bug. When in doubt, allowlist every file the grader touches (e.g. `--allowed-files '*' --allowed-files '!hello.py' --allowed-files '!helpers.py'`), or keep grader-only fixtures in the autograder bundle rather than the student repo. The release-body "Removed N file(s)" note lists exactly what was stripped, so a surprise removal is diagnosable there.
+
+> **`.github/` is force-kept and cannot be constrained by `allowed_files`.** The whole `.github/` subtree (and `.classroom50.yaml`) survives the allowlist so the autograde shim keeps working. A student can therefore commit arbitrary files under `.github/` that the allowlist won't strip. This is inert today — the runner only executes the Pages-fetched entrypoint and `.classroom50.yaml` is re-validated before use — but do not point a custom autograder at student-controlled `.github/` content.
+
+**It fails open.** Enforcement is a grading-scope/hygiene tool, not a secret-hiding security control, so if the runner cannot enforce a non-empty allowlist — git is unavailable or hangs, the matcher errors, the working tree can't be enumerated — it logs the failure, **skips enforcement, and grades the unfiltered submission** rather than blocking the grade. (Both sides are lenient: `gh student submit`'s pre-push filter is best-effort by design too.) An empty/absent allowlist has nothing to enforce and always grades normally. **Never use `allowed_files` to hide a solution or answer-key file from the autograder** — a student who forces a git failure (or just `git push`es) gets the unfiltered tree graded. If you later need the allowlist to be an authoritative boundary, `enforce_allowed_files` in `runner.py` documents how to flip it to fail-closed (publish an `error` result instead of grading).
+
+**It does not rewrite history.** Removal happens in the working tree only, so the baseline commit, the review compare link, and the Feedback PR diff are unaffected; only the files the autograder *reads* change.
+
+**Removals are reported.** When the runner strips files, it logs them and appends a "Removed N file(s) outside the assignment's allowed files" section to the submission's `release-body.md`, so a student whose required file is misnamed or missing can see why the autograder didn't find it.
+
 ## Custom runner workflow (rare)
 
 The `--autograder <name>` flag on `gh teacher assignment add` exists for the rare case where you want an assignment to call a fundamentally different *reusable workflow* — not just a different `autograder.py`, but a different runner entirely. To opt in:
