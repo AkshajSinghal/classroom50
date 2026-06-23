@@ -47,8 +47,7 @@ export type CreateAssignmentFormValues = {
   container_image: string
   container_user: string
   setup_command: string
-  // Raw textarea content: one .gitignore-style pattern per line. Split into a
-  // string[] on save (parseAllowedFiles); joined back on read.
+  // Raw textarea text; parsed to string[] on save, joined back on read.
   allowed_files: string
   tests: AssignmentTestDraft[]
 }
@@ -393,7 +392,7 @@ const CreateAssignmentForm = ({
         // the CLI later refuses to parse).
         Object.assign(errors, validateTestDrafts(value.tests))
 
-        // Same rationale for allowed_files: mirror the CLI's cap/shape rules.
+        // Mirror the CLI's cap/shape rules so a bad value can't reach the file.
         const allowedFilesError = validateAllowedFiles(
           parseAllowedFiles(value.allowed_files),
         )
@@ -777,7 +776,7 @@ const CreateAssignmentForm = ({
             <form.Field name="allowed_files">
               {(field) => {
                 const patterns = parseAllowedFiles(field.state.value)
-                const error = field.state.meta.errors[0]
+                const error = field.state.meta.errors[0] as string | undefined
                 return (
                   <div className="mt-4">
                     <label
