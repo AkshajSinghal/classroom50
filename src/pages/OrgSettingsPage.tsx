@@ -7,6 +7,7 @@ import Drawer, {
 import { useParams } from "@tanstack/react-router"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { putRepoSecret, validateServiceToken } from "@/hooks/github/mutations"
+import { githubKeys } from "@/hooks/github/queries"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import useGetServiceTokenStatus from "@/hooks/useGetServiceTokenStatus"
 import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
@@ -99,7 +100,7 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
       onSubmit?.()
       queryClient.invalidateQueries({ queryKey: ["orgs"] })
       queryClient.invalidateQueries({
-        queryKey: ["github", "serviceToken", org],
+        queryKey: githubKeys.serviceToken(org ?? ""),
       })
     },
   })

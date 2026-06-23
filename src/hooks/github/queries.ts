@@ -60,6 +60,9 @@ export const githubKeys = {
 
   lastCollectScoresRun: (owner: string) =>
     [...githubKeys.all, "last-collect-scores-run", owner] as const,
+
+  serviceToken: (owner: string) =>
+    [...githubKeys.all, "serviceToken", owner] as const,
 }
 
 export function viewerQuery(client: GitHubClient) {

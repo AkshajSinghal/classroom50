@@ -4,6 +4,7 @@ import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useEffect, useState } from "react"
 import { triggerScoreCollection } from "./github/mutations"
 import { getCollectScoresRunAfterId, githubKeys } from "./github/queries"
+import type { GitHubWorkflowRun } from "./github/types"
 
 export type CollectScoresPhase =
   | "idle"
@@ -27,7 +28,7 @@ const POLL_BACKOFF_INTERVAL_MS = 15000
 // failure, cancelled, timed_out, ...), regardless of whether `status` has
 // flipped to "completed" yet. Polling stops on either signal.
 const isRunFinished = (
-  run: { status: string; conclusion: string | null } | null | undefined,
+  run: GitHubWorkflowRun | null | undefined,
 ) => Boolean(run && (run.status === "completed" || run.conclusion !== null))
 
 // The in-flight dispatch we're tracking. `sinceRunId` is the newest dispatch
@@ -120,9 +121,11 @@ const useTriggerScoreCollection = (org: string) => {
     refetchInterval: (query) => {
       if (isRunFinished(query.state.data)) return false
       // Back off the cadence once the run has been pending for a while so a
-      // stuck/long run doesn't poll every 5s for the full 10 minutes.
-      const polls = query.state.dataUpdateCount
-      return polls * POLL_INTERVAL_MS >= POLL_BACKOFF_AFTER_MS
+      // stuck/long run doesn't poll every 5s for the full 10 minutes. Anchored
+      // to the dispatch's wall-clock start (persisted across remounts) rather
+      // than a per-observer poll count that resets on remount/org change.
+      const elapsed = Date.now() - (dispatch?.startedAt ?? Date.now())
+      return elapsed >= POLL_BACKOFF_AFTER_MS
         ? POLL_BACKOFF_INTERVAL_MS
         : POLL_INTERVAL_MS
     },
