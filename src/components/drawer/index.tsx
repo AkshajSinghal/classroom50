@@ -125,6 +125,16 @@ export const TeacherSidebarMenu = ({
             </li>
           </Link>
         )}
+        {isTeacher && (
+          <Link to={`/${org}/${classroom}/edit`}>
+            <li
+              className={`flex px-2 ${selected === "settings" && "bg-[#323b49] rounded-box"}`}
+            >
+              <Settings />
+              <span>Settings</span>
+            </li>
+          </Link>
+        )}
       </ul>
     </div>
   )
