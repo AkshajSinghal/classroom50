@@ -9,10 +9,11 @@ import type {
   GitHubRepo,
   GitHubTeam,
   GitHubUser,
+  GitHubWorkflowRun,
 } from "./types"
 import type { Assignment } from "@/types/classroom"
 import { GitHubAPIError } from "./errors"
-import { createTeam, getErrorMessage } from "./mutations"
+import { COLLECT_SCORES_WORKFLOW, createTeam, getErrorMessage } from "./mutations"
 import { decodeBase64Utf8 } from "@/util/github"
 import type { GetAssignmentsFileInput } from "@/api/queries/assignments"
 import type { OrgRunner, OrgRunnersResult } from "@/util/runners"
@@ -53,6 +54,12 @@ export const githubKeys = {
 
   csvFile: (owner: string, repo: string, path: string, ref?: string) =>
     [...githubKeys.all, "csv-file", owner, repo, path, ref ?? null] as const,
+
+  collectScoresRun: (owner: string, since: string | null) =>
+    [...githubKeys.all, "collect-scores-run", owner, since ?? "none"] as const,
+
+  lastCollectScoresRun: (owner: string) =>
+    [...githubKeys.all, "last-collect-scores-run", owner] as const,
 }
 
 export function viewerQuery(client: GitHubClient) {
@@ -789,4 +796,52 @@ export async function getRepoPermissionForUser(params: {
   return client.request(
     `/repos/${org}/${repo}/collaborators/${username}/permission`,
   )
+}
+
+// Fetches the most recent collect-scores run matching the given filters (or
+// null if none). Shared by the "track my dispatch" and "last collected" reads.
+async function listLatestCollectScoresRun(
+  client: GitHubClient,
+  org: string,
+  filters: { event?: string; since?: string },
+  signal?: AbortSignal,
+): Promise<GitHubWorkflowRun | null> {
+  const params = new URLSearchParams({ per_page: "1" })
+  if (filters.event) params.set("event", filters.event)
+  if (filters.since) params.set("created", `>=${filters.since}`)
+
+  const res = await client.request<{ workflow_runs: GitHubWorkflowRun[] }>(
+    `/repos/${org}/classroom50/actions/workflows/${COLLECT_SCORES_WORKFLOW}/runs?${params.toString()}`,
+    { method: "GET", signal },
+  )
+
+  return res.workflow_runs?.[0] ?? null
+}
+
+// The most recent collect-scores workflow_dispatch run created at/after `since`
+// (the moment we dispatched), or null if none has registered yet. Used to track
+// a manually-triggered collection to completion.
+export async function getLatestCollectScoresRun(
+  client: GitHubClient,
+  org: string,
+  since: string,
+  signal?: AbortSignal,
+): Promise<GitHubWorkflowRun | null> {
+  return listLatestCollectScoresRun(
+    client,
+    org,
+    { event: "workflow_dispatch", since },
+    signal,
+  )
+}
+
+// The most recent collect-scores run regardless of trigger (nightly cron or a
+// manual dispatch), or null if the workflow has never run. Used to show teachers
+// when scores were last collected.
+export async function getLastCollectScoresRun(
+  client: GitHubClient,
+  org: string,
+  signal?: AbortSignal,
+): Promise<GitHubWorkflowRun | null> {
+  return listLatestCollectScoresRun(client, org, {}, signal)
 }
