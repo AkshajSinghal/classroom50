@@ -108,16 +108,23 @@ const GroupMembers = ({
 const ReviewButton = ({ org, repo }: { org: string; repo: string }) => {
   const dialogRef = useRef<HTMLDialogElement | null>(null)
   const [resolving, setResolving] = useState(false)
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
   // enabled: false — driven by refetch() on click, never on mount.
   const { refetch } = useGetFeedbackPr(org, repo, false)
 
   const handleReview = async () => {
     setResolving(true)
     try {
-      const { data: pr } = await refetch()
-      if (pr) {
+      // getOpenPullRequests maps 404 -> [], so a non-404 failure surfaces here
+      // as `error`; show it rather than the misleading "no PR yet" message.
+      const { data: pr, error } = await refetch()
+      if (error) {
+        setErrorMsg(error instanceof Error ? error.message : String(error))
+        dialogRef.current?.showModal()
+      } else if (pr) {
         window.open(pr.html_url, "_blank", "noopener,noreferrer")
       } else {
+        setErrorMsg(null)
         dialogRef.current?.showModal()
       }
     } finally {
@@ -142,14 +149,29 @@ const ReviewButton = ({ org, repo }: { org: string; repo: string }) => {
       </button>
       <dialog ref={dialogRef} className="modal">
         <div className="modal-box max-w-md">
-          <h3 className="text-lg font-bold">No feedback pull request yet</h3>
-          <p className="mt-2 text-sm leading-6 text-base-content/70">
-            No Feedback PR has been opened for{" "}
-            <span className="font-mono">{repo}</span> yet. It's created by the
-            assignment's autograde workflow after a graded submission — if the
-            student hasn't submitted (or the assignment has the Feedback PR
-            disabled), there's nothing to review yet.
-          </p>
+          {errorMsg ? (
+            <>
+              <h3 className="text-lg font-bold">
+                Couldn't check for a feedback PR
+              </h3>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-base-content/70">
+                {errorMsg}
+              </p>
+            </>
+          ) : (
+            <>
+              <h3 className="text-lg font-bold">
+                No feedback pull request yet
+              </h3>
+              <p className="mt-2 text-sm leading-6 text-base-content/70">
+                No Feedback PR has been opened for{" "}
+                <span className="font-mono">{repo}</span> yet. It's created by
+                the assignment's autograde workflow after a graded submission —
+                if the student hasn't submitted (or the assignment has the
+                Feedback PR disabled), there's nothing to review yet.
+              </p>
+            </>
+          )}
           <div className="modal-action">
             <a
               className="btn btn-ghost btn-sm"

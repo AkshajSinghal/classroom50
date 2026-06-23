@@ -87,7 +87,12 @@ function bucketToRows(bucket: AssignmentBucket): SubmissionRow[] {
   // the whole submissions view).
   const entries = Array.isArray(bucket?.entries) ? bucket.entries : []
   return entries
-    .filter((entry) => entry.submissions && entry.submissions.length > 0)
+    .filter(
+      (entry) =>
+        entry &&
+        Array.isArray(entry.submissions) &&
+        entry.submissions.length > 0,
+    )
     .map((entry) => {
       const sorted = entry.submissions
         .slice()
