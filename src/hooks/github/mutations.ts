@@ -6,13 +6,12 @@ import {
   type GitHubTeam,
   type GitHubRepo,
   type GitHubOrgMembership,
-  type GitHubUser,
 } from "./types"
 import { GitHubAPIError } from "./errors"
 import sodium from "libsodium-wrappers"
 import { getBranchRef, getClassroomJson, getCommit } from "@/api/github/queries"
 import type { CreateClassroomInput } from "@/api/mutations/classrooms"
-import { getRepo, paginateAll } from "./queries"
+import { getRepo } from "./queries"
 
 const ASSIGNMENTS_TEMPLATE = {
   schema: "classroom50/assignments/v1",
@@ -415,16 +414,15 @@ async function adoptClassroomTeam(
     `/orgs/${org}/teams/${slug}`,
   )
 
-  // A populated same-slug team is likely a stale leftover from a failed
-  // deleteClassroom; adopting it would re-grant the prior cohort read on this
-  // classroom's private templates. Refuse it — the operator must clear it first.
-  const members = await listTeamMembers(client, org, existing.slug)
-  if (members.length > 0) {
-    throw new Error(
-      `A GitHub team "${existing.slug}" already exists in ${org} with ${members.length} member(s) — it's likely left over from a classroom that wasn't fully deleted. Adopting it would give those members read access to this classroom's private templates. Delete the team at https://github.com/orgs/${org}/teams/${existing.slug} (or remove its members), or recreate the classroom with a different short name, then retry.`,
-    )
-  }
-
+  // NOTE: a stale same-slug team left by a failed deleteClassroom can re-grant
+  // the prior cohort read on this classroom's private templates. We do NOT
+  // refuse a populated team here: GitHub auto-adds the team creator as a
+  // maintainer, so a freshly-created team (e.g. the winner of a concurrent
+  // same-name create race) already reports members, and refusing on member
+  // count would break the benign adopt the CLI relies on. Distinguishing a
+  // stale-leftover from this classroom's own live team requires the persisted
+  // team id from classroom.json, which isn't available here — left for a
+  // follow-up that reconciles against that id.
   if (existing.privacy !== "secret") {
     await client.request(`/orgs/${org}/teams/${existing.slug}`, {
       method: "PATCH",
@@ -433,19 +431,6 @@ async function adoptClassroomTeam(
   }
 
   return { id: existing.id, slug: existing.slug }
-}
-
-// List a team's members (paginated), to detect a stale populated team before
-// adopting it.
-async function listTeamMembers(
-  client: GitHubClient,
-  org: string,
-  teamSlug: string,
-): Promise<GitHubUser[]> {
-  return paginateAll<GitHubUser>(
-    client,
-    (page) => `/orgs/${org}/teams/${teamSlug}/members?per_page=100&page=${page}`,
-  )
 }
 
 // Delete the per-classroom team by its persisted slug (mirrors the CLI). As
