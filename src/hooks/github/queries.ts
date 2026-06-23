@@ -426,26 +426,34 @@ export function listOrgMembers(client: GitHubClient, org: string, page = 1) {
     `/orgs/${org}/members?per_page=100&page=${page}`,
   )
 }
+
+// Walk a GitHub list endpoint to exhaustion, 100 items per page. `makePath`
+// receives the 1-based page number. Stops when a page returns fewer than 100.
+export async function paginateAll<T>(
+  client: GitHubClient,
+  makePath: (page: number) => string,
+): Promise<T[]> {
+  const all: T[] = []
+  let page = 1
+
+  while (true) {
+    const batch = await client.request<T[]>(makePath(page))
+    all.push(...batch)
+    if (batch.length < 100) break
+    page++
+  }
+
+  return all
+}
+
 export async function getOrgMembers(
   client: GitHubClient,
   org: string,
 ): Promise<GitHubUser[]> {
-  const members: GitHubUser[] = []
-  let page = 1
-
-  while (true) {
-    const batch = await client.request<GitHubUser[]>(
-      `/orgs/${org}/members?per_page=100&page=${page}`,
-    )
-
-    members.push(...batch)
-
-    if (batch.length < 100) break
-
-    page++
-  }
-
-  return members
+  return paginateAll<GitHubUser>(
+    client,
+    (page) => `/orgs/${org}/members?per_page=100&page=${page}`,
+  )
 }
 
 export async function getTeam(

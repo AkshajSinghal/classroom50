@@ -555,8 +555,6 @@ export async function createAssignmentRepo(params: {
   owner: string
   name: string
   fallbackBranch: string
-  metadataYaml: string
-  autogradeYaml: string
 }): Promise<AcceptRepoCreationResult> {
   const {
     client,
@@ -565,8 +563,6 @@ export async function createAssignmentRepo(params: {
     owner,
     name,
     fallbackBranch,
-    metadataYaml,
-    autogradeYaml,
   } = params
 
   const cleanTemplateRepo = templateRepo
@@ -629,49 +625,15 @@ export async function createAssignmentRepo(params: {
     }
   }
 
-  // No template specified — an empty starter repo is intended here; seed it
-  // with the metadata + shim.
+  // No template specified — create an empty starter repo. auto_init seeds the
+  // README/initial commit; the metadata + shim land in the downstream tree
+  // commit (see provisionAcceptedRepo), together in one commit.
   return await createEmptyAssignmentRepo({
     client,
     owner,
     name,
     branch: fallbackBranch,
-    metadataYaml,
-    autogradeYaml,
   })
-}
-
-async function initializeEmptyRepoWithMetadata(params: {
-  client: GitHubClient
-  owner: string
-  repo: string
-  branch: string
-  metadataYaml: string
-}) {
-  const { client, owner, repo, branch, metadataYaml } = params
-
-  // Share the centralized fresh-repo retry. The empty-repo PUT can 404/409 while
-  // GitHub provisions, so retry on both (fixed 500ms x10) rather than the
-  // default empty-repo-message-only gate.
-  return withFreshRepoRetry(
-    () =>
-      client.request(`/repos/${owner}/${repo}/contents/.classroom50.yaml`, {
-        method: "PUT",
-        body: {
-          message: "Initialize classroom50 assignment",
-          content: btoa(unescape(encodeURIComponent(metadataYaml))),
-          branch,
-        },
-      }),
-    {
-      attempts: 10,
-      baseDelayMs: 500,
-      backoffFactor: 1,
-      shouldRetry: (err) =>
-        err instanceof GitHubAPIError &&
-        (err.status === 404 || err.status === 409),
-    },
-  )
 }
 
 type AcceptRepoCreationResult =
@@ -693,19 +655,22 @@ async function createEmptyAssignmentRepo(params: {
   owner: string
   name: string
   branch: string
-  metadataYaml: string
-  autogradeYaml: string
 }): Promise<AcceptRepoCreationResult> {
-  const { client, owner, name, branch, metadataYaml } = params
+  const { client, owner, name, branch } = params
   let repo: GitHubRepo
 
   try {
+    // metadata + workflow must land in ONE commit so the accept marker and the
+    // autograde workflow share the runner's Feedback-PR baseline. auto_init
+    // gives us the initial commit to build that single tree commit on; we used
+    // to commit .classroom50.yaml alone first, splitting them and skewing the
+    // baseline.
     repo = await client.request<GitHubRepo>(`/orgs/${owner}/repos`, {
       method: "POST",
       body: {
         name,
         private: true,
-        auto_init: false,
+        auto_init: true,
       },
     })
   } catch (err) {
@@ -723,21 +688,17 @@ async function createEmptyAssignmentRepo(params: {
     throw err
   }
 
-  await initializeEmptyRepoWithMetadata({
-    client,
-    owner,
-    repo: name,
-    branch,
-    metadataYaml,
-  })
+  // Commit onto the repo's real default branch (GitHub picks it for an
+  // auto_init repo); fall back to the requested branch, then "main".
+  const targetBranch = repo.default_branch || branch || "main"
 
   return {
     kind: "fallback-empty",
     repo: {
       ...repo,
-      default_branch: branch,
+      default_branch: targetBranch,
     },
-    branch,
+    branch: targetBranch,
   }
 }
 
@@ -1128,8 +1089,6 @@ export async function acceptAssignment(params: {
     owner: org,
     name: studentRepoNameValue,
     fallbackBranch: sourceBranch || "main",
-    metadataYaml,
-    autogradeYaml,
   })
 
   if (created.kind === "already-accepted") {

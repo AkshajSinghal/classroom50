@@ -12,7 +12,7 @@ import { GitHubAPIError } from "./errors"
 import sodium from "libsodium-wrappers"
 import { getBranchRef, getClassroomJson, getCommit } from "@/api/github/queries"
 import type { CreateClassroomInput } from "@/api/mutations/classrooms"
-import { getRepo } from "./queries"
+import { getRepo, paginateAll } from "./queries"
 
 const ASSIGNMENTS_TEMPLATE = {
   schema: "classroom50/assignments/v1",
@@ -442,19 +442,10 @@ async function listTeamMembers(
   org: string,
   teamSlug: string,
 ): Promise<GitHubUser[]> {
-  const members: GitHubUser[] = []
-  let page = 1
-
-  while (true) {
-    const batch = await client.request<GitHubUser[]>(
-      `/orgs/${org}/teams/${teamSlug}/members?per_page=100&page=${page}`,
-    )
-    members.push(...batch)
-    if (batch.length < 100) break
-    page++
-  }
-
-  return members
+  return paginateAll<GitHubUser>(
+    client,
+    (page) => `/orgs/${org}/teams/${teamSlug}/members?per_page=100&page=${page}`,
+  )
 }
 
 // Delete the per-classroom team by its persisted slug (mirrors the CLI). As
@@ -1673,6 +1664,14 @@ export async function initClassroom50({
 }) {
   const results: Partial<Record<InitStepId, unknown>> = {}
 
+  const buildResult = (status: "error" | "complete") => ({
+    org,
+    repo: "classroom50",
+    ...results,
+    status,
+    pagesUrl: `https://${org}.github.io/classroom50/`,
+  })
+
   results.orgDefaults = await tryStep({
     id: "orgDefaults",
     onStepUpdate,
@@ -1702,13 +1701,7 @@ export async function initClassroom50({
   // continuing only cascades 404s and (since the mutation still resolves) would
   // report success on a half-initialized org. Stop here.
   if (stepFailed(results.configRepo)) {
-    return {
-      org,
-      repo: "classroom50",
-      ...results,
-      status: "error" as const,
-      pagesUrl: `https://${org}.github.io/classroom50/`,
-    }
+    return buildResult("error")
   }
 
   results.skeleton = await tryStep({
@@ -1717,16 +1710,9 @@ export async function initClassroom50({
     fn: () => ensureSkeletonFiles(client, org),
   })
 
-  // Skeleton (workflows + scripts) is the second hard prerequisite; without it
-  // Pages/autograde can't function.
+  // skeleton (workflows + scripts) — same hard-prerequisite gate.
   if (stepFailed(results.skeleton)) {
-    return {
-      org,
-      repo: "classroom50",
-      ...results,
-      status: "error" as const,
-      pagesUrl: `https://${org}.github.io/classroom50/`,
-    }
+    return buildResult("error")
   }
 
   results.pages = await tryStep({
@@ -1753,13 +1739,7 @@ export async function initClassroom50({
     fn: () => ensureBranchProtection(client, org, "classroom50", "main"),
   })
 
-  return {
-    org,
-    repo: "classroom50",
-    ...results,
-    status: "complete" as const,
-    pagesUrl: `https://${org}.github.io/classroom50/`,
-  }
+  return buildResult("complete")
 }
 
 export async function addRepoCollaborator(params: {
