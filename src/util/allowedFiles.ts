@@ -1,25 +1,16 @@
-// Authoring helpers for an assignment's `allowed_files` — an ordered,
-// .gitignore-style allowlist of the files that belong to a submission
-// (last match wins, `!` re-includes; empty means all files allowed).
-//
-// The GUI only authors the patterns; matching/enforcement lives server-side
-// (the autograde runner and `gh student submit`, both via `git check-ignore`).
-// In the form they're edited as a single textarea (one pattern per line), so
-// these helpers convert between that text and the wire-shape `string[]`, and
-// mirror the CLI's write-time validation (ValidateAllowedFiles) and the
-// classroom50/assignments/v1 schema exactly so a bad value is caught here
-// rather than by a rejected commit that could break assignments.json.
+// Authoring helpers for an assignment's `allowed_files`: an ordered,
+// .gitignore-style allowlist (last match wins, `!` re-includes; empty = all
+// files allowed). Edited as a textarea (one pattern per line); these convert
+// to/from the wire-shape `string[]`. Validation mirrors the CLI's
+// ValidateAllowedFiles and the assignments-v1 schema so a bad value is caught
+// here, not by a rejected commit that breaks assignments.json.
 
-// The CLI rejects more than 100 patterns (AllowedFilesCap).
 export const ALLOWED_FILES_CAP = 100
 
-// Split textarea content into patterns: one per line, blank/whitespace-only
-// lines dropped. Only the line separator is stripped (a trailing CR from a
-// CRLF paste) — other whitespace is preserved verbatim, because the CLI and
-// the v1 schema store a pattern as-is and .gitignore treats an unescaped
-// trailing space as significant. Stripping it here would silently rewrite a
-// CLI-authored pattern on an unrelated re-save. Order is preserved (matching
-// is order-dependent: last match wins).
+// One pattern per line; blank lines dropped. Strips only the line separator
+// (trailing CR from CRLF) — other whitespace is significant in .gitignore and
+// stored verbatim by the CLI, so rewriting it would corrupt CLI-authored
+// patterns on re-save. Order is preserved (last match wins).
 export function parseAllowedFiles(raw: string): string[] {
   return raw
     .split("\n")
@@ -27,14 +18,13 @@ export function parseAllowedFiles(raw: string): string[] {
     .filter((line) => line.trim() !== "")
 }
 
-// Join stored patterns back into textarea content (one per line) for editing.
+// Join stored patterns into textarea content for editing.
 export function allowedFilesToText(patterns: string[] | undefined): string {
   return (patterns ?? []).join("\n")
 }
 
-// Validate the parsed patterns the way gh-teacher does. Returns an error
-// message for the form, or undefined when valid. (Empty list is valid — it
-// means "all files allowed".)
+// Mirror gh-teacher's ValidateAllowedFiles. Returns an error message, or
+// undefined when valid. Empty list is valid (all files allowed).
 export function validateAllowedFiles(patterns: string[]): string | undefined {
   if (patterns.length > ALLOWED_FILES_CAP) {
     return `Too many patterns (${patterns.length}) — ${ALLOWED_FILES_CAP} max.`
@@ -43,8 +33,6 @@ export function validateAllowedFiles(patterns: string[]): string | undefined {
     if (pattern.trim() === "") {
       return "A pattern must not be empty."
     }
-    // Newlines are the line separator, so they can't appear within a parsed
-    // pattern; a NUL byte still could, and the CLI rejects it.
     if (pattern.includes("\u0000")) {
       return "A pattern must not contain a NUL character."
     }
