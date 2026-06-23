@@ -460,7 +460,7 @@ const CreateAssignmentForm = ({
             )}
           </form.Field>
 
-          <div className="flex justify-between mb-4">
+          <div className="grid grid-cols-1 gap-4 mb-4 sm:grid-cols-2 sm:items-start">
             <div>
               <form.Field name="template_repo">
                 {(field) => (
@@ -473,14 +473,14 @@ const CreateAssignmentForm = ({
                         Template Repository
                       </label>
                     </div>
-                    <div className="flex">
+                    <div className="flex items-center">
                       <GitHub className="size-6 mr-2 text-[#ddd] opacity-50" />
                       <input
                         id={field.name}
                         name={field.name}
                         type="text"
                         placeholder="org-name/repo-name"
-                        className="input"
+                        className="input w-full"
                         value={field.state.value}
                         onBlur={field.handleBlur}
                         onChange={(e) => field.handleChange(e.target.value)}
@@ -508,7 +508,7 @@ const CreateAssignmentForm = ({
                       id={field.name}
                       name={field.name}
                       type="datetime-local"
-                      className="input"
+                      className="input w-full"
                       value={field.state.value}
                       onBlur={field.handleBlur}
                       onChange={(e) => field.handleChange(e.target.value)}
