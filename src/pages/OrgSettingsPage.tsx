@@ -9,6 +9,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { putRepoSecret, validateServiceToken } from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import useGetServiceTokenStatus from "@/hooks/useGetServiceTokenStatus"
+import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
 import {
   CalendarClock,
   CheckCircle2,
@@ -299,14 +300,29 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
 }
 
 const OrgSettingsPage = () => {
+  const { org } = useParams({ strict: false })
+  const { isTeacher } = useCourseTeacherAccess(org ?? "")
+
   return (
     <div className="min-h-screen">
       <Drawer>
         <DrawerToggle />
         <DrawerContent className="p-10 bg-[#fafafa] xl:px-50">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+            <p className="mt-1 text-sm text-base-content/60">
+              Organization-level configuration for{" "}
+              <span className="font-mono font-semibold">{org}</span>.
+            </p>
+          </div>
           <OrgSettingsPane />
         </DrawerContent>
-        <DrawerSidebar page="classes" settings selected="settings" />
+        <DrawerSidebar
+          page="classes"
+          settings
+          selected="settings"
+          isTeacher={isTeacher}
+        />
       </Drawer>
     </div>
   )
