@@ -42,6 +42,11 @@ export type Assignment = {
       user?: string
     }
   }
+  // Ordered .gitignore-style allowlist of files that belong to a submission
+  // (last match wins, `!` re-includes). Empty/absent means all files allowed.
+  // Enforced server-side by the autograde runner and `gh student submit`; the
+  // GUI only authors the patterns. Max 100; each non-empty with no NUL/newline.
+  allowed_files?: string[]
   tests?: AssignmentTest[]
 }
 
