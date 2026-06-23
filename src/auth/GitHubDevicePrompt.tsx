@@ -38,6 +38,13 @@ export function GitHubDevicePrompt({
   const [copied, setCopied] = useState(false)
   const [copyTick, setCopyTick] = useState(0)
 
+  // Reset stale "Copied!" when the code rotates.
+  const [copiedCode, setCopiedCode] = useState(device.userCode)
+  if (device.userCode !== copiedCode) {
+    setCopiedCode(device.userCode)
+    if (copied) setCopied(false)
+  }
+
   useEffect(() => {
     if (!copied) return
     const id = setTimeout(() => setCopied(false), 2000)

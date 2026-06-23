@@ -120,8 +120,7 @@ const useTriggerScoreCollection = (org: string) => {
         ? POLL_BACKOFF_INTERVAL_MS
         : POLL_INTERVAL_MS
     },
-    // Surface a persistent poll failure instead of retrying invisibly until the
-    // timeout (the app-wide QueryClient sets no retry policy).
+    // No internal retry; refetchInterval already polls.
     retry: false,
     staleTime: 0,
     gcTime: 0,
@@ -157,11 +156,11 @@ const useTriggerScoreCollection = (org: string) => {
   let phase: CollectScoresPhase = "idle"
   if (mutation.isPending) phase = "dispatching"
   else if (mutation.isError) phase = "failed"
-  // A persistent poll error (no retry) is a failure, not an endless spin.
-  else if (Boolean(dispatch) && runQuery.isError) phase = "failed"
   else if (runCompleted)
     phase = run?.conclusion === "success" ? "completed" : "failed"
   else if (timedOut) phase = "timeout"
+  // Transient poll errors self-heal via refetchInterval; stay "running" until
+  // the run finishes or the timeout fires.
   else if (dispatch) phase = "running"
 
   return {

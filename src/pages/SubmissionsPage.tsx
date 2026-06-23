@@ -28,8 +28,8 @@ import useGetLastCollectScoresRun from "@/hooks/useGetLastCollectScoresRun"
 import { COLLECT_SCORES_WORKFLOW } from "@/hooks/github/mutations"
 import { formatDistanceToNow } from "date-fns"
 
-// utility hook for forcing a component refresh; just grabs current time every X interval
-const useNow = (intervalMs = 30_000) => {
+// Re-renders on an interval to keep relative timestamps fresh; returns nothing.
+const usePeriodicRerender = (intervalMs = 30_000) => {
   const [, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -56,8 +56,8 @@ const SubmissionsPage = () => {
 
   const assignmentSubmitUrl = `${window.location.origin}/${org}/${classroom}/assignments/${assignment}/accept`
 
-  // simply having this here will trigger a re-render every 30s by default for the refresh label
-  useNow()
+  // Re-render every 30s so the relative "last collected"/"last updated" labels stay fresh.
+  usePeriodicRerender()
 
   const copySubmitLink = async () => {
     await navigator.clipboard.writeText(assignmentSubmitUrl)
