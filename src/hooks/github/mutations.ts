@@ -1391,6 +1391,49 @@ export async function validateServiceToken(
   }
 }
 
+export const COLLECT_SCORES_WORKFLOW = "collect-scores.yaml"
+
+/**
+ * Triggers the classroom50 config repo's `collect-scores.yaml` workflow via
+ * workflow_dispatch. This is the same nightly job that refreshes `scores.json`;
+ * dispatching it lets a teacher pull fresh submissions on demand instead of
+ * waiting for the cron run. The dispatch needs a git ref, so we read the repo's
+ * default branch first.
+ *
+ * @param classroom optional dispatch input to scope collection to one
+ *   classroom; callers currently omit it to collect org-wide.
+ */
+export async function triggerScoreCollection(
+  client: GitHubClient,
+  org: string | undefined,
+  classroom?: string,
+): Promise<{ dispatchedAt: string }> {
+  if (!org) throw new Error("org must be specified to collect scores")
+
+  const repo = await getRepo(client, org, "classroom50")
+  if (!repo) {
+    throw new Error(`${org}/classroom50 not found; run setup for this org first`)
+  }
+  const ref = repo.default_branch || "main"
+
+  // Capture the dispatch time *before* the POST so the run-poll's `created>=`
+  // filter can't miss a run that registers between the POST and now.
+  const dispatchedAt = new Date(Date.now() - 5000).toISOString()
+
+  await client.request(
+    `/repos/${org}/classroom50/actions/workflows/${COLLECT_SCORES_WORKFLOW}/dispatches`,
+    {
+      method: "POST",
+      body: {
+        ref,
+        inputs: classroom ? { classroom } : {},
+      },
+    },
+  )
+
+  return { dispatchedAt }
+}
+
 export async function putRepoSecret(
   client: GitHubClient,
   owner: string | undefined,
