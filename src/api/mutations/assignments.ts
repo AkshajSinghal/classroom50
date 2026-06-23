@@ -8,6 +8,7 @@ import { draftToTest, makeSetupTest } from "@/util/assignmentTests"
 import { buildDueFields } from "@/util/formatDate"
 import { studentRepoName } from "@/util/studentRepo"
 import { parseRunnerLabels } from "@/util/runners"
+import { parseAllowedFiles, validateAllowedFiles } from "@/util/allowedFiles"
 import {
   addRepositoryToTeam,
   createCommitForAssignment,
@@ -391,6 +392,19 @@ async function buildAssignmentEntry(
     entry.runtime = runtime
   }
 
+  // allowed_files: ordered .gitignore-style allowlist (Advanced Settings).
+  // Parse the raw textarea (one pattern per line), re-validate against the
+  // CLI's rules so a malformed value never reaches the committed file, and
+  // omit the field entirely when empty (matching how the CLI writes it).
+  const allowedFiles = parseAllowedFiles(input.allowed_files ?? "")
+  if (allowedFiles.length > 0) {
+    const allowedFilesError = validateAllowedFiles(allowedFiles)
+    if (allowedFilesError) {
+      throw new Error(`allowed_files: ${allowedFilesError}`)
+    }
+    entry.allowed_files = allowedFiles
+  }
+
   if (tests.length > 0) {
     entry.tests = tests
   }
@@ -717,6 +731,7 @@ export type CreateAssignmentInput = {
   container_image?: string
   container_user?: string
   setup_command?: string
+  allowed_files?: string
   tests: AssignmentTestDraft[]
 }
 export async function createAssignmentWithConflictRetry(

@@ -17,6 +17,11 @@ import {
   isSetupTest,
 } from "@/util/assignmentTests"
 import {
+  parseAllowedFiles,
+  allowedFilesToText,
+  validateAllowedFiles,
+} from "@/util/allowedFiles"
+import {
   containerRunnerWarning,
   isRunnerLabelShapeValid,
   verifyRunnerLabels,
@@ -42,6 +47,9 @@ export type CreateAssignmentFormValues = {
   container_image: string
   container_user: string
   setup_command: string
+  // Raw textarea content: one .gitignore-style pattern per line. Split into a
+  // string[] on save (parseAllowedFiles); joined back on read.
+  allowed_files: string
   tests: AssignmentTestDraft[]
 }
 
@@ -335,6 +343,7 @@ export const assignmentToFormValues = (
     container_image: assignment.runtime?.container?.image ?? "",
     container_user: assignment.runtime?.container?.user ?? "",
     setup_command: setupCommand,
+    allowed_files: allowedFilesToText(assignment.allowed_files),
     tests,
   }
 }
@@ -362,6 +371,7 @@ const CreateAssignmentForm = ({
       container_image: defaultValues?.container_image || "",
       container_user: defaultValues?.container_user || "",
       setup_command: defaultValues?.setup_command || "",
+      allowed_files: defaultValues?.allowed_files || "",
       tests: defaultValues?.tests || [],
     } satisfies CreateAssignmentFormValues,
     validators: {
@@ -383,6 +393,14 @@ const CreateAssignmentForm = ({
         // the CLI later refuses to parse).
         Object.assign(errors, validateTestDrafts(value.tests))
 
+        // Same rationale for allowed_files: mirror the CLI's cap/shape rules.
+        const allowedFilesError = validateAllowedFiles(
+          parseAllowedFiles(value.allowed_files),
+        )
+        if (allowedFilesError) {
+          errors.allowed_files = allowedFilesError
+        }
+
         return Object.keys(errors).length > 0 ? { fields: errors } : undefined
       },
     },
@@ -399,6 +417,7 @@ const CreateAssignmentForm = ({
         container_image: value.container_image.trim(),
         container_user: value.container_user.trim(),
         setup_command: value.setup_command.trim(),
+        allowed_files: value.allowed_files,
         tests: value.tests,
       })
     },
@@ -753,6 +772,57 @@ const CreateAssignmentForm = ({
                   </p>
                 </div>
               )}
+            </form.Field>
+
+            <form.Field name="allowed_files">
+              {(field) => {
+                const patterns = parseAllowedFiles(field.state.value)
+                const error = field.state.meta.errors[0]
+                return (
+                  <div className="mt-4">
+                    <label
+                      htmlFor={field.name}
+                      className="label block font-bold mb-1.5"
+                    >
+                      Allowed files
+                    </label>
+                    <textarea
+                      id={field.name}
+                      name={field.name}
+                      className="textarea w-full font-mono"
+                      rows={4}
+                      spellCheck={false}
+                      placeholder={"*\n!hello.py"}
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                    />
+                    <p className="mt-1.5 text-sm text-base-content/60">
+                      Ordered <code>.gitignore</code>-style patterns, one per
+                      line, defining which files belong to a submission (last
+                      match wins, <code>!</code> re-includes). E.g.{" "}
+                      <code>*</code> then <code>!hello.py</code> allows only{" "}
+                      <code>hello.py</code>. Leave blank to allow every file.
+                    </p>
+                    {error ? (
+                      <p
+                        role="alert"
+                        className="mt-1.5 flex items-center gap-1.5 text-sm text-error"
+                      >
+                        <AlertTriangle className="size-4 shrink-0" />
+                        {error}
+                      </p>
+                    ) : (
+                      patterns.length > 0 && (
+                        <p className="mt-1.5 text-xs text-base-content/50">
+                          {patterns.length} pattern
+                          {patterns.length === 1 ? "" : "s"}
+                        </p>
+                      )
+                    )}
+                  </div>
+                )
+              }}
             </form.Field>
           </details>
         </div>
