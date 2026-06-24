@@ -27,3 +27,9 @@ dist-ssr
 
 # Local dev launcher (machine-specific paths)
 dev.sh
+
+# Deploy keys / SSH private keys (never commit secrets)
+staging_deploy_key*
+*.pem
+id_ed25519*
+id_rsa*
