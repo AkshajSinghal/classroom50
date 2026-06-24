@@ -89,17 +89,16 @@ function parseTemplateRef(raw: string, defaultOwner: string): ParsedTemplate {
   }
 }
 
-// Advisory pre-flight verdict for a template ref the teacher is typing. Mirrors
-// the checks in resolveTemplate but never throws, powering the live note under
-// the Template Repository field. Uses the same OAuth token students use at
-// accept time.
+// Advisory pre-flight verdict for a template ref, mirroring resolveTemplate's
+// checks but returning a verdict instead of throwing. Uses the teacher's OAuth
+// token, which is the same one students use at accept time.
 export type TemplateAccessVerification =
   | { kind: "empty" }
   | { kind: "invalid"; message: string }
   | { kind: "not-visible"; owner: string; repo: string }
   | { kind: "not-template"; owner: string; repo: string }
   // No usable branch: no @branch given and the repo has no default branch
-  // (e.g. a fresh, commitless template). resolveTemplate rejects this too.
+  // (e.g. a commitless template). resolveTemplate rejects this too.
   | { kind: "no-branch"; owner: string; repo: string }
   | { kind: "private-out-of-org"; owner: string; repo: string }
   // Read denied (HTTP 403): the owning org likely restricts third-party apps.
@@ -116,9 +115,9 @@ export type TemplateAccessVerification =
       visibility: "public" | "private"
       inOrg: boolean
     }
-  // Reachable, but in a third-party org (not the classroom org, not the
-  // teacher's account). GitHub only enforces the org's app restriction at
-  // generate time, so we can't prove accept will work. Advise verifying.
+  // Reachable third-party org template (not the classroom org, not the
+  // teacher's account). The org's app restriction is only enforced at generate
+  // time, so accept may still fail.
   | {
       kind: "ok-verify"
       owner: string
@@ -189,7 +188,7 @@ export async function verifyTemplateAccess(
   const visibility = repo.private ? "private" : "public"
 
   // Third-party org (not the classroom org, not the teacher's account):
-  // readable, but the org may still block generate via app restrictions.
+  // readable, but generate may still be blocked by app restrictions.
   const isOwnAccount =
     viewerLogin !== undefined &&
     parsed.owner.toLowerCase() === viewerLogin.toLowerCase()
@@ -734,11 +733,10 @@ export async function createAssignmentRepo(params: {
         }
       }
 
-      // Template generation failed. Do NOT fall back to an empty repo: that
-      // produced broken repos (no template content or shim) that look
-      // "accepted" but can't be regenerated. A rate-limit also surfaces as 403,
-      // so rethrow it (retryable) before treating a 403 as a template problem.
-      // 403 = denied; 404 = not visible.
+      // Don't fall back to an empty repo: it looks "accepted" but has no
+      // template content/shim and can't be regenerated. A rate-limit also
+      // surfaces as 403, so rethrow it before treating 403/404 as a template
+      // problem. 403 = denied; 404 = not visible.
       if (err.isRateLimited) {
         throw err
       }
