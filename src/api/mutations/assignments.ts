@@ -98,9 +98,14 @@ export type TemplateAccessVerification =
   | { kind: "invalid"; message: string }
   | { kind: "not-visible"; owner: string; repo: string }
   | { kind: "not-template"; owner: string; repo: string }
+  // No usable branch: no @branch given and the repo has no default branch
+  // (e.g. a fresh, commitless template). resolveTemplate rejects this too.
+  | { kind: "no-branch"; owner: string; repo: string }
   | { kind: "private-out-of-org"; owner: string; repo: string }
   // Read denied (HTTP 403): the owning org likely restricts third-party apps.
   | { kind: "restricted"; owner: string; repo: string; policyUrl: string }
+  // GitHub rate limit hit; the check is inconclusive and should be retried.
+  | { kind: "rate-limited"; owner: string; repo: string }
   // Verification couldn't complete (network or unexpected error).
   | { kind: "unknown"; owner: string; repo: string }
   | {
@@ -143,10 +148,13 @@ export async function verifyTemplateAccess(
 
   let repo: GitHubRepo | null
   try {
-    // getRepo is 404-tolerant (returns null). A 403 means the owning org
-    // denied the read, so report it as restricted instead of erroring out.
+    // getRepo is 404-tolerant (returns null). A rate-limit also surfaces as 403,
+    // so check it before treating a 403 as an org restriction.
     repo = await getRepo(client, parsed.owner, parsed.repo)
   } catch (err) {
+    if (err instanceof GitHubAPIError && err.isRateLimited) {
+      return { kind: "rate-limited", owner: parsed.owner, repo: parsed.repo }
+    }
     if (err instanceof GitHubAPIError && err.isForbidden) {
       return {
         kind: "restricted",
@@ -175,6 +183,9 @@ export async function verifyTemplateAccess(
   }
 
   const branch = parsed.branch || repo.default_branch
+  if (!branch) {
+    return { kind: "no-branch", owner: parsed.owner, repo: parsed.repo }
+  }
   const visibility = repo.private ? "private" : "public"
 
   // Third-party org (not the classroom org, not the teacher's account):
@@ -725,7 +736,12 @@ export async function createAssignmentRepo(params: {
 
       // Template generation failed. Do NOT fall back to an empty repo: that
       // produced broken repos (no template content or shim) that look
-      // "accepted" but can't be regenerated. 403 = denied; 404 = not visible.
+      // "accepted" but can't be regenerated. A rate-limit also surfaces as 403,
+      // so rethrow it (retryable) before treating a 403 as a template problem.
+      // 403 = denied; 404 = not visible.
+      if (err.isRateLimited) {
+        throw err
+      }
       if (err.isForbidden || err.isNotFound) {
         const inOrg = templateOwner.toLowerCase() === owner.toLowerCase()
         throw inOrg
