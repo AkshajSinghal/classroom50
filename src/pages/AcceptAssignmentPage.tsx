@@ -1,7 +1,9 @@
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
   GraduationCap,
+  Loader2,
   UserPlus,
   UserRound,
 } from "lucide-react"
@@ -13,7 +15,12 @@ import { Link, useParams } from "@tanstack/react-router"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useGithubAuth } from "@/auth/useGithubAuth"
 import { useMutation } from "@tanstack/react-query"
-import { acceptAssignment } from "@/api/mutations/assignments"
+import { useState } from "react"
+import {
+  acceptAssignment,
+  type AcceptStepId,
+  type AcceptStepUpdate,
+} from "@/api/mutations/assignments"
 import usePagesAssignments from "@/hooks/usePagesAssignments"
 import { formatDueDate } from "@/util/formatDate"
 import { studentRepoName } from "@/util/studentRepo"
@@ -221,6 +228,139 @@ const modeMap = {
   group: "Group Assignment",
 }
 
+const ACCEPT_STEP_ORDER: { id: AcceptStepId; label: string }[] = [
+  { id: "account", label: "Checking your GitHub account" },
+  { id: "assignment", label: "Looking up the assignment" },
+  { id: "autograder", label: "Resolving the autograder" },
+  { id: "repo", label: "Creating your repository" },
+  { id: "access", label: "Granting you access" },
+  { id: "setup", label: "Setting up autograding" },
+]
+
+type StepState = Record<
+  AcceptStepId,
+  { status: AcceptStepUpdate["status"]; message?: string; error?: string }
+>
+
+const initialStepState: StepState = ACCEPT_STEP_ORDER.reduce((acc, step) => {
+  acc[step.id] = { status: "pending" }
+  return acc
+}, {} as StepState)
+
+const StatusIcon = ({
+  status,
+}: {
+  status: AcceptStepUpdate["status"]
+}) => {
+  if (status === "complete")
+    return <CheckCircle2 className="size-5 shrink-0 text-success" />
+  if (status === "running")
+    return <Loader2 className="size-5 shrink-0 animate-spin text-primary" />
+  if (status === "error")
+    return <AlertTriangle className="size-5 shrink-0 text-error" />
+  return <span className="size-2.5 rounded-full bg-base-300" />
+}
+
+const StepRow = ({
+  label,
+  state,
+}: {
+  label: string
+  state: StepState[AcceptStepId]
+}) => {
+  const text = state.error ?? state.message ?? label
+
+  return (
+    <div className="flex items-center gap-3 text-sm">
+      <span className="flex size-5 shrink-0 items-center justify-center">
+        <StatusIcon status={state.status} />
+      </span>
+      <span
+        className={
+          state.status === "pending"
+            ? "text-base-content/40"
+            : state.status === "error"
+              ? "text-error"
+              : "text-base-content/80"
+        }
+      >
+        {text}
+      </span>
+    </div>
+  )
+}
+
+const AcceptProgress = ({
+  steps,
+  defaultOpen = true,
+}: {
+  steps: StepState
+  defaultOpen?: boolean
+}) => {
+  const stepStates = ACCEPT_STEP_ORDER.map((step) => steps[step.id])
+  const completed = stepStates.filter((s) => s.status === "complete").length
+  const hasError = stepStates.some((s) => s.status === "error")
+  const isRunning = stepStates.some((s) => s.status === "running")
+  const allDone = completed === ACCEPT_STEP_ORDER.length
+
+  // Open by default while there's something to watch or review; collapsed once
+  // the accept has succeeded (defaultOpen=false). Students can toggle freely.
+  const [open, setOpen] = useState(defaultOpen)
+  // Force the panel open when a step fails so the failure is never hidden.
+  const expanded = open || hasError
+
+  const headerStatus: AcceptStepUpdate["status"] = hasError
+    ? "error"
+    : isRunning
+      ? "running"
+      : allDone
+        ? "complete"
+        : "pending"
+
+  const summary = hasError
+    ? "Setup failed — review the steps"
+    : allDone
+      ? "Setup complete"
+      : isRunning
+        ? "Setting up your repository…"
+        : "Setup progress"
+
+  return (
+    <div className="rounded-xl border border-base-300 bg-base-200/40">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={expanded}
+        className="flex w-full items-center justify-between gap-3 p-4 text-left"
+      >
+        <span className="flex items-center gap-3">
+          <StatusIcon status={headerStatus} />
+          <span className="font-medium">{summary}</span>
+        </span>
+
+        <span className="flex items-center gap-2 text-sm text-base-content/60">
+          <span>
+            {completed}/{ACCEPT_STEP_ORDER.length}
+          </span>
+          <ChevronDown
+            className={`size-4 transition-transform ${
+              expanded ? "rotate-180" : ""
+            }`}
+          />
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="flex flex-col gap-3 border-t border-base-300 p-5">
+          {ACCEPT_STEP_ORDER.map((step) => (
+            <StepRow key={step.id} label={step.label} state={steps[step.id]} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 const AcceptAssignmentPage = () => {
   const { org, classroom, assignment } = useParams({ strict: false })
   const client = useGitHubClient()
@@ -245,17 +385,28 @@ const AcceptAssignmentPage = () => {
   )
   const repoExistsAlready = checkedRepo?.name === expectedRepoName
 
+  const [steps, setSteps] = useState<StepState>(initialStepState)
+
   const acceptMutation = useMutation({
-    mutationFn: () =>
-      acceptAssignment({
+    mutationFn: () => {
+      setSteps(initialStepState)
+      return acceptAssignment({
         client,
         org,
         classroom,
         assignmentSlug: assignment,
-      }),
+        onStepUpdate: (update) =>
+          setSteps((prev) => ({
+            ...prev,
+            [update.id]: {
+              status: update.status,
+              message: update.message,
+              error: update.error,
+            },
+          })),
+      })
+    },
   })
-
-  const isBusy = acceptMutation.isPending
 
   if (loadingAssignments || isLoadingRepo || loadingOrgMembership) {
     return (
@@ -343,6 +494,12 @@ const AcceptAssignmentPage = () => {
               </div>
             </div>
 
+            {(acceptMutation.isPending ||
+              acceptMutation.isError ||
+              acceptMutation.isSuccess) && (
+              <AcceptProgress steps={steps} defaultOpen={false} />
+            )}
+
             {acceptMutation.isError && (
               <div className="alert alert-error items-start">
                 <AlertTriangle className="size-5 shrink-0" />
@@ -352,6 +509,10 @@ const AcceptAssignmentPage = () => {
                     {acceptMutation.error instanceof Error
                       ? acceptMutation.error.message
                       : "Something went wrong while accepting the assignment."}
+                  </div>
+                  <div className="mt-2 text-xs opacity-80">
+                    This is safe to retry — use the button below once you've
+                    addressed the issue above.
                   </div>
                 </div>
               </div>
@@ -382,41 +543,24 @@ const AcceptAssignmentPage = () => {
               </div>
             )}
 
-            {!acceptMutation.data && !repoExistsAlready && (
+            {!acceptMutation.data && !acceptMutation.isPending && (
               <button
                 type="button"
-                className="btn btn-primary w-full text-xl p-8"
-                disabled={isBusy || !username}
+                className={
+                  repoExistsAlready
+                    ? "btn btn-outline w-full text-lg p-6"
+                    : "btn btn-primary w-full text-xl p-8"
+                }
+                disabled={!username}
                 onClick={() => acceptMutation.mutate()}
               >
-                {acceptMutation.isPending ? (
-                  <>
-                    <span className="loading loading-spinner loading-sm" />
-                    Creating repository...
-                  </>
+                {repoExistsAlready ? (
+                  "Re-run setup"
                 ) : (
                   <>
                     <GitHubWhite className="size-6" />
                     Accept Assignment & Create Repository
                   </>
-                )}
-              </button>
-            )}
-
-            {repoExistsAlready && !acceptMutation.data && (
-              <button
-                type="button"
-                className="btn btn-outline w-full text-lg p-6"
-                disabled={isBusy || !username}
-                onClick={() => acceptMutation.mutate()}
-              >
-                {acceptMutation.isPending ? (
-                  <>
-                    <span className="loading loading-spinner loading-sm" />
-                    Re-running setup...
-                  </>
-                ) : (
-                  "Re-run setup"
                 )}
               </button>
             )}
