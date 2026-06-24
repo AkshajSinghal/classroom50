@@ -27,29 +27,16 @@ export const DrawerSidebar = ({
   selected = "",
   page = "",
   settings = false,
-  isTeacher = false,
 }) => {
   return (
     <div className="drawer-side bg-[#212a3a] text-white">
       <div className="flex flex-col min-h-full w-60 min-w-30 [&>div]:px-6">
         {page === "classes" ? (
-          <SidebarContentClasses
-            selected={selected}
-            settings={settings}
-            isTeacher={isTeacher}
-          />
+          <SidebarContentClasses selected={selected} settings={settings} />
         ) : page === "orgs" ? (
-          <SidebarContentOrgs
-            selected={selected}
-            settings={settings}
-            isTeacher={isTeacher}
-          />
+          <SidebarContentOrgs selected={selected} />
         ) : (
-          <SidebarContent
-            selected={selected}
-            settings={settings}
-            isTeacher={isTeacher}
-          />
+          <SidebarContent selected={selected} />
         )}
       </div>
     </div>
@@ -97,13 +84,14 @@ export const TeacherSidebarMenu = ({
   org,
   classroom,
   selected,
-  isTeacher,
 }: {
   org: string
   classroom: string
   selected: string
-  isTeacher?: boolean
 }) => {
+  // Placeholder while pending so items never flash in then out.
+  const { showTeacherUi, roleResolved } = useCourseTeacherAccess(org ?? "")
+
   return (
     <div className="py-4">
       <ul className="[&>a>li]:py-2 [&>a>li>span]:pl-2">
@@ -115,25 +103,35 @@ export const TeacherSidebarMenu = ({
             <span>Assignments</span>
           </li>
         </Link>
-        {isTeacher && (
-          <Link to={`/${org}/${classroom}/students`}>
-            <li
-              className={`flex px-2 ${selected === "students" && "bg-[#323b49] rounded-box"}`}
-            >
-              <UsersRound />
-              <span>Students</span>
-            </li>
-          </Link>
-        )}
-        {isTeacher && (
-          <Link to={`/${org}/${classroom}/edit`}>
-            <li
-              className={`flex px-2 ${selected === "settings" && "bg-[#323b49] rounded-box"}`}
-            >
-              <Settings />
-              <span>Settings</span>
-            </li>
-          </Link>
+        {!roleResolved ? (
+          <>
+            {[0, 1].map((i) => (
+              <li key={i} className="flex px-2 py-2">
+                <span className="skeleton h-4 w-24 bg-white/10" />
+              </li>
+            ))}
+          </>
+        ) : (
+          showTeacherUi && (
+            <>
+              <Link to={`/${org}/${classroom}/students`}>
+                <li
+                  className={`flex px-2 ${selected === "students" && "bg-[#323b49] rounded-box"}`}
+                >
+                  <UsersRound />
+                  <span>Students</span>
+                </li>
+              </Link>
+              <Link to={`/${org}/${classroom}/edit`}>
+                <li
+                  className={`flex px-2 ${selected === "settings" && "bg-[#323b49] rounded-box"}`}
+                >
+                  <Settings />
+                  <span>Settings</span>
+                </li>
+              </Link>
+            </>
+          )
         )}
       </ul>
     </div>
@@ -157,7 +155,18 @@ export const SidebarFooter = () => {
   const avatar_img = user?.avatar_url || duck
   const name = truncateName(user?.name || "") || user?.login || "User"
   const { org } = useParams({ strict: false })
-  const { isTeacher } = useCourseTeacherAccess(org)
+  const { isTeacher, isStudent, isLoading: roleLoading } =
+    useCourseTeacherAccess(org)
+  // Identity claim: only assert a role once resolved; placeholder while pending.
+  // Stays conservative (blank) on transient errors while nav stays optimistic —
+  // a deliberate split, not a bug.
+  const roleLabel = roleLoading
+    ? null
+    : isTeacher
+      ? "Teacher"
+      : isStudent
+        ? "Student"
+        : null
 
   const [menuOpen, setMenuOpen] = useState(false)
   const footerRef = useRef<HTMLDivElement | null>(null)
@@ -250,7 +259,11 @@ export const SidebarFooter = () => {
           {org ? (
             <div>
               <span className="text-[#aaa]">
-                {isTeacher ? "Teacher" : "Student"}
+                {roleLoading ? (
+                  <span className="skeleton inline-block h-3 w-16 align-middle bg-white/10" />
+                ) : (
+                  roleLabel
+                )}
               </span>
             </div>
           ) : null}
@@ -260,13 +273,7 @@ export const SidebarFooter = () => {
   )
 }
 
-export const SidebarContent = ({
-  selected,
-  isTeacher,
-}: {
-  selected: string
-  isTeacher?: boolean
-}) => {
+export const SidebarContent = ({ selected }: { selected: string }) => {
   const { org, classroom } = useParams({ strict: false })
   const { data: classData } = useGetClassroom(org, classroom)
 
@@ -275,24 +282,15 @@ export const SidebarContent = ({
       <ClassroomLogo />
       <AllClasses org={org} />
       <SidebarClassInfo classInfo={classData} />
-      <TeacherSidebarMenu
-        selected={selected}
-        org={org}
-        classroom={classroom}
-        isTeacher={isTeacher}
-      />
+      <TeacherSidebarMenu selected={selected} org={org} classroom={classroom} />
       <SidebarFooter />
     </>
   )
 }
 
-export const MyClasses = ({
-  settings = false,
-  selected = "",
-  isTeacher = false,
-}) => {
+export const MyClasses = ({ settings = false, selected = "" }) => {
   const { org } = useParams({ strict: false })
-  const { isLoading: roleLoading } = useCourseTeacherAccess(org ?? "")
+  const { showTeacherUi, roleResolved } = useCourseTeacherAccess(org ?? "")
   const onSettings = settings || selected === "settings"
   return (
     <div className="py-4">
@@ -303,9 +301,9 @@ export const MyClasses = ({
           >
             <BookText />
             <span>
-              {roleLoading ? (
+              {!roleResolved ? (
                 <span className="skeleton inline-block h-4 w-24 align-middle bg-white/10" />
-              ) : isTeacher ? (
+              ) : showTeacherUi ? (
                 "My Classes"
               ) : (
                 "My Assignments"
@@ -313,7 +311,7 @@ export const MyClasses = ({
             </span>
           </li>
         </Link>
-        {isTeacher && (
+        {showTeacherUi && (
           <Link to={`/${org}/settings`}>
             <li
               className={`flex px-2 rounded-box${onSettings ? " bg-[#323b49]" : ""}`}
@@ -329,8 +327,6 @@ export const MyClasses = ({
 }
 
 export const MyOrgs = ({ settings = false }) => {
-  const { org } = useParams({ strict: false })
-
   return (
     <div className="py-4">
       <ul className="[&>a>li]:py-2 [&>a>li>span]:pl-2">
@@ -347,25 +343,17 @@ export const MyOrgs = ({ settings = false }) => {
   )
 }
 
-export const SidebarContentClasses = ({
-  selected,
-  settings = false,
-  isTeacher = false,
-}) => {
+export const SidebarContentClasses = ({ selected, settings = false }) => {
   return (
     <>
       <ClassroomLogo />
-      <MyClasses
-        selected={selected}
-        settings={settings}
-        isTeacher={isTeacher}
-      />
+      <MyClasses selected={selected} settings={settings} />
       <SidebarFooter />
     </>
   )
 }
 
-export const SidebarContentOrgs = ({ selected, isTeacher }) => {
+export const SidebarContentOrgs = ({ selected }) => {
   return (
     <>
       <ClassroomLogo />
