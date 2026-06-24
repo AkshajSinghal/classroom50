@@ -12,7 +12,7 @@ name: Mirror to public repo
 #   - `wiki/` is pushed to two wiki repos — one commit per sync,
 #     replacing the previous wiki contents on each:
 #       * `foundation50/classroom50.wiki.git`   (public)
-#       * `foundation50/classroom50-dev.wiki.git` (internal preview)
+#       * `foundation50/classroom50-cli.wiki.git` (internal preview)
 #     The dev wiki lets the team review rendered pages on this repo
 #     before they propagate to the public one.
 #
@@ -27,7 +27,7 @@ name: Mirror to public repo
 #      Settings → Secrets and variables → Actions.
 #   3. Enable the wiki and create at least one page via the GitHub
 #      UI on BOTH `foundation50/classroom50` and
-#      `foundation50/classroom50-dev` (Settings → Features → Wikis).
+#      `foundation50/classroom50-cli` (Settings → Features → Wikis).
 #      GitHub doesn't initialize the wiki repo until the first page
 #      exists, and the wiki sync step will fail until then.
 #
