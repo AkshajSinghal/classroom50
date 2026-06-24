@@ -58,6 +58,9 @@ type CreateAssignmentFormProps = {
   // Org slug for verifying a runner label against the org's self-hosted
   // runners. When absent, verification never blocks.
   org?: string
+  // Classroom slug, used by the template pre-flight to check whether the
+  // classroom team already has read on an in-org private template.
+  classroom?: string
 }
 const FormErrors = ({ form }) => (
   <form.Subscribe selector={(state) => [state.errors]}>
@@ -318,6 +321,7 @@ const CreateAssignmentForm = ({
   edit = false,
   loading = false,
   org,
+  classroom,
 }: CreateAssignmentFormProps) => {
   const form = useForm({
     defaultValues: {
@@ -435,7 +439,9 @@ const CreateAssignmentForm = ({
           <div className="grid grid-cols-1 gap-4 mb-4 sm:grid-cols-2 sm:items-start">
             <div>
               <form.Field name="template_repo">
-                {(field) => <TemplateField field={field} org={org} />}
+                {(field) => (
+                  <TemplateField field={field} org={org} classroom={classroom} />
+                )}
               </form.Field>
             </div>
             <div>
