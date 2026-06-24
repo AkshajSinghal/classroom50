@@ -36,6 +36,7 @@ import {
 import { getAuthenticatedUser } from "../queries/users"
 import { acceptPendingOrgInvite } from "./users"
 import {
+  TemplateAccessError,
   inOrgTemplateError,
   outOfOrgTemplateError,
 } from "@/util/templateAccessError"
@@ -46,6 +47,101 @@ import { githubOrgOAuthPolicyUrl } from "@/auth/constants"
 // PR. Mirrors the CLI's `gh student accept` commit; keep in lockstep.
 const ACCEPT_COMMIT_SUBJECT =
   "Initialize .classroom50.yaml and autograde workflow (gh student accept)"
+
+// A student-facing accept failure. The accept page renders `error.message`
+// verbatim, so this keeps a raw GitHub "Not Found" from reaching a student.
+class AcceptStepError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message)
+    this.name = "AcceptStepError"
+    if (cause !== undefined) {
+      this.cause = cause
+    }
+  }
+}
+
+// Ordered phases of the accept flow, surfaced as a progress checklist in the
+// GUI.
+export type AcceptStepId =
+  | "account"
+  | "assignment"
+  | "autograder"
+  | "repo"
+  | "access"
+  | "setup"
+
+export type AcceptStepStatus = "pending" | "running" | "complete" | "error"
+
+type AcceptStepUpdate = {
+  id: AcceptStepId
+  status: AcceptStepStatus
+  // The label shown for the step; on resolution it can override the default
+  // (e.g. "Repository already exists").
+  message?: string
+  error?: string
+}
+
+type OnAcceptStepUpdate = (update: AcceptStepUpdate) => void
+
+// Run one accept step, emitting progress around it. Its core job is to
+// translate a raw GitHubAPIError into a student-facing, actionable message
+// (`actions`) so a bare "Not Found" never reaches the student; already-friendly
+// errors pass through untouched.
+async function withAcceptStep<T>(
+  params: {
+    id: AcceptStepId
+    label: string
+    actions: string
+    onStepUpdate?: OnAcceptStepUpdate
+    doneMessage?: string
+  },
+  fn: () => Promise<T>,
+): Promise<T> {
+  const { id, label, actions, onStepUpdate, doneMessage } = params
+
+  onStepUpdate?.({ id, status: "running", message: label })
+
+  try {
+    const result = await fn()
+    onStepUpdate?.({ id, status: "complete", message: doneMessage ?? label })
+    return result
+  } catch (err) {
+    const fail = (message: string, cause?: unknown): never => {
+      onStepUpdate?.({ id, status: "error", error: message })
+      throw new AcceptStepError(message, cause)
+    }
+
+    if (err instanceof TemplateAccessError || err instanceof AcceptStepError) {
+      onStepUpdate?.({ id, status: "error", error: err.message })
+      throw err
+    }
+    if (err instanceof GitHubAPIError) {
+      console.error(`Accept step "${label}" failed:`, err)
+
+      if (err.isRateLimited) {
+        fail(
+          `${label} hit GitHub's rate limit. Wait a minute, then try accepting again.`,
+          err,
+        )
+      }
+      if (err.isUnauthorized) {
+        fail(
+          `${label} failed because your GitHub session expired (HTTP 401). Sign out and sign back in, then accept again.`,
+          err,
+        )
+      }
+      fail(`${label} failed (HTTP ${err.status}). ${actions}`, err)
+    }
+    // Unexpected non-GitHub error (network/parse/etc.): surface it on the step
+    // so the checklist row leaves "running" instead of spinning forever.
+    onStepUpdate?.({
+      id,
+      status: "error",
+      error: err instanceof Error ? err.message : "Unexpected error",
+    })
+    throw err
+  }
+}
 
 // Parse a `--template` ref — `<owner>/<repo>[@<branch>]` or a bare `<repo>`
 // (owner defaults to the org). Mirrors the CLI's parseTemplateRef so the GUI
@@ -1149,60 +1245,109 @@ async function provisionAcceptedRepo(params: {
   branch: string
   metadataYaml: string
   autogradeYaml: string
+  onStepUpdate?: OnAcceptStepUpdate
 }) {
-  const { client, org, repo, username, branch, metadataYaml, autogradeYaml } =
-    params
-
-  await patchRepoSurface(client, org, repo.name)
-
-  await addAdminCollaborator({
+  const {
     client,
-    owner: org,
-    repo: repo.name,
+    org,
+    repo,
     username,
-  })
-
-  // Land the metadata + autograde shim, retrying through GitHub's post-generate
-  // git-data lag (see commitAcceptFilesWithFreshRepoRetry).
-  await commitAcceptFilesWithFreshRepoRetry({
-    client,
-    owner: org,
-    repo: repo.name,
     branch,
     metadataYaml,
     autogradeYaml,
-  })
+    onStepUpdate,
+  } = params
+
+  await withAcceptStep(
+    {
+      id: "access",
+      label: "Granting you access to your repository",
+      actions: `Your repository ${org}/${repo.name} was created, but adding you (${username}) as a collaborator failed. This usually means your GitHub username changed or you left ${org}. Confirm you're a member of ${org}, then use "Re-run setup".`,
+      doneMessage: "Granted you access to your repository",
+      onStepUpdate,
+    },
+    async () => {
+      await patchRepoSurface(client, org, repo.name)
+      await addAdminCollaborator({
+        client,
+        owner: org,
+        repo: repo.name,
+        username,
+      })
+    },
+  )
+
+  // Land the metadata + autograde shim, retrying through GitHub's post-generate
+  // git-data lag (see commitAcceptFilesWithFreshRepoRetry).
+  await withAcceptStep(
+    {
+      id: "setup",
+      label: "Setting up autograding",
+      actions: `Your repository ${org}/${repo.name} exists, but writing the setup files to branch "${branch}" failed. The repository may still be initializing — wait a minute and use "Re-run setup".`,
+      doneMessage: "Autograding configured",
+      onStepUpdate,
+    },
+    () =>
+      commitAcceptFilesWithFreshRepoRetry({
+        client,
+        owner: org,
+        repo: repo.name,
+        branch,
+        metadataYaml,
+        autogradeYaml,
+      }),
+  )
 }
 export async function acceptAssignment(params: {
   client: GitHubClient
   org: string
   classroom: string
   assignmentSlug: string
+  onStepUpdate?: OnAcceptStepUpdate
 }): Promise<AcceptAssignmentResult> {
-  const { client, org, classroom, assignmentSlug } = params
+  const { client, org, classroom, assignmentSlug, onStepUpdate } = params
 
-  const user = await getAuthenticatedUser(client)
+  const user = await withAcceptStep(
+    {
+      id: "account",
+      label: "Checking your GitHub account",
+      actions:
+        "Couldn't read your GitHub account. Sign out and sign back in, then accept again.",
+      doneMessage: "Checked your GitHub account",
+      onStepUpdate,
+    },
+    () => getAuthenticatedUser(client),
+  )
   const username = user.login
 
-  console.log("accepting pending org invite...")
+  // Best-effort: auto-accept a pending org invite. Failures are ignored (the
+  // student may already be a member), so this isn't a tracked step.
   await acceptPendingOrgInvite(client, org)
 
-  console.log("fetching assignment from pages...")
-  const assignment = await fetchAssignmentFromPages(
-    org,
-    classroom,
-    assignmentSlug,
+  const assignment = await withAcceptStep(
+    {
+      id: "assignment",
+      label: `Looking up ${assignmentSlug}`,
+      actions: `Couldn't load assignment "${assignmentSlug}" for ${org}/${classroom}. Check the link, or ask your instructor to confirm the assignment is published.`,
+      doneMessage: `Found assignment ${assignmentSlug}`,
+      onStepUpdate,
+    },
+    () => fetchAssignmentFromPages(org, classroom, assignmentSlug),
   )
 
   const sourceOwner = assignment.template?.owner
   const sourceRepo = assignment.template?.repo
   const sourceBranch = assignment.template?.branch ?? "main"
 
-  console.log("resolving autograder workflow...")
-  const autogradeYaml = await resolveAutograderWorkflow(
-    org,
-    classroom,
-    assignment.autograder,
+  const autogradeYaml = await withAcceptStep(
+    {
+      id: "autograder",
+      label: "Resolving the autograder",
+      actions: `Couldn't resolve the autograder for "${assignmentSlug}". Ask your instructor to confirm it's published, then accept again.`,
+      doneMessage: "Resolved the autograder",
+      onStepUpdate,
+    },
+    () => resolveAutograderWorkflow(org, classroom, assignment.autograder),
   )
 
   const studentRepoNameValue = studentRepoName(
@@ -1211,7 +1356,6 @@ export async function acceptAssignment(params: {
     username,
   )
 
-  console.log("creating classroom50 yaml...")
   const metadataYaml = createClassroom50Yaml({
     classroom,
     assignment: assignment.slug,
@@ -1220,36 +1364,67 @@ export async function acceptAssignment(params: {
     sourceBranch,
   })
 
-  console.log("creating repo from template...")
-  const created = await createAssignmentRepo({
-    client,
-    templateOwner: sourceOwner,
-    templateRepo: sourceRepo,
-    owner: org,
-    name: studentRepoNameValue,
-    fallbackBranch: sourceBranch || "main",
-  })
+  const created = await withAcceptStep(
+    {
+      id: "repo",
+      label: "Creating your repository",
+      actions: `Couldn't create ${org}/${studentRepoNameValue}. Confirm you're a member of ${org} and ask your instructor to verify the assignment's template repository is configured correctly, then accept again.`,
+      doneMessage: `Created ${org}/${studentRepoNameValue}`,
+      onStepUpdate,
+    },
+    () =>
+      createAssignmentRepo({
+        client,
+        templateOwner: sourceOwner,
+        templateRepo: sourceRepo,
+        owner: org,
+        name: studentRepoNameValue,
+        fallbackBranch: sourceBranch || "main",
+      }),
+  )
 
   if (created.kind === "already-accepted") {
     // The repo exists, but a prior accept may have failed AFTER creating it but
     // BEFORE committing the metadata/workflow (seeding lag, transient 5xx),
-    // leaving a repo that looks accepted but never autogrades. Heal it: if
-    // .classroom50.yaml is missing, re-run the idempotent provisioning;
-    // otherwise it's genuinely already accepted — leave it untouched.
-    const provisioned = await repoContentsPathExists(
-      client,
-      org,
-      created.repo.name,
-      ".classroom50.yaml",
-    )
+    // leaving a repo that looks accepted but never autogrades. Heal it: a repo
+    // is only "genuinely accepted" when BOTH the metadata and the autograde
+    // workflow landed (they're written in one commit, so a missing workflow
+    // means the prior accept failed mid-flow). If either is missing, re-run the
+    // idempotent provisioning.
+    const [hasMetadata, hasWorkflow] = await Promise.all([
+      repoContentsPathExists(client, org, created.repo.name, ".classroom50.yaml"),
+      repoContentsPathExists(
+        client,
+        org,
+        created.repo.name,
+        ".github/workflows/autograde.yaml",
+      ),
+    ])
+    const provisioned = hasMetadata && hasWorkflow
 
     if (provisioned) {
+      // Genuinely already accepted — mark the remaining steps complete so the
+      // checklist doesn't look stuck.
+      onStepUpdate?.({
+        id: "repo",
+        status: "complete",
+        message: `Repository already exists: ${org}/${created.repo.name}`,
+      })
+      onStepUpdate?.({ id: "access", status: "complete" })
+      onStepUpdate?.({ id: "setup", status: "complete" })
       return {
         status: "already-accepted",
         repo: created.repo,
         cloneCommand: `git clone ${created.repo.ssh_url}`,
       }
     }
+
+    // Half-finished prior accept — re-provision to repair it.
+    onStepUpdate?.({
+      id: "repo",
+      status: "complete",
+      message: `Found incomplete setup: ${org}/${created.repo.name}`,
+    })
 
     await provisionAcceptedRepo({
       client,
@@ -1259,6 +1434,7 @@ export async function acceptAssignment(params: {
       branch: created.repo.default_branch || sourceBranch,
       metadataYaml,
       autogradeYaml,
+      onStepUpdate,
     })
 
     return {
@@ -1283,6 +1459,7 @@ export async function acceptAssignment(params: {
     branch: targetBranch,
     metadataYaml,
     autogradeYaml,
+    onStepUpdate,
   })
 
   return {
