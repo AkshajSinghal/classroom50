@@ -12,10 +12,16 @@ Everything substantive (runner workflow, `runner.py`, classroom-default and per-
 
 The shim listens on two events:
 
-- **`push` to `main`** — every commit grades. The runner creates the `submit/<UTC-timestamp>-<short-sha>` tag at the pushed SHA. This is what `gh student submit` and a plain `git push origin main` both end up using.
+- **`push` to `main`** — every commit grades, **except the acceptance commit**. The runner creates the `submit/<UTC-timestamp>-<short-sha>` tag at the pushed SHA. This is what `gh student submit` and a plain `git push origin main` both end up using.
 - **`push` of a `submit/*` tag** — manual or web-UI tag pushes work too. The runner detects the tag-trigger and reuses `github.ref_name` instead of creating a new tag.
 
 Tags pushed by the runner with the workflow's `GITHUB_TOKEN` don't fire workflows (GitHub's anti-recursion rule), so the auto-tag step never causes a second run.
+
+### The acceptance commit is not graded
+
+Accepting an assignment lands `.classroom50.yaml` + the autograde shim in one student-authored commit, which fires this workflow — but that commit is the student *accepting*, not *submitting*, so there's nothing to grade. The `setup` job detects it (the pushed commit is the commit that introduced `.classroom50.yaml`, with nothing stacked on top) and **skips tagging, grading, and the release** — no `submit/*` tag, no `0/0` "acceptance" release. The run still appears in the Actions tab with a `notice` explaining there's nothing to grade yet.
+
+Detection reuses the same accept-commit contract as the Feedback PR baseline (the structural `.classroom50.yaml` marker, not a commit subject — see ["How the baseline is identified"](#feedback-pull-requests)), and is **fail-open**: any uncertainty (shallow clone that can't deepen, unreadable git history, a Pages fetch failure) grades rather than risk dropping a real submission. The first `gh student submit` always stacks a fresh commit on top (it commits with `--allow-empty`), so it is never mistaken for the acceptance and always grades. Templates whose default branch isn't `main` don't fire the workflow at accept time at all; their first graded run is the first `gh student submit` to `main`, which is correctly a submission.
 
 ## The `result.json` contract
 
