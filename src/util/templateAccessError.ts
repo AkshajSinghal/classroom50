@@ -1,8 +1,6 @@
-// A template-generate failure at accept time, carrying a student-facing,
-// plain-text message. Students can't change a template org's settings or the
-// classroom team's access themselves, so every message points them at their
-// instructor. The accept page renders the message as-is (no buttons/links): a
-// student isn't the actor who can approve an OAuth app or grant team read.
+// A template-generate failure at accept time, with a plain-text message the
+// accept page renders as-is. Messages point students at their instructor —
+// they can't approve an OAuth app or grant team read themselves.
 export class TemplateAccessError extends Error {
   constructor(message: string) {
     super(message)

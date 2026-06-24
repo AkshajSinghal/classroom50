@@ -23,9 +23,9 @@ import {
 } from "./formFieldHelpers"
 import { InlineNote, InlineCode as Code } from "@/components/InlineNote"
 
-// Advisory, non-blocking pre-flight for the Template Repository field: verifies
-// the OAuth token can reach the typed repo and annotates the field (never
-// rewrites it), mirroring RunnerField.
+// Advisory, non-blocking pre-flight for the Template Repository field: checks
+// the OAuth token can reach the typed repo and annotates the field without
+// rewriting it. Mirrors RunnerField.
 export const TemplateField = ({
   field,
   org,
@@ -42,8 +42,8 @@ export const TemplateField = ({
   const trimmedValue = rawValue.trim()
   const debouncedValue = useDebouncedValue(trimmedValue, 500)
 
-  // Wait for the viewer: viewerLogin decides ok vs ok-verify, so verifying
-  // mid-load would show a verdict that flips once the profile resolves.
+  // viewerLogin decides ok vs ok-verify, so wait for it — verifying mid-load
+  // would show a verdict that flips once the profile resolves.
   const enabled = Boolean(client && org && debouncedValue && !isLoadingUser)
 
   const verificationQuery = useQuery({
@@ -55,8 +55,8 @@ export const TemplateField = ({
     retry: false,
   })
 
-  // Don't show "Checking…" while the debounce drains on a cleared field —
-  // there's nothing to verify once the live value is empty.
+  // A cleared field has nothing to verify, so don't show "Checking…" while the
+  // debounce drains.
   const pending =
     enabled &&
     trimmedValue !== "" &&
@@ -66,8 +66,7 @@ export const TemplateField = ({
     enabled && !pending ? (verificationQuery.data ?? null) : null
 
   // For an in-org private template, check whether the classroom team already
-  // has read on it. If so the field shows a plain checkmark; if not, the note
-  // explains the grant happens automatically on create. Advisory only.
+  // has read. Drives the checkmark-vs-"added on create" message below.
   const inOrgPrivateTemplate =
     verification?.kind === "ok" &&
     verification.inOrg &&
@@ -98,8 +97,8 @@ export const TemplateField = ({
     retry: false,
   })
 
-  // While the team check is in flight (or unavailable), fall back to the
-  // "will be granted on create" message rather than blocking the verdict.
+  // Default to the "will be granted on create" message until the team check
+  // resolves, rather than blocking the verdict.
   const teamHasAccess = teamAccessEnabled
     ? teamAccessQuery.data === true
     : undefined
@@ -151,8 +150,7 @@ const TemplateVerificationNote = ({
   pending: boolean
   org?: string
   // For an in-org private template: true if the classroom team already has
-  // read, false if it will be granted on create, undefined if not applicable
-  // or the check hasn't resolved.
+  // read, false if it'll be granted on create, undefined if N/A or unresolved.
   teamHasAccess?: boolean
 }) => {
   if (pending) {
@@ -170,11 +168,9 @@ const TemplateVerificationNote = ({
 
   switch (verification.kind) {
     case "ok": {
-      // In-org private template: students can't read it directly, but the
-      // classroom team is what grants access. If the team already has read,
-      // show a plain checkmark; otherwise explain the grant happens
-      // automatically when the assignment is created (see
-      // tryGrantTeamTemplateRead).
+      // Students can't read an in-org private template directly; the classroom
+      // team grant is what lets them. Show whether that grant already exists or
+      // will be added on create (see tryGrantTeamTemplateRead).
       if (verification.inOrg && verification.visibility === "private") {
         if (teamHasAccess === true) {
           return (
@@ -285,15 +281,15 @@ const TemplateVerificationNote = ({
       )
 
     default: {
-      // Exhaustiveness guard: a new verdict kind becomes a compile error.
+      // A new verdict kind becomes a compile error here.
       const _never: never = verification
       return _never
     }
   }
 }
 
-// Adds the optional OAuth-policy link to an InlineNote; the verdict switch
-// passes a `policy` for the cases where an org owner must approve the app.
+// Wraps InlineNote with an optional OAuth-policy link for the cases where an
+// org owner must approve the app.
 const Note = ({
   tone,
   icon,
