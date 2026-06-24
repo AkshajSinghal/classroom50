@@ -229,6 +229,8 @@ const modeMap = {
   group: "Group Assignment",
 }
 
+// Pending-state placeholders; once a step emits, the live withAcceptStep
+// message (assignments.ts) overrides these, so they only need loose parity.
 const ACCEPT_STEP_ORDER: { id: AcceptStepId; label: string }[] = [
   { id: "account", label: "Checking your GitHub account" },
   { id: "assignment", label: "Looking up the assignment" },
@@ -353,7 +355,6 @@ const AcceptProgress = ({ steps }: { steps: StepState }) => {
   )
 }
 
-// Celebrate a freshly created assignment repo.
 const fireConfetti = () => {
   const base = {
     spread: 80,
