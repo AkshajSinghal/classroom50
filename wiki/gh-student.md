@@ -81,7 +81,7 @@ Under the hood:
 
 The commit is authored with the user's GitHub login and noreply email (`<id>+<login>@users.noreply.github.com`) via `git -c user.name=... -c user.email=...`, so a fresh shell with no global git identity still submits cleanly. `GIT_AUTHOR_*` / `GIT_COMMITTER_*` environment variables override these defaults.
 
-Tagging is the runner's job — the autograde workflow's first step creates `submit/<UTC-timestamp>-<short-sha>` at the just-pushed SHA. That gives each submission an immutable history entry plus its own Release without `gh student submit` having to know anything about tags.
+Tagging is the runner's job — the autograde workflow's first step creates `submit/<UTC-timestamp>-<short-sha>` at the just-pushed SHA. That gives each submission an immutable history entry plus its own Release without `gh student submit` having to know anything about tags. The one exception is the **acceptance commit** (the commit `gh student accept` lands to set the repo up): it fires the workflow but has no work to grade, so the runner detects it and skips tagging, grading, and the release. Your first real `gh student submit` is always graded.
 
 The hardcoded `main` push target means templates whose default branch is `master`/`develop` end up with a separate `main` after the first submit.
 

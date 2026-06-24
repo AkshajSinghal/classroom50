@@ -105,7 +105,7 @@ When submit finishes, two URLs are printed:
 
 A few useful properties:
 
-- **Every push grades.** Whether through `gh student submit` or `git push`, every commit on `main` triggers a graded run with its own tag and release. The latest release on the page is always the most recent submission.
+- **Every push grades.** Whether through `gh student submit` or `git push`, every commit on `main` triggers a graded run with its own tag and release — except the very first commit from accepting the assignment, which has nothing to grade and is skipped automatically. The latest release on the page is always the most recent submission.
 - **History is preserved.** Submissions overlay as commits on top of the existing `main`; prior commits stay reachable for review.
 - **No git config required.** The commit is authored with your GitHub login and noreply email, passed via `git -c user.name=... -c user.email=...`, so a fresh shell with no global git identity still submits cleanly. `GIT_AUTHOR_*` / `GIT_COMMITTER_*` environment variables override these defaults if you want a custom identity.
 - **Build artifacts are excluded.** Only tracked files plus untracked-not-ignored files are submitted, so build outputs and unrelated local files don't end up in the snapshot.
