@@ -484,6 +484,30 @@ export async function getTeam(
   }
 }
 
+// Whether the classroom team already has access to a repo (the in-org private
+// template). GitHub returns 2xx when the team has access and 404 when it
+// doesn't; any other error propagates so a transient failure isn't misread as
+// "no access". The team slug mirrors the create/grant path (classroom50-<slug>).
+export async function teamHasRepoAccess(
+  client: GitHubClient,
+  input: { org: string; classroom: string; owner: string; repo: string },
+): Promise<boolean> {
+  const { org, classroom, owner, repo } = input
+  const teamSlug = `classroom50-${classroom}`
+
+  try {
+    await client.request(
+      `/orgs/${org}/teams/${teamSlug}/repos/${owner}/${repo}`,
+    )
+    return true
+  } catch (error) {
+    if (error instanceof GitHubAPIError && error.status === 404) {
+      return false
+    }
+    throw error
+  }
+}
+
 export async function ensureTeam(
   client: GitHubClient,
   org: string,

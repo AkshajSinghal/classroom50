@@ -15,6 +15,7 @@ import {
   verifyTemplateAccess,
   type TemplateAccessVerification,
 } from "@/api/mutations/assignments"
+import { teamHasRepoAccess } from "@/hooks/github/queries"
 import {
   useDebouncedValue,
   normalizeOnBlur,
@@ -28,9 +29,11 @@ import { InlineNote, InlineCode as Code } from "@/components/InlineNote"
 export const TemplateField = ({
   field,
   org,
+  classroom,
 }: {
   field: StringField
   org?: string
+  classroom?: string
 }) => {
   const client = useOptionalGitHubClient()
   const { user, isLoadingUser } = useGithubAuth()
@@ -59,6 +62,48 @@ export const TemplateField = ({
     trimmedValue !== "" &&
     (trimmedValue !== debouncedValue || verificationQuery.isFetching)
 
+  const verification =
+    enabled && !pending ? (verificationQuery.data ?? null) : null
+
+  // For an in-org private template, check whether the classroom team already
+  // has read on it. If so the field shows a plain checkmark; if not, the note
+  // explains the grant happens automatically on create. Advisory only.
+  const inOrgPrivateTemplate =
+    verification?.kind === "ok" &&
+    verification.inOrg &&
+    verification.visibility === "private"
+      ? { owner: verification.owner, repo: verification.repo }
+      : null
+  const teamAccessEnabled = Boolean(
+    client && org && classroom && inOrgPrivateTemplate,
+  )
+
+  const teamAccessQuery = useQuery({
+    queryKey: [
+      "template-team-access",
+      org,
+      classroom,
+      inOrgPrivateTemplate?.owner ?? null,
+      inOrgPrivateTemplate?.repo ?? null,
+    ],
+    queryFn: () =>
+      teamHasRepoAccess(client!, {
+        org: org!,
+        classroom: classroom!,
+        owner: inOrgPrivateTemplate!.owner,
+        repo: inOrgPrivateTemplate!.repo,
+      }),
+    enabled: teamAccessEnabled,
+    staleTime: 30_000,
+    retry: false,
+  })
+
+  // While the team check is in flight (or unavailable), fall back to the
+  // "will be granted on create" message rather than blocking the verdict.
+  const teamHasAccess = teamAccessEnabled
+    ? teamAccessQuery.data === true
+    : undefined
+
   return (
     <>
       <label
@@ -82,11 +127,10 @@ export const TemplateField = ({
       />
 
       <TemplateVerificationNote
-        verification={
-          enabled && !pending ? (verificationQuery.data ?? null) : null
-        }
+        verification={verification}
         pending={pending}
         org={org}
+        teamHasAccess={teamHasAccess}
       />
 
       <p className="label pt-2">
@@ -101,10 +145,15 @@ const TemplateVerificationNote = ({
   verification,
   pending,
   org,
+  teamHasAccess,
 }: {
   verification: TemplateAccessVerification | null
   pending: boolean
   org?: string
+  // For an in-org private template: true if the classroom team already has
+  // read, false if it will be granted on create, undefined if not applicable
+  // or the check hasn't resolved.
+  teamHasAccess?: boolean
 }) => {
   if (pending) {
     return (
@@ -121,16 +170,27 @@ const TemplateVerificationNote = ({
 
   switch (verification.kind) {
     case "ok": {
-      // In-org private template: students can't read it directly, but creating
-      // the assignment grants the classroom team read on it (see
-      // tryGrantTeamTemplateRead), so say that rather than implying instant
-      // access.
+      // In-org private template: students can't read it directly, but the
+      // classroom team is what grants access. If the team already has read,
+      // show a plain checkmark; otherwise explain the grant happens
+      // automatically when the assignment is created (see
+      // tryGrantTeamTemplateRead).
       if (verification.inOrg && verification.visibility === "private") {
+        if (teamHasAccess === true) {
+          return (
+            <Note tone="success" icon={CheckCircle2}>
+              Private template in {verification.owner} (branch{" "}
+              <Code>{verification.branch}</Code>). The classroom team already
+              has read access — students can copy it.
+            </Note>
+          )
+        }
         return (
           <Note tone="success" icon={CheckCircle2}>
             Private template in {verification.owner} (branch{" "}
-            <Code>{verification.branch}</Code>). Creating the assignment grants
-            the classroom team read access so students can copy it.
+            <Code>{verification.branch}</Code>). The classroom team doesn't have
+            access yet; it'll be added automatically when you create the
+            assignment, so students can copy it.
           </Note>
         )
       }
