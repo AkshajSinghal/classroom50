@@ -94,9 +94,8 @@ export const TeacherSidebarMenu = ({
   // the items visible while the role is still resolving and only hide them on
   // a definitive non-teacher result, so a transient loading/error state can't
   // make "Students"/"Settings" flicker out.
-  const { isTeacher, isStudent, isBlocked } = useCourseTeacherAccess(org ?? "")
-  const roleResolvedAsNonTeacher = isStudent || isBlocked
-  const showTeacherItems = isTeacher || !roleResolvedAsNonTeacher
+  const { isStudent, isBlocked } = useCourseTeacherAccess(org ?? "")
+  const showTeacherItems = !(isStudent || isBlocked)
 
   return (
     <div className="py-4">
