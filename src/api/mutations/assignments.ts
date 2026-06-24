@@ -89,9 +89,9 @@ function parseTemplateRef(raw: string, defaultOwner: string): ParsedTemplate {
   }
 }
 
-// Advisory pre-flight verdict for a template ref, mirroring resolveTemplate's
-// checks but returning a verdict instead of throwing. Uses the teacher's OAuth
-// token, which is the same one students use at accept time.
+// Advisory pre-flight verdict for a template ref: mirrors resolveTemplate's
+// checks but returns a verdict instead of throwing. Uses the teacher's OAuth
+// token — the same one students use at accept time.
 export type TemplateAccessVerification =
   | { kind: "empty" }
   | { kind: "invalid"; message: string }
@@ -115,9 +115,9 @@ export type TemplateAccessVerification =
       visibility: "public" | "private"
       inOrg: boolean
     }
-  // Reachable third-party org template (not the classroom org, not the
-  // teacher's account). The org's app restriction is only enforced at generate
-  // time, so accept may still fail.
+  // Reachable third-party org template (neither the classroom org nor the
+  // teacher's account). The org's app restriction only bites at generate time,
+  // so accept may still fail.
   | {
       kind: "ok-verify"
       owner: string
@@ -733,10 +733,9 @@ export async function createAssignmentRepo(params: {
         }
       }
 
-      // Don't fall back to an empty repo: it looks "accepted" but has no
-      // template content/shim and can't be regenerated. A rate-limit also
-      // surfaces as 403, so rethrow it before treating 403/404 as a template
-      // problem. 403 = denied; 404 = not visible.
+      // Don't fall back to an empty repo — it looks "accepted" but has no
+      // template content and can't be regenerated. A rate-limit also surfaces
+      // as 403, so rethrow it before treating 403/404 as a template problem.
       if (err.isRateLimited) {
         throw err
       }
