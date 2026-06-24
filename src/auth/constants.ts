@@ -22,17 +22,6 @@ export const githubOrgOAuthPolicyUrl = (org: string) =>
 export const GITHUB_OAUTH_CLIENT_ID: string =
   import.meta.env.VITE_GITHUB_CLIENT_ID ?? ""
 
-// Per-app authorization page where a user can review or request org access.
-// GitHub keys this page by the app's client ID, so reuse GITHUB_OAUTH_CLIENT_ID
-// rather than hardcoding a separate value. Returns null when no client ID is
-// configured so callers can omit the link.
-export const githubOAuthAppConnectionUrl = (
-  clientId: string = GITHUB_OAUTH_CLIENT_ID,
-): string | null =>
-  clientId
-    ? `https://github.com/settings/connections/applications/${clientId}`
-    : null
-
 export const GITHUB_OAUTH_WORKER_BASE =
   import.meta.env.VITE_GITHUB_OAUTH_WORKER_BASE ??
   "https://tiny-bonus-7dc1.fifty-foundation.workers.dev"

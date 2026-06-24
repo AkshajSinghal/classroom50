@@ -20,10 +20,9 @@ import {
   type StringField,
 } from "./formFieldHelpers"
 
-// Advisory pre-flight check for the Template Repository field. As the teacher
-// types `<owner>/<repo>`, it verifies the OAuth token (the same one students
-// use) can reach the repo. Non-blocking: it annotates but never rewrites the
-// value, mirroring RunnerField.
+// Advisory, non-blocking pre-flight for the Template Repository field: verifies
+// the OAuth token can reach the typed repo and annotates the field (never
+// rewrites it), mirroring RunnerField.
 export const TemplateField = ({
   field,
   org,
@@ -38,8 +37,7 @@ export const TemplateField = ({
   const trimmedValue = rawValue.trim()
   const debouncedValue = useDebouncedValue(trimmedValue, 500)
 
-  // Wait for the viewer to load before verifying: viewerLogin distinguishes an
-  // own-account template (ok) from a third-party org (ok-verify), so checking
+  // Wait for the viewer: viewerLogin decides ok vs ok-verify, so verifying
   // mid-load would show a verdict that flips once the profile resolves.
   const enabled = Boolean(client && org && debouncedValue && !isLoadingUser)
 
@@ -258,8 +256,7 @@ const TemplateVerificationNote = ({
       )
 
     default: {
-      // Exhaustiveness guard: a new TemplateAccessVerification kind without a
-      // case here is a compile error rather than a silent blank note.
+      // Exhaustiveness guard: a new verdict kind becomes a compile error.
       const _never: never = verification
       return _never
     }
