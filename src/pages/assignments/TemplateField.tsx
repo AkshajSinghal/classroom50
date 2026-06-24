@@ -35,7 +35,8 @@ export const TemplateField = ({
   const { user, isLoadingUser } = useGithubAuth()
   const viewerLogin = user?.login
   const rawValue = field.state.value
-  const debouncedValue = useDebouncedValue(rawValue.trim(), 500)
+  const trimmedValue = rawValue.trim()
+  const debouncedValue = useDebouncedValue(trimmedValue, 500)
 
   // Wait for the viewer to load before verifying: viewerLogin distinguishes an
   // own-account template (ok) from a third-party org (ok-verify), so checking
@@ -53,7 +54,7 @@ export const TemplateField = ({
 
   const pending =
     enabled &&
-    (rawValue.trim() !== debouncedValue || verificationQuery.isFetching)
+    (trimmedValue !== debouncedValue || verificationQuery.isFetching)
 
   return (
     <>
