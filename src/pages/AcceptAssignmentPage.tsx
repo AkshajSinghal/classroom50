@@ -16,6 +16,7 @@ import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useGithubAuth } from "@/auth/useGithubAuth"
 import { useMutation } from "@tanstack/react-query"
 import { useState } from "react"
+import confetti from "canvas-confetti"
 import {
   acceptAssignment,
   type AcceptStepId,
@@ -361,6 +362,14 @@ const AcceptProgress = ({
   )
 }
 
+// A simple two-burst confetti pop from the top corners, angled in toward the
+// center, to celebrate a freshly created assignment repo.
+const fireConfetti = () => {
+  const base = { spread: 80, startVelocity: 55, ticks: 200, zIndex: 1000 }
+  confetti({ ...base, particleCount: 60, origin: { x: 0, y: 0 }, angle: -55 })
+  confetti({ ...base, particleCount: 60, origin: { x: 1, y: 0 }, angle: -125 })
+}
+
 const AcceptAssignmentPage = () => {
   const { org, classroom, assignment } = useParams({ strict: false })
   const client = useGitHubClient()
@@ -405,6 +414,13 @@ const AcceptAssignmentPage = () => {
             },
           })),
       })
+    },
+    onSuccess: (result) => {
+      // Celebrate a freshly created repo; an already-accepted repo isn't a new
+      // milestone, so it skips the confetti.
+      if (result.status === "created") {
+        fireConfetti()
+      }
     },
   })
 
