@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
+import type { ReactNode } from "react"
 import {
   AlertTriangle,
   CheckCircle2,
@@ -19,6 +20,7 @@ import {
   normalizeOnBlur,
   type StringField,
 } from "./formFieldHelpers"
+import { InlineNote, InlineCode } from "@/components/InlineNote"
 
 // Advisory, non-blocking pre-flight for the Template Repository field: verifies
 // the OAuth token can reach the typed repo and annotates the field (never
@@ -56,26 +58,25 @@ export const TemplateField = ({
 
   return (
     <>
-      <div>
-        <label htmlFor={field.name} className="label font-bold mb-2">
-          Template Repository
-        </label>
-      </div>
-      <div className="flex items-center">
-        <GitHub className="size-6 mr-2 text-[#ddd] opacity-50" />
-        <input
-          id={field.name}
-          name={field.name}
-          type="text"
-          autoComplete="off"
-          spellCheck={false}
-          placeholder="<owner>/<repo>"
-          className="input w-full"
-          value={rawValue}
-          onBlur={normalizeOnBlur(field)}
-          onChange={(e) => field.handleChange(e.target.value)}
-        />
-      </div>
+      <label
+        htmlFor={field.name}
+        className="label font-bold mb-2 flex items-center gap-1.5"
+      >
+        <GitHub className="size-4 text-[#ddd] opacity-70" />
+        Template Repository
+      </label>
+      <input
+        id={field.name}
+        name={field.name}
+        type="text"
+        autoComplete="off"
+        spellCheck={false}
+        placeholder="<owner>/<repo>"
+        className="input w-full"
+        value={rawValue}
+        onBlur={normalizeOnBlur(field)}
+        onChange={(e) => field.handleChange(e.target.value)}
+      />
 
       <TemplateVerificationNote
         verification={
@@ -113,146 +114,98 @@ const TemplateVerificationNote = ({
 
   if (!verification || verification.kind === "empty") return null
 
+  const fallbackOrg = org ?? "your org"
+
   switch (verification.kind) {
-    case "ok":
+    case "ok": {
+      const where = verification.inOrg ? "" : ` in ${verification.owner}`
       return (
-        <p className="mt-1.5 flex items-start gap-1.5 text-sm text-success">
-          <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
-          <span>
-            {verification.visibility === "public" ? "Public" : "Private"}{" "}
-            template
-            {verification.inOrg ? "" : ` in ${verification.owner}`}. Students can
-            access it (branch{" "}
-            <code className="text-xs">{verification.branch}</code>).
-          </span>
-        </p>
+        <Note tone="success" icon={CheckCircle2}>
+          {verification.visibility === "public" ? "Public" : "Private"} template
+          {where}, branch <Code>{verification.branch}</Code>. Students can access
+          it.
+        </Note>
       )
+    }
 
     case "ok-verify":
       return (
-        <div className="mt-1.5 flex items-start gap-1.5 text-sm text-warning">
-          <Info className="mt-0.5 size-4 shrink-0" />
-          <div>
-            <p>
-              {verification.visibility === "public" ? "Public" : "Private"}{" "}
-              template in{" "}
-              <span className="font-medium">{verification.owner}</span> (branch{" "}
-              <code className="text-xs">{verification.branch}</code>). Reachable,
-              but {verification.owner} may restrict third-party apps. If so,
-              students can't copy it until an owner approves the Classroom 50
-              app.
-            </p>
-            <a
-              href={verification.policyUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-1 inline-flex items-center gap-1 link link-warning"
-            >
-              Check {verification.owner}'s OAuth app policy
-              <ExternalLink className="size-3.5 shrink-0" />
-            </a>
-          </div>
-        </div>
+        <Note
+          tone="warning"
+          icon={Info}
+          policy={{ owner: verification.owner, href: verification.policyUrl }}
+        >
+          Reachable in {verification.owner} (branch{" "}
+          <Code>{verification.branch}</Code>). If {verification.owner} restricts
+          third-party apps, students can't copy it until an owner approves
+          Classroom 50.
+        </Note>
       )
 
     case "invalid":
       return (
-        <p className="mt-1.5 flex items-center gap-1.5 text-sm text-error">
-          <AlertTriangle className="size-4 shrink-0" />
+        <Note tone="error" icon={AlertTriangle}>
           {verification.message}
-        </p>
+        </Note>
       )
 
     case "not-visible":
       return (
-        <p className="mt-1.5 flex items-start gap-1.5 text-sm text-error">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          <span>
-            {verification.owner}/{verification.repo} isn't visible to your
-            account. Make it public or copy it into {org ?? "your org"}.
-          </span>
-        </p>
+        <Note tone="error" icon={AlertTriangle}>
+          {verification.owner}/{verification.repo} isn't visible to you. Make it
+          public or copy it into {fallbackOrg}.
+        </Note>
       )
 
     case "not-template":
       return (
-        <p className="mt-1.5 flex items-start gap-1.5 text-sm text-error">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          <span>
-            {verification.owner}/{verification.repo} isn't a template repo.
-            Enable Settings → "Template repository" on it.
-          </span>
-        </p>
+        <Note tone="error" icon={AlertTriangle}>
+          {verification.owner}/{verification.repo} isn't a template repo. Enable
+          it in the repo's Settings.
+        </Note>
       )
 
     case "restricted":
       return (
-        <div className="mt-1.5 flex items-start gap-1.5 text-sm text-error">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          <div>
-            <p>
-              {verification.owner} denied access to {verification.owner}/
-              {verification.repo}. It likely restricts third-party apps, so
-              students won't be able to copy it until an owner approves the
-              Classroom 50 app.
-            </p>
-            <a
-              href={verification.policyUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-1 inline-flex items-center gap-1 link link-error"
-            >
-              Check {verification.owner}'s OAuth app policy
-              <ExternalLink className="size-3.5 shrink-0" />
-            </a>
-          </div>
-        </div>
+        <Note
+          tone="error"
+          icon={AlertTriangle}
+          policy={{ owner: verification.owner, href: verification.policyUrl }}
+        >
+          {verification.owner} blocked access to {verification.repo}. It
+          restricts third-party apps; an owner must approve Classroom 50.
+        </Note>
       )
 
     case "unknown":
       return (
-        <p className="mt-1.5 flex items-start gap-1.5 text-sm text-base-content/60">
-          <HelpCircle className="mt-0.5 size-4 shrink-0" />
-          <span>
-            Couldn't verify {verification.owner}/{verification.repo} access right
-            now. It'll be checked again when students accept.
-          </span>
-        </p>
+        <Note tone="neutral" icon={HelpCircle}>
+          Couldn't verify {verification.owner}/{verification.repo} now. It's
+          rechecked when students accept.
+        </Note>
       )
 
     case "private-out-of-org":
       return (
-        <p className="mt-1.5 flex items-start gap-1.5 text-sm text-error">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          <span>
-            {verification.owner}/{verification.repo} is private and outside{" "}
-            {org ?? "your org"}, so students can't be granted access. Make it
-            public or copy it into {org ?? "your org"}.
-          </span>
-        </p>
+        <Note tone="error" icon={AlertTriangle}>
+          {verification.owner}/{verification.repo} is private and outside{" "}
+          {fallbackOrg}. Make it public or copy it into {fallbackOrg}.
+        </Note>
       )
 
     case "no-branch":
       return (
-        <p className="mt-1.5 flex items-start gap-1.5 text-sm text-error">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          <span>
-            {verification.owner}/{verification.repo} has no default branch. Push
-            an initial commit, or specify a branch as {verification.owner}/
-            {verification.repo}@&lt;branch&gt;.
-          </span>
-        </p>
+        <Note tone="error" icon={AlertTriangle}>
+          {verification.owner}/{verification.repo} has no default branch. Push a
+          commit, or add <Code>@&lt;branch&gt;</Code>.
+        </Note>
       )
 
     case "rate-limited":
       return (
-        <p className="mt-1.5 flex items-start gap-1.5 text-sm text-base-content/60">
-          <HelpCircle className="mt-0.5 size-4 shrink-0" />
-          <span>
-            Hit a GitHub rate limit checking {verification.owner}/
-            {verification.repo}. Try again shortly.
-          </span>
-        </p>
+        <Note tone="neutral" icon={HelpCircle}>
+          GitHub rate limit hit. Try again shortly.
+        </Note>
       )
 
     default: {
@@ -262,3 +215,34 @@ const TemplateVerificationNote = ({
     }
   }
 }
+
+const Code = InlineCode
+
+// Adds the optional OAuth-policy link to an InlineNote; the verdict switch
+// passes a `policy` for the cases where an org owner must approve the app.
+const Note = ({
+  tone,
+  icon,
+  policy,
+  children,
+}: {
+  tone: "success" | "warning" | "error" | "neutral"
+  icon: typeof Info
+  policy?: { owner: string; href: string }
+  children: ReactNode
+}) => (
+  <InlineNote tone={tone} icon={icon} className="mt-1.5">
+    <span>{children}</span>
+    {policy && (
+      <a
+        href={policy.href}
+        target="_blank"
+        rel="noreferrer"
+        className="mt-1 flex items-center gap-1 font-semibold underline"
+      >
+        Check {policy.owner}'s OAuth app policy
+        <ExternalLink className="size-3.5 shrink-0" />
+      </a>
+    )}
+  </InlineNote>
+)
