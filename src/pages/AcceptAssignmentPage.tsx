@@ -302,11 +302,12 @@ const AcceptProgress = ({
   const isRunning = stepStates.some((s) => s.status === "running")
   const allDone = completed === ACCEPT_STEP_ORDER.length
 
-  // Open by default while there's something to watch or review; collapsed once
-  // the accept has succeeded (defaultOpen=false). Students can toggle freely.
-  const [open, setOpen] = useState(defaultOpen)
-  // Force the panel open when a step fails so the failure is never hidden.
-  const expanded = open || hasError
+  // Open while there's something to watch (running) or review (error); collapse
+  // once complete. A student's explicit toggle takes precedence over this
+  // lifecycle default. `defaultOpen` seeds the initial state only.
+  const [userOpen, setUserOpen] = useState<boolean | null>(null)
+  const lifecycleOpen = isRunning || hasError || (defaultOpen && !allDone)
+  const expanded = userOpen ?? lifecycleOpen
 
   const headerStatus: AcceptStepStatus = hasError
     ? "error"
@@ -327,7 +328,7 @@ const AcceptProgress = ({
     <div className="rounded-xl border border-base-300 bg-base-200/40">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setUserOpen(!expanded)}
         aria-expanded={expanded}
         className="flex w-full items-center justify-between gap-3 p-4 text-left"
       >
@@ -361,7 +362,13 @@ const AcceptProgress = ({
 
 // Celebrate a freshly created assignment repo.
 const fireConfetti = () => {
-  const base = { spread: 80, startVelocity: 55, ticks: 200, zIndex: 1000 }
+  const base = {
+    spread: 80,
+    startVelocity: 55,
+    ticks: 200,
+    zIndex: 1000,
+    disableForReducedMotion: true,
+  }
   confetti({ ...base, particleCount: 60, origin: { x: 0, y: 0 }, angle: -55 })
   confetti({ ...base, particleCount: 60, origin: { x: 1, y: 0 }, angle: -125 })
 }
