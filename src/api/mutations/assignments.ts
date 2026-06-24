@@ -132,6 +132,13 @@ async function withAcceptStep<T>(
       }
       fail(`${label} failed (HTTP ${err.status}). ${actions}`, err)
     }
+    // Unexpected non-GitHub error (network/parse/etc.): surface it on the step
+    // so the checklist row leaves "running" instead of spinning forever.
+    onStepUpdate?.({
+      id,
+      status: "error",
+      error: err instanceof Error ? err.message : "Unexpected error",
+    })
     throw err
   }
 }
