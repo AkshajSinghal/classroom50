@@ -501,7 +501,7 @@ const AcceptAssignmentPage = () => {
                 : "No due date"}
             </span>
           </div>
-          <h1 className="text-2xl font-bold tracking-tight pt-6">
+          <h1 className="text-2xl font-bold tracking-tight pt-2">
             {assignmentData?.name}
           </h1>
           <h2 className="text-lg">
@@ -520,11 +520,11 @@ const AcceptAssignmentPage = () => {
             </div>
           )}
 
-          <div className="divider mt-0" />
+          <div className="divider my-0" />
 
           <label className="label text-lg">Signed in as</label>
 
-          <div className="flex flex-col gap-8">
+          <div className="flex flex-col gap-4">
             <UserInfo user={user} />
 
             <div className="flex gap-2 flex-col bg-[#fafafa] p-4 rounded-xl border border-[#ddd]">
@@ -568,7 +568,7 @@ const AcceptAssignmentPage = () => {
             )}
 
             {acceptMutation.data && (
-              <div className="alert alert-success items-start p-8">
+              <div className="alert alert-success items-start">
                 <CheckCircle2 className="size-5 shrink-0" />
                 <div className="min-w-0">
                   <div className="font-bold">
@@ -594,7 +594,7 @@ const AcceptAssignmentPage = () => {
 
             {(acceptMutation.data || repoExistsAlready) && (
               <a
-                className="btn btn-primary w-full text-xl p-8"
+                className="btn btn-primary w-full text-xl p-6"
                 href={
                   acceptMutation?.data?.repo.html_url ||
                   `https://www.github.com/${org}/${checkedRepo?.name}`
@@ -612,7 +612,7 @@ const AcceptAssignmentPage = () => {
               !acceptMutation.isPending && (
                 <button
                   type="button"
-                  className="btn btn-primary w-full text-xl p-8"
+                  className="btn btn-primary w-full text-xl p-6"
                   disabled={!username || acceptMutation.isPending}
                   onClick={() => acceptMutation.mutate()}
                 >
