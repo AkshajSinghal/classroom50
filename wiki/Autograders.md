@@ -372,28 +372,12 @@ Anything beyond apt + setup-X actions reaches for `runtime.container`. The image
 
 `user` is recommended for any image that doesn't run as root by default (cs50/cli, most maintained Docker Hub images). Without it, `actions/checkout` fails with `EACCES: permission denied` when writing to GitHub Actions' temp directory at `/__w/_temp/`. Accepts `docker run --user` syntax: a name (`root`, `appuser`), a numeric uid (`0`, `1000`), or `uid:gid` (`1000:1000`). Internally translated to `container.options: --user <value>` because GitHub Actions doesn't accept `container.user` directly.
 
-For a private image, supply pull credentials. Passwords must be `${{ secrets.NAME }}` references — raw token strings are rejected so a teacher can't accidentally paste a token into git history.
-
-```json
-{
-  "container": {
-    "image": "ghcr.io/private/grader:latest",
-    "user": "root",
-    "credentials": {
-      "username": "cs50-bot",
-      "password": "${{ secrets.GHCR_TOKEN }}"
-    }
-  }
-}
-```
-
-> **Known limitation: private-image pulls are currently unverified end-to-end.** The runner workflow ships the container block to the grade job via `container: ${{ fromJSON(needs.setup.outputs.container) }}`, and GitHub Actions does **not** re-evaluate `${{ }}` expressions inside `fromJSON`-derived data — the literal text `${{ secrets.GHCR_TOKEN }}` flows through to docker login as the password instead of the secret value. Public images (no `credentials` block) work as designed; private images need a follow-up architectural change that splits credentials out of the JSON path. Until then, prefer public registry images or pre-pull private images via a separate workflow before grading.
+The image must be **publicly pullable**. The grade job runs inside the student repo, where GitHub Actions provides no way to deliver a private-registry pull secret safely, so private images are not supported — publish your grading image publicly (e.g. a public `ghcr.io/<org>/<name>`).
 
 | Field | Type | Notes |
 |---|---|---|
-| `image` | string | Required. Validated against an injection-safe character set. |
+| `image` | string | Required. Must be publicly pullable. Validated against an injection-safe character set. |
 | `user` | string | Optional but recommended for non-root images. `^[A-Za-z0-9_][A-Za-z0-9_.-]{0,31}(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,31})?$`. |
-| `credentials` | object | Optional. `username` + `password`; password must be a `${{ secrets.NAME }}` reference. |
 
 ## Customization layers
 
