@@ -342,24 +342,29 @@ const EnrolledStudents = ({
 
   // Resend (or first-time invite for "none"). Returns true on success. "expired"
   // carries an invitation id we cancel first; "none" is a plain create.
-  const resendForStudent = async (student: Student): Promise<boolean> => {
+  // Returns what actually happened so callers don't over-report: "invited" =
+  // a fresh invite was sent; "pending"/"active" = no-op (already has a valid
+  // invite / already a member); "skipped" = couldn't attempt (missing id).
+  type ResendOutcome = "invited" | "pending" | "active" | "skipped"
+
+  const resendForStudent = async (student: Student): Promise<ResendOutcome> => {
     const inviteeId = Number(student.github_id)
     if (!Number.isFinite(inviteeId) || inviteeId <= 0) {
       setWarning(
         student.username,
         `Can't re-send the invite for ${student.username}: missing GitHub id. Re-add them to the roster.`,
       )
-      return false
+      return "skipped"
     }
 
     const status = statusByUsername.get(student.username)
-    await resendOrgInvitation(client, {
+    const result = await resendOrgInvitation(client, {
       org,
       username: student.username,
       inviteeId,
       invitationId: status?.invitationId,
     })
-    return true
+    return result.state
   }
 
   const resendMutation = useMutation({
@@ -391,7 +396,8 @@ const EnrolledStudents = ({
   // don't keep burning the invite cap (and risking more partial failures) once
   // GitHub has started throttling.
   const handleResendAll = async () => {
-    let succeeded = 0
+    let resent = 0
+    let alreadyValid = 0
     const failures: string[] = []
     let rateLimited = false
     let stoppedAt = 0
@@ -399,8 +405,11 @@ const EnrolledStudents = ({
     for (const student of nonMemberStudents) {
       stoppedAt++
       try {
-        const ok = await resendForStudent(student)
-        if (ok) succeeded++
+        const outcome = await resendForStudent(student)
+        if (outcome === "invited") resent++
+        // "pending"/"active" = the student already has a valid invite or is a
+        // member; no invite was re-sent, so don't count it as a failure either.
+        else if (outcome === "pending" || outcome === "active") alreadyValid++
         else failures.push(student.username)
       } catch (err) {
         failures.push(student.username)
@@ -415,12 +424,14 @@ const EnrolledStudents = ({
     invalidateInviteQueries()
 
     const remaining = nonMemberStudents.length - stoppedAt
+    const alreadyNote =
+      alreadyValid > 0 ? ` ${alreadyValid} already had a pending invite.` : ""
     const summaryKey = "__resend_all__"
     if (rateLimited) {
       const failedList = failures.length ? ` (${failures.join(", ")})` : ""
       setWarning(
         summaryKey,
-        `Re-sent ${succeeded} before GitHub rate-limited the request; ` +
+        `Re-sent ${resent} before GitHub rate-limited the request; ` +
           `${failures.length} failed${failedList}` +
           (remaining > 0 ? `, ${remaining} not attempted` : "") +
           `. Wait a bit and try again.`,
@@ -428,12 +439,12 @@ const EnrolledStudents = ({
     } else if (failures.length === 0) {
       setWarning(
         summaryKey,
-        `Re-sent ${succeeded} invite${succeeded === 1 ? "" : "s"}.`,
+        `Re-sent ${resent} invite${resent === 1 ? "" : "s"}.${alreadyNote}`,
       )
     } else {
       setWarning(
         summaryKey,
-        `Re-sent ${succeeded} of ${nonMemberStudents.length}; ${failures.length} failed (${failures.join(", ")}).`,
+        `Re-sent ${resent} of ${nonMemberStudents.length}; ${failures.length} failed (${failures.join(", ")}).${alreadyNote}`,
       )
     }
   }
