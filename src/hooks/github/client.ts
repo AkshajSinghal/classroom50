@@ -87,7 +87,7 @@ export function createGitHubClient(args: {
   }
 
   return {
-    async request<T>(path, options) {
+    async request<T>(path: string, options?: GitHubRequestOptions) {
       const res = await requestInternal(path, options)
 
       if (res.status === 204 || res.status === 205) {
@@ -103,8 +103,9 @@ export function createGitHubClient(args: {
       return JSON.parse(text) as T
     },
 
-    async requestRaw(path, options) {
+    async requestRaw(path: string, options?: GitHubRequestOptions) {
       const res = await requestInternal(path, {
+        method: options?.method ?? "GET",
         ...options,
         accept: options?.accept ?? "application/vnd.github.raw+json",
       })

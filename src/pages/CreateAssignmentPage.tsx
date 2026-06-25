@@ -58,9 +58,9 @@ const CreateAssignmentPage = () => {
     onSuccess: (result) => {
       queryClient.invalidateQueries({
         queryKey: githubKeys.jsonFile(
-          org,
+          org ?? "",
           "classroom50",
-          `${classroom}/assignments.json`,
+          `${classroom ?? ""}/assignments.json`,
         ),
       })
       // Assignment created. If the template team grant failed, stay on the
@@ -70,9 +70,20 @@ const CreateAssignmentPage = () => {
         window.scrollTo({ top: 0, behavior: "smooth" })
         return
       }
-      navigate({ to: `/${org}/${classroom}/assignments` })
+      navigate({
+        to: "/$org/$classroom/assignments",
+        params: { org: org ?? "", classroom: classroom ?? "" },
+      })
     },
   })
+
+  if (!org || !classroom) {
+    return (
+      <div className="alert alert-error m-10">
+        Missing organization or classroom.
+      </div>
+    )
+  }
   return (
     <div className="min-h-screen">
       <Drawer>
@@ -98,7 +109,10 @@ const CreateAssignmentPage = () => {
                 type="button"
                 className="btn btn-sm"
                 onClick={() =>
-                  navigate({ to: `/${org}/${classroom}/assignments` })
+                  navigate({
+                    to: "/$org/$classroom/assignments",
+                    params: { org, classroom },
+                  })
                 }
               >
                 Go to assignments
