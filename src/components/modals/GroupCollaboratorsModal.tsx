@@ -91,9 +91,8 @@ export function GroupCollaboratorsModal({
 }: GroupCollaboratorsModalProps) {
   const dialogRef = useRef<HTMLDialogElement | null>(null)
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Synchronous re-entrancy guard: isSaving derives from mutation.isPending,
-  // which updates a tick late, so a rapid double-click could otherwise start two
-  // overlapping save passes (double DELETE -> spurious failure).
+  // Synchronous re-entrancy guard: isSaving (from mutation.isPending) updates a
+  // tick late, so a rapid double-click could start two overlapping saves.
   const savingRef = useRef(false)
   const { user } = useGithubAuth()
 
@@ -101,7 +100,7 @@ export function GroupCollaboratorsModal({
     data: collaborators,
     isLoading: loadingCollaborators,
     refetch: refetchCollaborators,
-  } = useGetRepoCollaborators(org, repoName)
+  } = useGetRepoCollaborators(org, repoName, { enabled: open })
 
   const addCollaboratorMutation = useAddRepoCollaborator()
   const removeCollaboratorMutation = useRemoveRepoCollaborator()
@@ -114,9 +113,8 @@ export function GroupCollaboratorsModal({
     () => new Set(),
   )
 
-  // max_group_size includes the owner, so the addable count is one less
-  // (size 2 = owner + 1 collaborator). Fall back to the schema minimum when the
-  // size is unknown, so a group assignment never locks to owner-only.
+  // max_group_size includes the owner, so the addable count is one less. Fall
+  // back to the schema minimum so an unknown size never locks to owner-only.
   const maxCollaborators = Math.max((maxGroupSize ?? GROUP_SIZE_MIN) - 1, 0)
 
   const ownerLoginResolved = normalizeUsername(ownerLogin)
@@ -125,7 +123,7 @@ export function GroupCollaboratorsModal({
   // effective permission from the repo object (which includes inherited
   // org-owner admin) rather than the affiliation=direct collaborator list,
   // which omits inherited access and would lock out org-owner teachers.
-  const { data: repo } = useGetRepo(org, repoName)
+  const { data: repo } = useGetRepo(org, repoName, { enabled: open })
   const viewerLogin = user?.login ? normalizeUsername(user.login) : null
   const canManage = Boolean(
     viewerLogin &&
@@ -289,8 +287,18 @@ export function GroupCollaboratorsModal({
         }),
       )
 
+      const failedRemoves = rejectedItems(removeResults, toRemove)
+
+      // A failed remove keeps its slot, so cap adds at the remaining capacity —
+      // otherwise a swap at max size would push GitHub to max+1.
+      const succeededRemoves = toRemove.length - failedRemoves.length
+      const liveCount = initialCollaborators.length - succeededRemoves
+      const capacity = Math.max(maxCollaborators - liveCount, 0)
+      const addable = toAdd.slice(0, capacity)
+      const blockedByCapacity = toAdd.slice(capacity)
+
       const addResults = await Promise.allSettled(
-        toAdd.map(async (username) => {
+        addable.map(async (username) => {
           await addCollaboratorMutation.mutateAsync({
             org,
             repo: repoName,
@@ -301,11 +309,17 @@ export function GroupCollaboratorsModal({
         }),
       )
 
-      const failedAdds = rejectedItems(addResults, toAdd)
-      const failedRemoves = rejectedItems(removeResults, toRemove)
+      const failedAdds = [
+        ...rejectedItems(addResults, addable),
+        ...blockedByCapacity,
+      ]
 
       if (failedAdds.length || failedRemoves.length) {
-        setInvalidCollaborators(new Set(failedAdds.map(normalizeUsername)))
+        // Highlight everything still needing action: failed/blocked adds and
+        // failed removes.
+        setInvalidCollaborators(
+          new Set([...failedAdds, ...failedRemoves].map(normalizeUsername)),
+        )
 
         const firstReason =
           [...addResults, ...removeResults].find(
@@ -317,17 +331,22 @@ export function GroupCollaboratorsModal({
             : null
         const suffix = detail ? ` ${detail}` : ""
 
+        // Name what changed so a partial apply isn't read as a full save.
+        const removedNote = succeededRemoves
+          ? ` Removed ${succeededRemoves} collaborator${succeededRemoves === 1 ? "" : "s"}.`
+          : ""
+
         if (failedAdds.length && failedRemoves.length) {
           setSubmitError(
-            `Some collaborators could not be added or removed. Check the highlighted usernames and try again.${suffix}`,
+            `Some collaborators could not be added or removed.${removedNote} Check the highlighted usernames and Save again to retry.${suffix}`,
           )
         } else if (failedAdds.length) {
           setSubmitError(
-            `Some collaborators could not be added. Check the highlighted usernames and try again.${suffix}`,
+            `Some collaborators could not be added.${removedNote} Check the highlighted usernames and Save again to retry.${suffix}`,
           )
         } else {
           setSubmitError(
-            `Some collaborators could not be removed. Refresh and try again.${suffix}`,
+            `Some collaborators could not be removed.${removedNote} Check the highlighted usernames and Save again to retry.${suffix}`,
           )
         }
 
@@ -492,32 +511,37 @@ export function GroupCollaboratorsModal({
                   )
                 })}
 
-                {markedForRemoval.map((username) => (
-                  <li
-                    key={`remove-${username}`}
-                    className="flex items-center gap-3 bg-error/5 px-4 py-2.5"
-                  >
-                    <GitHub className="size-5 shrink-0 text-error/50" />
-                    <span className="min-w-0 flex-1 leading-tight text-error line-through opacity-70">
-                      <CollaboratorIdentity
-                        login={username}
-                        students={students}
-                      />
-                    </span>
-                    <span className="text-xs font-medium text-error/70">
-                      Removing
-                    </span>
-                    {canManage && (
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm text-error"
-                        onClick={() => restoreToDraft(username)}
-                      >
-                        Undo
-                      </button>
-                    )}
-                  </li>
-                ))}
+                {markedForRemoval.map((username) => {
+                  const failedToRemove = invalidCollaborators.has(
+                    normalizeUsername(username),
+                  )
+                  return (
+                    <li
+                      key={`remove-${username}`}
+                      className="flex items-center gap-3 bg-error/5 px-4 py-2.5"
+                    >
+                      <GitHub className="size-5 shrink-0 text-error/50" />
+                      <span className="min-w-0 flex-1 leading-tight text-error line-through opacity-70">
+                        <CollaboratorIdentity
+                          login={username}
+                          students={students}
+                        />
+                      </span>
+                      <span className="text-xs font-medium text-error/70">
+                        {failedToRemove ? "Couldn't remove" : "Removing"}
+                      </span>
+                      {canManage && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm text-error"
+                          onClick={() => restoreToDraft(username)}
+                        >
+                          Undo
+                        </button>
+                      )}
+                    </li>
+                  )
+                })}
 
                 {draftCollaborators.length === 0 &&
                   markedForRemoval.length === 0 && (

@@ -3,7 +3,11 @@ import { useQuery } from "@tanstack/react-query"
 import { githubKeys } from "./github/queries"
 import type { GitHubUser } from "./github/types"
 
-const useGetRepoCollaborators = (org: string, repoName: string) => {
+const useGetRepoCollaborators = (
+  org: string,
+  repoName: string,
+  options?: { enabled?: boolean },
+) => {
   const client = useGitHubClient()
 
   return useQuery({
@@ -18,7 +22,7 @@ const useGetRepoCollaborators = (org: string, repoName: string) => {
       )
     },
     staleTime: 10 * 60 * 1000,
-    enabled: Boolean(org && repoName),
+    enabled: Boolean(org && repoName) && (options?.enabled ?? true),
   })
 }
 
