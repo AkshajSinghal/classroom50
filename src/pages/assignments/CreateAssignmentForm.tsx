@@ -38,6 +38,7 @@ import {
   type StringField,
 } from "./formFieldHelpers"
 import type { Assignment } from "@/types/classroom"
+import { GROUP_SIZE_MAX, GROUP_SIZE_MIN } from "@/types/classroom"
 
 export type CreateAssignmentFormValues = {
   name: string
@@ -357,10 +358,15 @@ const CreateAssignmentForm = ({
         }
         if (!Number(value.max_group_size)) {
           errors.max_group_size = "Max group size must be a valid number."
-        } else if (value.mode === "group" && Number(value.max_group_size) < 2) {
-          // The CLI rejects a group assignment with max_group_size < 2 (schema
-          // minimum: 2), which would make the whole assignments.json unparseable.
-          errors.max_group_size = "Group size must be at least 2."
+        } else if (
+          value.mode === "group" &&
+          (!Number.isInteger(Number(value.max_group_size)) ||
+            Number(value.max_group_size) < GROUP_SIZE_MIN ||
+            Number(value.max_group_size) > GROUP_SIZE_MAX)
+        ) {
+          // Mirror the buildAssignmentEntry guard: the CLI schema needs a whole
+          // number in [MIN, MAX] or assignments.json becomes unparseable.
+          errors.max_group_size = `Group size must be a whole number between ${GROUP_SIZE_MIN} and ${GROUP_SIZE_MAX}.`
         }
 
         // Mirrors gh-teacher's write-time validation so a bad test is
@@ -458,7 +464,11 @@ const CreateAssignmentForm = ({
             <div>
               <form.Field name="template_repo">
                 {(field) => (
-                  <TemplateField field={field} org={org} classroom={classroom} />
+                  <TemplateField
+                    field={field}
+                    org={org}
+                    classroom={classroom}
+                  />
                 )}
               </form.Field>
             </div>
@@ -539,10 +549,28 @@ const CreateAssignmentForm = ({
                           type="number"
                           className="input validator"
                           placeholder="#"
-                          min="2"
-                          max="100"
-                          title="Must be a valid number between 2 and 100"
-                          onBlur={field.handleBlur}
+                          min={GROUP_SIZE_MIN}
+                          max={GROUP_SIZE_MAX}
+                          step="1"
+                          title={`Must be a whole number between ${GROUP_SIZE_MIN} and ${GROUP_SIZE_MAX}`}
+                          value={
+                            Number.isFinite(field.state.value)
+                              ? field.state.value
+                              : ""
+                          }
+                          onBlur={() => {
+                            // Snap to a valid whole number on blur so the CLI
+                            // never sees a non-integer or out-of-range size.
+                            const raw = field.state.value
+                            const next = Number.isFinite(raw)
+                              ? Math.min(
+                                  Math.max(Math.floor(raw), GROUP_SIZE_MIN),
+                                  GROUP_SIZE_MAX,
+                                )
+                              : GROUP_SIZE_MIN
+                            if (next !== raw) field.handleChange(next)
+                            field.handleBlur()
+                          }}
                           onChange={(e) =>
                             field.handleChange(e.target.valueAsNumber)
                           }

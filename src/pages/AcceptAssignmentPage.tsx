@@ -6,6 +6,7 @@ import {
   Loader2,
   UserPlus,
   UserRound,
+  UsersRound,
 } from "lucide-react"
 
 import GitHub from "@/assets/github.svg?react"
@@ -27,6 +28,7 @@ import { formatDueDateTime, isPastDue } from "@/util/formatDate"
 import { studentRepoName } from "@/util/studentRepo"
 import useGetRepo from "@/hooks/useGetRepo"
 import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
+import { GroupCollaboratorsModal } from "@/components/modals/GroupCollaboratorsModal"
 
 const initialsFor = (user: GitHubUser | null) => {
   const source = user?.name || user?.login || "?"
@@ -429,6 +431,7 @@ const AcceptAssignmentPage = () => {
   const repoExistsAlready = checkedRepo?.name === expectedRepoName
 
   const [steps, setSteps] = useState<StepState>(initialStepState)
+  const [collaboratorsOpen, setCollaboratorsOpen] = useState(false)
 
   const acceptMutation = useMutation({
     mutationFn: () => {
@@ -545,9 +548,7 @@ const AcceptAssignmentPage = () => {
 
             {(acceptMutation.isPending ||
               acceptMutation.isError ||
-              acceptMutation.isSuccess) && (
-              <AcceptProgress steps={steps} />
-            )}
+              acceptMutation.isSuccess) && <AcceptProgress steps={steps} />}
 
             {acceptMutation.isError && (
               <div className="alert alert-error items-start">
@@ -608,6 +609,18 @@ const AcceptAssignmentPage = () => {
               </a>
             )}
 
+            {assignmentData?.mode === "group" &&
+              (acceptMutation.data || repoExistsAlready) && (
+                <button
+                  type="button"
+                  className="btn btn-outline w-full text-lg p-5"
+                  onClick={() => setCollaboratorsOpen(true)}
+                >
+                  <UsersRound className="size-5" />
+                  Edit collaborators
+                </button>
+              )}
+
             {!acceptMutation.data &&
               !repoExistsAlready &&
               !acceptMutation.isPending && (
@@ -633,6 +646,23 @@ const AcceptAssignmentPage = () => {
           </div>
         </div>
       </AcceptCard>
+
+      {assignmentData?.mode === "group" &&
+        username &&
+        (acceptMutation.data?.repo.name || checkedRepo?.name) && (
+          <GroupCollaboratorsModal
+            open={collaboratorsOpen}
+            onClose={() => setCollaboratorsOpen(false)}
+            org={org}
+            repoName={acceptMutation.data?.repo.name || checkedRepo?.name || ""}
+            repoUrl={
+              acceptMutation.data?.repo.html_url || checkedRepo?.html_url
+            }
+            ownerLogin={username}
+            assignmentName={assignmentData?.name}
+            maxGroupSize={assignmentData?.max_group_size}
+          />
+        )}
     </div>
   )
 }

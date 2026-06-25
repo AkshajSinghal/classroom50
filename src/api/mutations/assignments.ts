@@ -1,5 +1,6 @@
 import type { GitHubClient } from "@/hooks/github/client"
 import type { Assignment } from "@/types/classroom"
+import { GROUP_SIZE_MAX, GROUP_SIZE_MIN } from "@/types/classroom"
 import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
 import { GitHubAPIError } from "@/hooks/github/errors"
 
@@ -592,7 +593,19 @@ async function buildAssignmentEntry(
       entry.due_meta = due_meta
     }
   }
-  if (input.mode === "group" && input.max_group_size > 0) {
+  if (input.mode === "group") {
+    // A group size outside [GROUP_SIZE_MIN, GROUP_SIZE_MAX] (or non-integer)
+    // produces an assignments.json the CLI refuses to parse; enforce the schema
+    // bounds here, not just in the form.
+    if (
+      !Number.isInteger(input.max_group_size) ||
+      input.max_group_size < GROUP_SIZE_MIN ||
+      input.max_group_size > GROUP_SIZE_MAX
+    ) {
+      throw new Error(
+        `max_group_size: group assignments require a whole number between ${GROUP_SIZE_MIN} and ${GROUP_SIZE_MAX} (got ${input.max_group_size}).`,
+      )
+    }
     entry.max_group_size = input.max_group_size
   }
 
@@ -792,14 +805,8 @@ export async function createAssignmentRepo(params: {
   name: string
   fallbackBranch: string
 }): Promise<AcceptRepoCreationResult> {
-  const {
-    client,
-    templateOwner,
-    templateRepo,
-    owner,
-    name,
-    fallbackBranch,
-  } = params
+  const { client, templateOwner, templateRepo, owner, name, fallbackBranch } =
+    params
 
   const cleanTemplateRepo = templateRepo
     ? extractTemplate(templateRepo)
@@ -1392,7 +1399,12 @@ export async function acceptAssignment(params: {
     // means the prior accept failed mid-flow). If either is missing, re-run the
     // idempotent provisioning.
     const [hasMetadata, hasWorkflow] = await Promise.all([
-      repoContentsPathExists(client, org, created.repo.name, ".classroom50.yaml"),
+      repoContentsPathExists(
+        client,
+        org,
+        created.repo.name,
+        ".classroom50.yaml",
+      ),
       repoContentsPathExists(
         client,
         org,
