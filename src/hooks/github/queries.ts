@@ -453,16 +453,18 @@ export function submissionResultQuery<T>(
       }
 
       // Reject an unrecognized schema version up front so a newer runner's
-      // reshaped payload fails loudly instead of mis-rendering as v1. A missing
-      // `schema` field is tolerated for backward compatibility with older
-      // result.json files that predate the version stamp.
+      // reshaped payload fails loudly instead of mis-rendering as v1. Match the
+      // version as an exact segment (the bare prefix or `v1.x`) so a future
+      // `result/v10`/`v1x` is NOT misaccepted as v1. A missing `schema` field is
+      // tolerated for backward compatibility with older result.json files.
       const schema =
         typeof parsed === "object" && parsed !== null && "schema" in parsed
           ? (parsed as { schema?: unknown }).schema
           : undefined
       if (
         typeof schema === "string" &&
-        !schema.startsWith(RESULT_SCHEMA_PREFIX)
+        schema !== RESULT_SCHEMA_PREFIX &&
+        !schema.startsWith(`${RESULT_SCHEMA_PREFIX}.`)
       ) {
         throw new Error(
           "This submission was graded by a newer version of Classroom 50. Please refresh or update to view it.",
