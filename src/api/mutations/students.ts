@@ -775,7 +775,7 @@ export async function unenrollStudent(
     warnings.push(
       `${toRemoveStudent.username} was removed from the roster. Their ` +
         `organization membership was kept because they are the signed-in ` +
-        `account — remove yourself from the organization's people page if you ` +
+        `account. Remove yourself from the organization's people page if you ` +
         `really intend to.`,
     )
   } else if (shouldRemoveFromOrg) {
