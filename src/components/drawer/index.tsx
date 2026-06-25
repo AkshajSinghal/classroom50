@@ -5,6 +5,10 @@ import {
   LogOut,
   MessageCircleQuestionMark,
   Settings,
+  ChevronLeft,
+  ChevronRight,
+  ArrowLeft,
+  Menu,
 } from "lucide-react"
 import { Link, useParams } from "@tanstack/react-router"
 import { useGithubAuth } from "../../auth/useGithubAuth"
@@ -12,11 +16,49 @@ import duck from "@/assets/duck.png"
 import { useCourseTeacherAccess } from "../../hooks/useCourseTeacherAccess"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import type { Classroom } from "@/types/classroom"
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
 
-const Drawer = ({ children }: { children: ReactNode }) => (
-  <div className="drawer lg:drawer-open">{children}</div>
-)
+const SIDEBAR_COLLAPSED_KEY = "classroom50:sidebar-collapsed"
+const MOBILE_DRAWER_ID = "app-drawer"
+
+type SidebarCollapseContextValue = {
+  collapsed: boolean
+  toggle: () => void
+}
+
+const SidebarCollapseContext = createContext<SidebarCollapseContextValue>({
+  collapsed: false,
+  toggle: () => {},
+})
+
+const useSidebarCollapse = () => useContext(SidebarCollapseContext)
+
+const Drawer = ({ children }: { children: ReactNode }) => {
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true"
+  })
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(collapsed))
+  }, [collapsed])
+
+  return (
+    <SidebarCollapseContext.Provider
+      value={{ collapsed, toggle: () => setCollapsed((value) => !value) }}
+    >
+      <div className="drawer lg:drawer-open">{children}</div>
+    </SidebarCollapseContext.Provider>
+  )
+}
 
 export const DrawerContent = ({
   children,
@@ -24,17 +66,43 @@ export const DrawerContent = ({
 }: {
   children: ReactNode
   className?: string
-}) => <div className={`${className} drawer-content`}>{children}</div>
-export const DrawerToggle = () => <div className="drawer-toggle"></div>
+}) => (
+  <div className={`${className} drawer-content`}>
+    <label
+      htmlFor={MOBILE_DRAWER_ID}
+      aria-label="Open menu"
+      className="btn btn-ghost btn-square fixed top-3 left-3 z-30 lg:hidden"
+    >
+      <Menu className="size-6" />
+    </label>
+    {children}
+  </div>
+)
+
+export const DrawerToggle = () => (
+  <input id={MOBILE_DRAWER_ID} type="checkbox" className="drawer-toggle" />
+)
 
 export const DrawerSidebar = ({
   selected = "",
   page = "",
   settings = false,
 }) => {
+  const { collapsed } = useSidebarCollapse()
   return (
-    <div className="drawer-side bg-[#212a3a] text-white">
-      <div className="flex flex-col min-h-full w-60 min-w-30 [&>div]:px-6">
+    <div className="drawer-side z-40">
+      <label
+        htmlFor={MOBILE_DRAWER_ID}
+        aria-label="Close menu"
+        className="drawer-overlay"
+      />
+      <div
+        className={`flex flex-col min-h-full bg-[#212a3a] text-white transition-[width] duration-200 ease-out ${
+          collapsed
+            ? "w-16 min-w-16 [&>div]:px-2"
+            : "w-60 min-w-30 [&>div]:px-6"
+        }`}
+      >
         {page === "classes" ? (
           <SidebarContentClasses selected={selected} settings={settings} />
         ) : page === "orgs" ? (
@@ -47,18 +115,108 @@ export const DrawerSidebar = ({
   )
 }
 
-export const ClassroomLogo = () => {
+const navItemClass = (active: boolean, collapsed: boolean) =>
+  `flex items-center gap-2 rounded-box border-l-2 px-2 py-2 transition-colors ${
+    collapsed ? "justify-center" : ""
+  } ${
+    active
+      ? "border-[#accefb] bg-[#323b49]"
+      : "border-transparent hover:bg-[#323b49]/60"
+  }`
+
+const Tip = ({ label, children }: { label: string; children: ReactNode }) => {
+  const { collapsed } = useSidebarCollapse()
+  if (!collapsed) return <>{children}</>
   return (
-    <Link
-      to="/"
-      className="flex p-6 text-lg text-white font-bold border-b-1 border-[#444]"
+    <div
+      className="tooltip tooltip-right w-full [--tt-bg:#323b49] before:text-white"
+      data-tip={label}
     >
-      <GraduationCap className="size-8 text-[#accefb] mr-2" /> Classroom 50
-    </Link>
+      {children}
+    </div>
+  )
+}
+
+export const ClassroomLogo = () => {
+  const { collapsed, toggle } = useSidebarCollapse()
+
+  if (collapsed) {
+    return (
+      <div className="flex items-center justify-center px-2 py-6 border-b-1 border-[#444]">
+        <button
+          type="button"
+          onClick={toggle}
+          className="tooltip tooltip-right [--tt-bg:#323b49] before:text-white cursor-pointer rounded-md p-1 transition-colors hover:bg-[#323b49]"
+          data-tip="Expand sidebar"
+          aria-label="Expand sidebar"
+        >
+          <GraduationCap className="size-8 text-[#accefb]" />
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-2 px-6 py-6 border-b-1 border-[#444]">
+      <Link
+        to="/"
+        className="flex flex-1 min-w-0 items-center text-lg text-white font-bold"
+        title="Classroom 50"
+      >
+        <GraduationCap className="size-8 text-[#accefb] shrink-0 mr-2" />
+        <span className="whitespace-nowrap">Classroom 50</span>
+      </Link>
+      <button
+        type="button"
+        onClick={toggle}
+        className="shrink-0 rounded-md p-1 text-[#aaa] transition-colors hover:bg-[#323b49] hover:text-white cursor-pointer"
+        aria-label="Collapse sidebar"
+        title="Collapse sidebar"
+      >
+        <ChevronLeft className="size-5" />
+      </button>
+    </div>
+  )
+}
+
+const ExpandSidebarButton = () => {
+  const { collapsed, toggle } = useSidebarCollapse()
+  if (!collapsed) return null
+
+  return (
+    <div className="flex justify-center py-2">
+      <button
+        type="button"
+        onClick={toggle}
+        className="tooltip tooltip-right [--tt-bg:#323b49] before:text-white cursor-pointer rounded-md p-2 text-[#aaa] transition-colors hover:bg-[#323b49] hover:text-white"
+        data-tip="Expand sidebar"
+        aria-label="Expand sidebar"
+      >
+        <ChevronRight className="size-5" />
+      </button>
+    </div>
   )
 }
 
 export const AllClasses = ({ org }: { org: string }) => {
+  const { collapsed } = useSidebarCollapse()
+
+  if (collapsed) {
+    return (
+      <div className="flex justify-center py-2 text-sm">
+        <Link
+          to="/$org/classes"
+          params={{ org }}
+          className="tooltip tooltip-right [--tt-bg:#323b49] before:text-white rounded-md p-1 text-[#aaa] transition-colors hover:bg-[#323b49] hover:text-white"
+          data-tip="All Classes"
+          aria-label="All Classes"
+        >
+          <ArrowLeft className="size-5" />
+        </Link>
+      </div>
+    )
+  }
+
   return (
     <div className="py-4 text-sm">
       <Link to="/$org/classes" params={{ org }} className="text-center">
@@ -70,6 +228,9 @@ export const AllClasses = ({ org }: { org: string }) => {
 
 export const SidebarClassInfo = ({ classInfo }: { classInfo?: Classroom }) => {
   const { classroom } = useParams({ strict: false })
+  const { collapsed } = useSidebarCollapse()
+
+  if (collapsed) return null
 
   return (
     <div className="py-2">
@@ -95,18 +256,22 @@ export const TeacherSidebarMenu = ({
 }) => {
   // Placeholder while pending so items never flash in then out.
   const { showTeacherUi, roleResolved } = useCourseTeacherAccess(org)
+  const { collapsed } = useSidebarCollapse()
 
   return (
     <div className="py-4">
-      <ul className="[&>a>li]:py-2 [&>a>li>span]:pl-2">
-        <Link to="/$org/$classroom/assignments" params={{ org, classroom }}>
-          <li
-            className={`flex px-2 ${selected === "assignments" && "bg-[#323b49] rounded-box"}`}
-          >
-            <BookText />
-            <span>Assignments</span>
-          </li>
-        </Link>
+      <ul className="flex flex-col gap-1">
+        <Tip label="Assignments">
+          <Link to="/$org/$classroom/assignments" params={{ org, classroom }}>
+            <li
+              aria-current={selected === "assignments" ? "page" : undefined}
+              className={navItemClass(selected === "assignments", collapsed)}
+            >
+              <BookText className="shrink-0" />
+              {!collapsed && <span className="truncate">Assignments</span>}
+            </li>
+          </Link>
+        </Tip>
         {!roleResolved ? (
           <>
             {[0, 1].map((i) => (
@@ -118,22 +283,31 @@ export const TeacherSidebarMenu = ({
         ) : (
           showTeacherUi && (
             <>
-              <Link to="/$org/$classroom/students" params={{ org, classroom }}>
-                <li
-                  className={`flex px-2 ${selected === "students" && "bg-[#323b49] rounded-box"}`}
+              <Tip label="Students">
+                <Link
+                  to="/$org/$classroom/students"
+                  params={{ org, classroom }}
                 >
-                  <UsersRound />
-                  <span>Students</span>
-                </li>
-              </Link>
-              <Link to="/$org/$classroom/edit" params={{ org, classroom }}>
-                <li
-                  className={`flex px-2 ${selected === "settings" && "bg-[#323b49] rounded-box"}`}
-                >
-                  <Settings />
-                  <span>Settings</span>
-                </li>
-              </Link>
+                  <li
+                    aria-current={selected === "students" ? "page" : undefined}
+                    className={navItemClass(selected === "students", collapsed)}
+                  >
+                    <UsersRound className="shrink-0" />
+                    {!collapsed && <span className="truncate">Students</span>}
+                  </li>
+                </Link>
+              </Tip>
+              <Tip label="Settings">
+                <Link to="/$org/$classroom/edit" params={{ org, classroom }}>
+                  <li
+                    aria-current={selected === "settings" ? "page" : undefined}
+                    className={navItemClass(selected === "settings", collapsed)}
+                  >
+                    <Settings className="shrink-0" />
+                    {!collapsed && <span className="truncate">Settings</span>}
+                  </li>
+                </Link>
+              </Tip>
             </>
           )
         )}
@@ -165,6 +339,7 @@ export const SidebarFooter = () => {
 
   const [menuOpen, setMenuOpen] = useState(false)
   const footerRef = useRef<HTMLDivElement | null>(null)
+  const { collapsed } = useSidebarCollapse()
 
   useEffect(() => {
     if (!menuOpen) return
@@ -206,7 +381,8 @@ export const SidebarFooter = () => {
     >
       <div
         className={`
-        absolute bottom-full left-6 right-6 z-50 mb-3
+        absolute bottom-full z-50 mb-3
+        ${collapsed ? "left-2 w-48" : "left-6 right-6"}
         origin-bottom rounded-box
         transition-all duration-150 ease-out
 
@@ -239,30 +415,35 @@ export const SidebarFooter = () => {
         </ul>
       </div>
 
-      <div className="flex w-full items-center justify-start gap-4 text-left">
+      <div
+        className={`flex w-full items-center gap-4 text-left ${collapsed ? "justify-center" : "justify-start"}`}
+        title={collapsed ? name : undefined}
+      >
         <div className="avatar avatar-placeholder">
           <img
             src={avatar_img}
             alt={`${name}'s avatar`}
-            className="w-12 rounded-full"
+            className={`rounded-full ${collapsed ? "w-10" : "w-12"}`}
           />
         </div>
 
-        <div className="min-w-0 flex-1">
-          <div className="truncate font-medium text-white">{name}</div>
+        {!collapsed && (
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-medium text-white">{name}</div>
 
-          {org ? (
-            <div>
-              <span className="text-[#aaa]">
-                {roleLoading ? (
-                  <span className="skeleton inline-block h-3 w-16 align-middle bg-white/10" />
-                ) : (
-                  roleLabel
-                )}
-              </span>
-            </div>
-          ) : null}
-        </div>
+            {org ? (
+              <div>
+                <span className="text-[#aaa]">
+                  {roleLoading ? (
+                    <span className="skeleton inline-block h-3 w-16 align-middle bg-white/10" />
+                  ) : (
+                    roleLabel
+                  )}
+                </span>
+              </div>
+            ) : null}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -275,6 +456,7 @@ export const SidebarContent = ({ selected }: { selected: string }) => {
   return (
     <>
       <ClassroomLogo />
+      <ExpandSidebarButton />
       {org && <AllClasses org={org} />}
       <SidebarClassInfo classInfo={classData} />
       {org && classroom && (
@@ -292,36 +474,44 @@ export const SidebarContent = ({ selected }: { selected: string }) => {
 export const MyClasses = ({ settings = false, selected = "" }) => {
   const { org } = useParams({ strict: false })
   const { showTeacherUi, roleResolved } = useCourseTeacherAccess(org)
+  const { collapsed } = useSidebarCollapse()
   const onSettings = settings || selected === "settings"
   if (!org) return null
+
+  const classesLabel = showTeacherUi ? "My Classes" : "My Assignments"
+
   return (
     <div className="py-4">
-      <ul className="[&>a>li]:py-2 [&>a>li>span]:pl-2">
-        <Link to="/$org" params={{ org }}>
-          <li
-            className={`flex px-2 rounded-box${onSettings ? "" : " bg-[#323b49]"}`}
-          >
-            <BookText />
-            <span>
-              {!roleResolved ? (
-                <span className="skeleton inline-block h-4 w-24 align-middle bg-white/10" />
-              ) : showTeacherUi ? (
-                "My Classes"
-              ) : (
-                "My Assignments"
-              )}
-            </span>
+      <ul className="flex flex-col gap-1">
+        {!roleResolved ? (
+          <li className="flex px-2 py-2">
+            <span className="skeleton inline-block h-4 w-24 align-middle bg-white/10" />
           </li>
-        </Link>
+        ) : (
+          <Tip label={classesLabel}>
+            <Link to="/$org" params={{ org }}>
+              <li
+                aria-current={!onSettings ? "page" : undefined}
+                className={navItemClass(!onSettings, collapsed)}
+              >
+                <BookText className="shrink-0" />
+                {!collapsed && <span className="truncate">{classesLabel}</span>}
+              </li>
+            </Link>
+          </Tip>
+        )}
         {showTeacherUi && (
-          <Link to="/$org/settings" params={{ org }}>
-            <li
-              className={`flex px-2 rounded-box${onSettings ? " bg-[#323b49]" : ""}`}
-            >
-              <Settings />
-              <span>Settings</span>
-            </li>
-          </Link>
+          <Tip label="Settings">
+            <Link to="/$org/settings" params={{ org }}>
+              <li
+                aria-current={onSettings ? "page" : undefined}
+                className={navItemClass(onSettings, collapsed)}
+              >
+                <Settings className="shrink-0" />
+                {!collapsed && <span className="truncate">Settings</span>}
+              </li>
+            </Link>
+          </Tip>
         )}
       </ul>
     </div>
@@ -329,17 +519,21 @@ export const MyClasses = ({ settings = false, selected = "" }) => {
 }
 
 export const MyOrgs = ({ settings = false }) => {
+  const { collapsed } = useSidebarCollapse()
   return (
     <div className="py-4">
-      <ul className="[&>a>li]:py-2 [&>a>li>span]:pl-2">
-        <Link to="/">
-          <li
-            className={`flex${!settings ? " bg-[#323b49]" : ""} px-2 rounded-box`}
-          >
-            <BookText />
-            <span>Organizations</span>
-          </li>
-        </Link>
+      <ul className="flex flex-col gap-1">
+        <Tip label="Organizations">
+          <Link to="/">
+            <li
+              aria-current={!settings ? "page" : undefined}
+              className={navItemClass(!settings, collapsed)}
+            >
+              <BookText className="shrink-0" />
+              {!collapsed && <span className="truncate">Organizations</span>}
+            </li>
+          </Link>
+        </Tip>
       </ul>
     </div>
   )
@@ -355,6 +549,7 @@ export const SidebarContentClasses = ({
   return (
     <>
       <ClassroomLogo />
+      <ExpandSidebarButton />
       <MyClasses selected={selected} settings={settings} />
       <SidebarFooter />
     </>
@@ -365,6 +560,7 @@ export const SidebarContentOrgs = ({ selected }: { selected: string }) => {
   return (
     <>
       <ClassroomLogo />
+      <ExpandSidebarButton />
       <MyOrgs settings={selected === "settings"} />
       <SidebarFooter />
     </>
