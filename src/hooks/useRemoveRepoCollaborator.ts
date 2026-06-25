@@ -14,7 +14,7 @@ export function useRemoveRepoCollaborator() {
       }),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({
-        queryKey: ["repo-collaborators", variables.org, variables.repo],
+        queryKey: ["github", "collaborators", variables.org, variables.repo],
       })
     },
   })

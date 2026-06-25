@@ -8,8 +8,12 @@ const useGetRepoCollaborators = (org: string, repoName: string) => {
   return useQuery({
     queryKey: ["github", "collaborators", org, repoName],
     queryFn: () => {
+      // affiliation=direct excludes collaborators whose access is only
+      // inherited from org membership (e.g. org owners, who hold admin on
+      // every repo). Without it, every org owner shows up as an admin
+      // collaborator, masking the real repo owner (the student founder).
       return client.request<GitHubUser[]>(
-        `/repos/${org}/${repoName}/collaborators`,
+        `/repos/${org}/${repoName}/collaborators?affiliation=direct`,
       )
     },
     staleTime: 10 * 60 * 1000,
