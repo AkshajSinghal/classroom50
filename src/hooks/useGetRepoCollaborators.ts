@@ -14,7 +14,7 @@ const useGetRepoCollaborators = (org: string, repoName: string) => {
       // every repo). Without it, every org owner shows up as an admin
       // collaborator, masking the real repo owner (the student founder).
       return client.request<GitHubUser[]>(
-        `/repos/${org}/${repoName}/collaborators?affiliation=direct`,
+        `/repos/${encodeURIComponent(org)}/${encodeURIComponent(repoName)}/collaborators?affiliation=direct`,
       )
     },
     staleTime: 10 * 60 * 1000,

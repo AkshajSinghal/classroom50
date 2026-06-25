@@ -3,6 +3,7 @@ import { Plus, Trash2, UsersRound } from "lucide-react"
 
 import GitHub from "@/assets/github.svg?react"
 import { useGithubAuth } from "@/auth/useGithubAuth"
+import useGetRepo from "@/hooks/useGetRepo"
 import useGetRepoCollaborators from "@/hooks/useGetRepoCollaborators"
 import useAddRepoCollaborator from "@/hooks/useAddRepoCollaborator"
 import useRemoveRepoCollaborator from "@/hooks/useRemoveRepoCollaborator"
@@ -39,7 +40,7 @@ type GroupCollaboratorsModalProps = {
   // assignment. This is the `owner` segment of the repo name, NOT inferred from
   // GitHub admin permissions (org owners hold admin on every repo and would
   // otherwise be mistaken for the founder).
-  ownerLogin?: string
+  ownerLogin: string
   repoUrl?: string
   assignmentName?: string
   maxGroupSize?: number
@@ -81,33 +82,21 @@ export function GroupCollaboratorsModal({
 
   const maxCollaborators = maxGroupSize ?? 1
 
-  const normalizedOwner = ownerLogin ? normalizeUsername(ownerLogin) : null
+  // The repository owner (group founder) is always the repo name's `owner`
+  // segment, passed in as `ownerLogin` — never inferred from admin permissions,
+  // because org owners hold admin on every repo.
+  const ownerLoginResolved = normalizeUsername(ownerLogin)
 
-  // The repository owner (group founder) is identified by the repo name's
-  // `owner` segment, passed in as `ownerLogin` — never inferred from admin
-  // permissions, because org owners hold admin on every repo. As a fallback
-  // (e.g. owner not passed), use the sole direct admin collaborator.
-  const directAdminLogins = useMemo(
-    () =>
-      new Set(
-        collaborators
-          ?.filter((c) => c.permissions?.admin === true)
-          .map((c) => normalizeUsername(c.login)) ?? [],
-      ),
-    [collaborators],
-  )
-
-  const ownerLoginResolved =
-    normalizedOwner ??
-    (directAdminLogins.size === 1 ? [...directAdminLogins][0] : null)
-
-  // Whoever is viewing can manage collaborators if they are the founder or hold
-  // admin on this specific repo (direct or inherited via org ownership). This
-  // matches what the GitHub API will actually allow.
+  // The viewer can manage collaborators if they are the founder OR hold admin on
+  // this specific repo. We read the viewer's *effective* repo permission from
+  // the repo object (which reflects inherited org-owner admin) rather than the
+  // collaborator list, because the list is `affiliation=direct` and omits
+  // inherited access — so an org-owner teacher would otherwise be locked out.
+  const { data: repo } = useGetRepo(org, repoName)
   const viewerLogin = user?.login ? normalizeUsername(user.login) : null
   const canManage = Boolean(
     viewerLogin &&
-    (viewerLogin === ownerLoginResolved || directAdminLogins.has(viewerLogin)),
+    (viewerLogin === ownerLoginResolved || repo?.permissions?.admin === true),
   )
 
   // Members are every collaborator that isn't the founder. (The list is already
@@ -290,10 +279,7 @@ export function GroupCollaboratorsModal({
   const ownerDisplayLogin =
     collaborators?.find(
       (c) => normalizeUsername(c.login) === ownerLoginResolved,
-    )?.login ??
-    ownerLogin ??
-    ownerLoginResolved ??
-    undefined
+    )?.login ?? ownerLogin
 
   return (
     <dialog
@@ -423,37 +409,9 @@ export function GroupCollaboratorsModal({
                             ].join(" ")}
                           />
 
-                          {canManage ? (
-                            <input
-                              className={[
-                                "input input-md min-w-0 flex-1",
-                                isInvalid
-                                  ? "input-error bg-base-100"
-                                  : "input-ghost",
-                              ].join(" ")}
-                              value={username}
-                              onChange={(e) => {
-                                clearInvalidCollaborator(username)
-                                setDraftCollaborators((current) => {
-                                  const nextDraft = [...current]
-                                  nextDraft[index] = e.target.value
-                                  return nextDraft
-                                })
-                              }}
-                              onBlur={(e) => {
-                                const value = normalizeUsername(e.target.value)
-                                setDraftCollaborators((current) => {
-                                  const nextDraft = [...current]
-                                  nextDraft[index] = value
-                                  return nextDraft
-                                })
-                              }}
-                            />
-                          ) : (
-                            <span className="min-w-0 flex-1 truncate text-sm">
-                              {name ? `${name} (${username})` : username}
-                            </span>
-                          )}
+                          <span className="min-w-0 flex-1 truncate text-sm">
+                            {name ? `${name} (${username})` : username}
+                          </span>
 
                           {canManage && (
                             <button
@@ -562,5 +520,3 @@ export function GroupCollaboratorsModal({
     </dialog>
   )
 }
-
-export default GroupCollaboratorsModal

@@ -1432,7 +1432,9 @@ export async function triggerScoreCollection(
 
   const repo = await getRepo(client, org, "classroom50")
   if (!repo) {
-    throw new Error(`${org}/classroom50 not found; run setup for this org first`)
+    throw new Error(
+      `${org}/classroom50 not found; run setup for this org first`,
+    )
   }
   const ref = repo.default_branch || "main"
 
@@ -1851,11 +1853,13 @@ export async function addRepoCollaborator(params: {
 }) {
   const { client, org, repo, username, permission = "push" } = params
 
-  const userReq = await client.requestRaw(`/orgs/${org}/members/${username}`)
+  const userReq = await client.requestRaw(
+    `/orgs/${encodeURIComponent(org)}/members/${encodeURIComponent(username)}`,
+  )
   console.log("user req for " + username, userReq)
 
   const res = await client.requestRaw(
-    `/repos/${org}/${repo}/collaborators/${username}`,
+    `/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/collaborators/${encodeURIComponent(username)}`,
     {
       method: "PUT",
       body: {
@@ -1876,9 +1880,12 @@ export async function removeRepoCollaborator(params: {
 }) {
   const { client, org, repo, username } = params
 
-  return client.request(`/repos/${org}/${repo}/collaborators/${username}`, {
-    method: "DELETE",
-  })
+  return client.request(
+    `/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/collaborators/${encodeURIComponent(username)}`,
+    {
+      method: "DELETE",
+    },
+  )
 }
 
 export async function createBlob(

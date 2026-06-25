@@ -13,7 +13,7 @@ import useGetPublicAssignment from "@/hooks/useGetPublicAssignment"
 
 import GitHub from "@/assets/github.svg?react"
 import { useGithubAuth } from "@/auth/useGithubAuth"
-import GroupCollaboratorsModal from "@/components/modals/GroupCollaboratorsModal"
+import { GroupCollaboratorsModal } from "@/components/modals/GroupCollaboratorsModal"
 import EditAssignmentForm from "./assignments/EditAssignmentForm"
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 
@@ -119,16 +119,18 @@ const EditAssignmentFormStudent = ({
         </div>
       </div>
 
-      <GroupCollaboratorsModal
-        open={collaboratorsOpen}
-        onClose={() => setCollaboratorsOpen(false)}
-        org={org}
-        repoName={assignmentRepo.name}
-        repoUrl={assignmentRepo.html_url}
-        ownerLogin={user?.login}
-        assignmentName={assignmentData?.name}
-        maxGroupSize={assignmentData?.max_group_size}
-      />
+      {user?.login && (
+        <GroupCollaboratorsModal
+          open={collaboratorsOpen}
+          onClose={() => setCollaboratorsOpen(false)}
+          org={org}
+          repoName={assignmentRepo.name}
+          repoUrl={assignmentRepo.html_url}
+          ownerLogin={user.login}
+          assignmentName={assignmentData?.name}
+          maxGroupSize={assignmentData?.max_group_size}
+        />
+      )}
     </>
   )
 }
