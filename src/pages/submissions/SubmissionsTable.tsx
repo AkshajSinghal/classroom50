@@ -11,7 +11,7 @@ import GitHub from "@/assets/github.svg?react"
 import { getName, getInitials } from "@/util/students"
 import { studentRepoName, studentRepoUrl } from "@/util/studentRepo"
 import Avatar from "@/components/avatar"
-import GroupCollaboratorsModal from "@/components/modals/GroupCollaboratorsModal"
+import { GroupCollaboratorsModal } from "@/components/modals/GroupCollaboratorsModal"
 import type { SubmissionAttempt, SubmissionRow } from "@/hooks/useGetScores"
 import useGetFeedbackPr from "@/hooks/useGetFeedbackPr"
 import type { Student } from "@/types/classroom"
@@ -466,23 +466,15 @@ const SubmissionsTable = ({
         </table>
       </div>
 
-      {isGroup && (
+      {isGroup && manageOwner && (
         <GroupCollaboratorsModal
-          key={manageOwner ?? "none"}
-          open={manageOwner !== null}
+          key={manageOwner}
+          open
           onClose={() => setManageOwner(null)}
           org={org}
-          repoName={
-            manageOwner
-              ? studentRepoName(classroom, assignment, manageOwner)
-              : ""
-          }
-          repoUrl={
-            manageOwner
-              ? studentRepoUrl(org, classroom, assignment, manageOwner)
-              : undefined
-          }
-          ownerLogin={manageOwner ?? undefined}
+          repoName={studentRepoName(classroom, assignment, manageOwner)}
+          repoUrl={studentRepoUrl(org, classroom, assignment, manageOwner)}
+          ownerLogin={manageOwner}
           assignmentName={assignmentName}
           maxGroupSize={maxGroupSize}
           students={students}

@@ -28,7 +28,7 @@ import { formatDueDateTime, isPastDue } from "@/util/formatDate"
 import { studentRepoName } from "@/util/studentRepo"
 import useGetRepo from "@/hooks/useGetRepo"
 import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
-import GroupCollaboratorsModal from "@/components/modals/GroupCollaboratorsModal"
+import { GroupCollaboratorsModal } from "@/components/modals/GroupCollaboratorsModal"
 
 const initialsFor = (user: GitHubUser | null) => {
   const source = user?.name || user?.login || "?"
@@ -647,18 +647,22 @@ const AcceptAssignmentPage = () => {
         </div>
       </AcceptCard>
 
-      {assignmentData?.mode === "group" && (
-        <GroupCollaboratorsModal
-          open={collaboratorsOpen}
-          onClose={() => setCollaboratorsOpen(false)}
-          org={org}
-          repoName={acceptMutation.data?.repo.name || checkedRepo?.name || ""}
-          repoUrl={acceptMutation.data?.repo.html_url || checkedRepo?.html_url}
-          ownerLogin={username}
-          assignmentName={assignmentData?.name}
-          maxGroupSize={assignmentData?.max_group_size}
-        />
-      )}
+      {assignmentData?.mode === "group" &&
+        username &&
+        (acceptMutation.data?.repo.name || checkedRepo?.name) && (
+          <GroupCollaboratorsModal
+            open={collaboratorsOpen}
+            onClose={() => setCollaboratorsOpen(false)}
+            org={org}
+            repoName={acceptMutation.data?.repo.name || checkedRepo?.name || ""}
+            repoUrl={
+              acceptMutation.data?.repo.html_url || checkedRepo?.html_url
+            }
+            ownerLogin={username}
+            assignmentName={assignmentData?.name}
+            maxGroupSize={assignmentData?.max_group_size}
+          />
+        )}
     </div>
   )
 }
