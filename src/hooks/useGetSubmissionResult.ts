@@ -1,11 +1,11 @@
 import { useQuery } from "@tanstack/react-query"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
-import { latestReleaseResultQuery } from "./github/queries"
+import { submissionResultQuery } from "./github/queries"
 import { studentRepoName } from "@/util/studentRepo"
 import type { ResultJson } from "@/types/result"
 
-// The logged-in student's most recent graded submission. result.json is an
-// asset on the latest submit/* release of their repo
+// The logged-in student's most recent graded submission. The autograde runner
+// commits result.json to the repo's `results` branch
 // (<classroom>-<assignment>-<username>); `data` is null until they submit.
 const useGetSubmissionResult = (
   org: string | undefined,
@@ -21,7 +21,7 @@ const useGetSubmissionResult = (
       : ""
 
   return useQuery({
-    ...latestReleaseResultQuery<ResultJson>(client, org ?? "", repo),
+    ...submissionResultQuery<ResultJson>(client, org ?? "", repo),
     enabled: Boolean(org && repo),
     // Defensive normalization: a malformed/partial result.json must not crash
     // the render (StudentSubmissionPage reads result.tests.length/.map). Coerce

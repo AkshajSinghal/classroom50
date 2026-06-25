@@ -86,8 +86,8 @@ export const githubKeys = {
   serviceToken: (owner: string) =>
     [...githubKeys.all, "serviceToken", owner] as const,
 
-  latestReleaseResult: (owner: string, repo: string) =>
-    [...githubKeys.all, "latest-release-result", owner, repo] as const,
+  submissionResult: (owner: string, repo: string) =>
+    [...githubKeys.all, "submission-result", owner, repo] as const,
 }
 
 // Refresh the lists that drive roster invite status after enroll/resend/
@@ -393,56 +393,38 @@ export function jsonFileQuery<T>(
   })
 }
 
-type GitHubReleaseAsset = {
-  name: string
-  url: string
-  browser_download_url: string
-}
+const RESULT_BRANCH = "results"
+const RESULT_PATH = "result.json"
 
-type GitHubRelease = {
-  tag_name: string
-  name: string | null
-  html_url: string
-  created_at: string
-  assets: GitHubReleaseAsset[]
-}
-
-// Reads the `result.json` asset off a student repo's latest submit/* release.
-// The autograde workflow marks the newest submission release "latest", so
-// /releases/latest is the most recent graded submission. Returns null when the
-// repo has no releases yet or the release carries no result.json asset.
-export function latestReleaseResultQuery<T>(
+// Reads the student's latest graded result from the committed `result.json` on
+// the repo's orphan `results` branch (written by the autograde runner). We use
+// the Contents API — not the release asset — because release-asset downloads
+// 302-redirect to a storage host with no CORS headers and are unreadable from
+// the browser. Returns null when the file/branch doesn't exist yet (no graded
+// submission). The result.json contract is shared with classroom50-cli.
+export function submissionResultQuery<T>(
   client: GitHubClient,
   owner: string,
   repo: string,
 ) {
   return queryOptions({
-    queryKey: githubKeys.latestReleaseResult(owner, repo),
+    queryKey: githubKeys.submissionResult(owner, repo),
     queryFn: async ({ signal }): Promise<T | null> => {
-      let release: GitHubRelease
+      let raw: string
       try {
-        release = await client.request<GitHubRelease>(
+        raw = await client.requestRaw(
           `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
             repo,
-          )}/releases/latest`,
+          )}/contents/${RESULT_PATH}?ref=${encodeURIComponent(RESULT_BRANCH)}`,
           { method: "GET", signal },
         )
       } catch (error) {
-        // No published release yet -> no submission graded yet.
+        // No results branch / file yet -> no graded submission.
         if (error instanceof GitHubAPIError && error.status === 404) {
           return null
         }
         throw error
       }
-
-      const asset = release.assets.find((a) => a.name === "result.json")
-      if (!asset) return null
-
-      const raw = await client.requestRaw(asset.url, {
-        method: "GET",
-        accept: "application/octet-stream",
-        signal,
-      })
 
       try {
         return JSON.parse(raw) as T
