@@ -10,6 +10,7 @@ import { unenrollStudent } from "@/api/mutations/students"
 import type { UnenrollStudentInput } from "@/api/mutations/students"
 import { resendOrgInvitation, getErrorMessage } from "@/hooks/github/mutations"
 import { GitHubAPIError } from "@/hooks/github/errors"
+import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import {
   githubKeys,
@@ -229,26 +230,7 @@ const InviteStatusBadge = ({ status }: { status: InviteStatus }) => {
 // URL for everyone (no per-student token).
 const InviteLink = ({ org }: { org: string }) => {
   const inviteUrl = `https://github.com/orgs/${org}/invitation`
-  const [copied, setCopied] = useState(false)
-  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  useEffect(
-    () => () => {
-      if (resetTimerRef.current) clearTimeout(resetTimerRef.current)
-    },
-    [],
-  )
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(inviteUrl)
-      setCopied(true)
-      if (resetTimerRef.current) clearTimeout(resetTimerRef.current)
-      resetTimerRef.current = setTimeout(() => setCopied(false), 2000)
-    } catch {
-      setCopied(false)
-    }
-  }
+  const { copied, copy } = useCopyToClipboard(inviteUrl)
 
   return (
     <div className="flex flex-col gap-1 px-6 py-3 border-b border-base-300 bg-base-200/40">
@@ -267,7 +249,7 @@ const InviteLink = ({ org }: { org: string }) => {
         <button
           type="button"
           className="btn btn-sm join-item"
-          onClick={() => void handleCopy()}
+          onClick={() => void copy()}
           aria-label="Copy invite link"
         >
           {copied ? (
