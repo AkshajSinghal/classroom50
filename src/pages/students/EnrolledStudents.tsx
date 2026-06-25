@@ -9,6 +9,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { unenrollStudent } from "@/api/mutations/students"
 import type { UnenrollStudentInput } from "@/api/mutations/students"
 import { resendOrgInvitation, getErrorMessage } from "@/hooks/github/mutations"
+import { GitHubAPIError } from "@/hooks/github/errors"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import {
   githubKeys,
@@ -404,12 +405,17 @@ const EnrolledStudents = ({
   }
 
   // Sequential to respect GitHub's 50/24h invite cap and secondary rate limits.
-  // Aggregates a single summary warning.
+  // Aggregates a single summary warning. Stops early on a rate-limit error so we
+  // don't keep burning the invite cap (and risking more partial failures) once
+  // GitHub has started throttling.
   const handleResendAll = async () => {
     let succeeded = 0
     const failures: string[] = []
+    let rateLimited = false
+    let stoppedAt = 0
 
     for (const student of nonMemberStudents) {
+      stoppedAt++
       try {
         const ok = await resendForStudent(student)
         if (ok) succeeded++
@@ -417,13 +423,27 @@ const EnrolledStudents = ({
       } catch (err) {
         failures.push(student.username)
         console.error(`resend failed for ${student.username}:`, err)
+        if (err instanceof GitHubAPIError && err.isRateLimited) {
+          rateLimited = true
+          break
+        }
       }
     }
 
     invalidateInviteQueries()
 
+    const remaining = nonMemberStudents.length - stoppedAt
     const summaryKey = "__resend_all__"
-    if (failures.length === 0) {
+    if (rateLimited) {
+      const failedList = failures.length ? ` (${failures.join(", ")})` : ""
+      setWarning(
+        summaryKey,
+        `Re-sent ${succeeded} before GitHub rate-limited the request; ` +
+          `${failures.length} failed${failedList}` +
+          (remaining > 0 ? `, ${remaining} not attempted` : "") +
+          `. Wait a bit and try again.`,
+      )
+    } else if (failures.length === 0) {
       setWarning(
         summaryKey,
         `Re-sent ${succeeded} invite${succeeded === 1 ? "" : "s"}.`,
