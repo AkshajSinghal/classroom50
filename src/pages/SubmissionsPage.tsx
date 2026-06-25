@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import Papa from "papaparse"
 
 import {
@@ -26,6 +26,7 @@ import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetStudents from "@/hooks/useGetStudents"
 import useTriggerScoreCollection from "@/hooks/useTriggerScoreCollection"
 import useGetLastCollectScoresRun from "@/hooks/useGetLastCollectScoresRun"
+import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
 import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
 import RoleResolvingFallback from "@/components/RoleResolvingFallback"
 import { COLLECT_SCORES_WORKFLOW } from "@/hooks/github/mutations"
@@ -54,37 +55,19 @@ const SubmissionsPageContent = () => {
   } = useGetScores(org, classroom)
   const { data: assignmentData } = useGetClassroomAssignments(org, classroom)
   const { students } = useGetStudents(org, classroom)
-  const [copiedSubmitLink, setCopiedSubmitLink] = useState(false)
-  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  useEffect(
-    () => () => {
-      if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
-    },
-    [],
-  )
   const scoresLastUpdated =
     scoresUpdatedAt > 0
       ? formatDistanceToNow(scoresUpdatedAt, { addSuffix: true })
       : "never"
 
   const assignmentSubmitUrl = `${window.location.origin}/${org}/${classroom}/assignments/${assignment}/accept`
+  const { copied: copiedSubmitLink, copy: copySubmitLink } = useCopyToClipboard(
+    assignmentSubmitUrl,
+    1500,
+  )
 
   // Re-render every 30s so the relative "last collected"/"last updated" labels stay fresh.
   usePeriodicRerender()
-
-  const copySubmitLink = async () => {
-    try {
-      await navigator.clipboard.writeText(assignmentSubmitUrl)
-      setCopiedSubmitLink(true)
-      if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
-      copyTimerRef.current = setTimeout(() => {
-        setCopiedSubmitLink(false)
-      }, 1500)
-    } catch {
-      setCopiedSubmitLink(false)
-    }
-  }
   const assignmentInfo = assignmentData?.assignments.find(
     (a) => a.slug === assignment,
   )

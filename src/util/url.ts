@@ -3,7 +3,9 @@
 // branch. A `javascript:`/`data:`/`vbscript:` URL rendered into an anchor href
 // is a script-injection sink; only http(s) links are safe to render.
 
-export function isSafeHttpUrl(value: string | null | undefined): boolean {
+export function isSafeHttpUrl(
+  value: string | null | undefined,
+): value is string {
   if (!value) return false
   try {
     const url = new URL(value)
@@ -20,5 +22,5 @@ export function isSafeHttpUrl(value: string | null | undefined): boolean {
 export function safeHttpUrl(
   value: string | null | undefined,
 ): string | undefined {
-  return isSafeHttpUrl(value) ? (value as string) : undefined
+  return isSafeHttpUrl(value) ? value : undefined
 }
