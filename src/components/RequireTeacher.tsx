@@ -2,6 +2,7 @@ import { type ReactNode } from "react"
 import { useParams } from "@tanstack/react-router"
 import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
 import NotFound from "@/components/NotFound"
+import RoleResolvingFallback from "@/components/RoleResolvingFallback"
 
 // Gate page content to teachers. While the role is resolving we render a
 // spinner (so we never flash a 404 at a real teacher), then either the
@@ -13,11 +14,7 @@ const RequireTeacher = ({ children }: { children: ReactNode }) => {
   const { showTeacherUi, roleResolved } = useCourseTeacherAccess(org)
 
   if (!roleResolved) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <span className="loading loading-spinner loading-lg" />
-      </div>
-    )
+    return <RoleResolvingFallback />
   }
 
   if (!showTeacherUi) {

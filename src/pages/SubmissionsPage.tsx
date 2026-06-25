@@ -27,6 +27,7 @@ import useGetStudents from "@/hooks/useGetStudents"
 import useTriggerScoreCollection from "@/hooks/useTriggerScoreCollection"
 import useGetLastCollectScoresRun from "@/hooks/useGetLastCollectScoresRun"
 import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
+import RoleResolvingFallback from "@/components/RoleResolvingFallback"
 import { COLLECT_SCORES_WORKFLOW } from "@/hooks/github/mutations"
 import { formatDueDateTime } from "@/util/formatDate"
 import { formatDistanceToNow } from "date-fns"
@@ -421,11 +422,7 @@ const SubmissionsPage = () => {
   const { showTeacherUi, roleResolved } = useCourseTeacherAccess(org)
 
   if (!roleResolved) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <span className="loading loading-spinner loading-lg" />
-      </div>
-    )
+    return <RoleResolvingFallback className="min-h-screen" />
   }
 
   if (!showTeacherUi && org && classroom && assignment) {

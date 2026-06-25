@@ -1,5 +1,6 @@
 import { Navigate, useParams } from "@tanstack/react-router"
 import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
+import RoleResolvingFallback from "@/components/RoleResolvingFallback"
 
 // The bare assignment route has no view of its own: it forwards to the
 // role-appropriate landing. Teachers go to the submissions gradebook; students
@@ -14,11 +15,7 @@ const AssignmentIndexPage = () => {
   }
 
   if (!roleResolved) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <span className="loading loading-spinner loading-lg" />
-      </div>
-    )
+    return <RoleResolvingFallback className="min-h-screen" />
   }
 
   return (

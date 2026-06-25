@@ -446,7 +446,13 @@ export function latestReleaseResultQuery<T>(
         signal,
       })
 
-      return JSON.parse(raw) as T
+      try {
+        return JSON.parse(raw) as T
+      } catch {
+        throw new Error(
+          "Your submission result couldn't be read (it may still be uploading). Try again in a moment.",
+        )
+      }
     },
     enabled: Boolean(owner && repo),
     staleTime: 5 * 60 * 1000,
@@ -686,16 +692,25 @@ export function classroomsIndexUrl(org: string) {
 
 export async function orgPublishesClassroom50Pages(
   org: string,
-): Promise<boolean> {
+): Promise<"yes" | "no" | "indeterminate"> {
   try {
-    const res = await fetch(classroomsIndexUrl(org), { cache: "no-store" })
-    if (!res.ok) return false
+    const res = await fetch(classroomsIndexUrl(org), {
+      cache: "no-store",
+      // Bound the probe so a hung github.io host can't stall the orgs load.
+      signal: AbortSignal.timeout(5000),
+    })
+    // A clean 404 is a definitive "not a Classroom50 org". Other non-ok
+    // statuses (5xx, 429) are transient -> indeterminate, don't penalize.
+    if (res.status === 404) return "no"
+    if (!res.ok) return "indeterminate"
     // Confirm it's actually the index shape, not a stray 200 (e.g. a custom
     // 404 page served with 200).
     const data = (await res.json()) as { classrooms?: unknown }
-    return Array.isArray(data?.classrooms)
+    return Array.isArray(data?.classrooms) ? "yes" : "no"
   } catch {
-    return false
+    // Network failure, timeout, DNS, CORS -> transient; never collapse to a
+    // definitive "no" (that would hide a genuinely-enrolled student's org).
+    return "indeterminate"
   }
 }
 
@@ -803,11 +818,11 @@ export async function getClassroom50OrgSummary(
       } else {
         // A non-admin gets a 404 both when the org isn't a Classroom50 org and
         // when it is but the config repo is private to them. Disambiguate via
-        // the public Pages index: present -> a real Classroom50 org they're
-        // enrolled in (no_access but legitimate); absent -> not a Classroom50
-        // org, so the UI can filter it out.
-        const isClassroom50 = await orgPublishesClassroom50Pages(org.login)
-        status = isClassroom50 ? "no_access" : "not_classroom50"
+        // the public Pages index. On an indeterminate probe (transient network
+        // failure) keep the org visible (no_access) rather than hiding a
+        // genuinely-enrolled student's org behind a CDN blip.
+        const pagesVerdict = await orgPublishesClassroom50Pages(org.login)
+        status = pagesVerdict === "no" ? "not_classroom50" : "no_access"
       }
     } else {
       status = "unknown"
