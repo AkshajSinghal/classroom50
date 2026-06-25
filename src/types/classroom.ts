@@ -14,6 +14,13 @@ export type Classroom = {
   }
 }
 
+// Inclusive bounds for a group assignment's max_group_size (owner included).
+// The CLI schema enforces the same range; an out-of-range value makes
+// assignments.json unparseable, so the form and mutation layer both clamp/guard
+// against these.
+export const GROUP_SIZE_MIN = 2
+export const GROUP_SIZE_MAX = 100
+
 // Mirrors one entry of classroom50/assignments/v1 — the shape gh-teacher
 // writes and parses (strictly: unknown fields are rejected by the CLI).
 // Schema: https://github.com/foundation50/classroom50/blob/main/schemas/assignments-v1.schema.json
