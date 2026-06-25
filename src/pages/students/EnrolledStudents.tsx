@@ -159,7 +159,7 @@ const UnenrollStudentButton = ({
                 </span>{" "}
                 from the <span className="font-semibold">{org}</span>{" "}
                 organization. Leave unchecked if they are switching between your
-                classes — keeping their membership avoids re-inviting them.
+                classes, since keeping their membership avoids re-inviting them.
               </span>
             </label>
           ) : null}
@@ -593,11 +593,11 @@ const EnrolledStudents = ({
               deleted and then resent
             </span>
             . After this, every student who is not already a member of{" "}
-            <span className="font-semibold text-base-content">{org}</span> —{" "}
+            <span className="font-semibold text-base-content">{org}</span> (
             <span className="font-semibold text-base-content">
               {nonMemberStudents.length}
             </span>{" "}
-            student{nonMemberStudents.length === 1 ? "" : "s"} — will receive a
+            student{nonMemberStudents.length === 1 ? "" : "s"}) will receive a
             new invitation email.
           </>
         }
