@@ -10,6 +10,7 @@ import {
   ArrowLeft,
   Menu,
   FileCheck2,
+  FilePlus2,
 } from "lucide-react"
 import { Link, useParams, useMatchRoute } from "@tanstack/react-router"
 import { useGithubAuth } from "../../auth/useGithubAuth"
@@ -18,6 +19,7 @@ import { useCourseTeacherAccess } from "../../hooks/useCourseTeacherAccess"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetPublicAssignment from "@/hooks/useGetPublicAssignment"
+import useGetAssignmentRepo from "@/hooks/useGetAssignmentRepo"
 import type { Classroom } from "@/types/classroom"
 import {
   createContext,
@@ -298,6 +300,21 @@ const AssignmentSidebarMenu = ({
       fuzzy: false,
     }),
   )
+  const onAccept = Boolean(
+    matchRoute({
+      to: "/$org/$classroom/assignments/$assignment/accept",
+      fuzzy: false,
+    }),
+  )
+
+  // Students only: surface "Accept assignment" until they have their repo.
+  // Resolved best-effort; while loading we don't show it (avoids a flash that
+  // then disappears once we learn they've already accepted).
+  const { user } = useGithubAuth()
+  const { assignment: studentRepo, isLoading: repoLoading } =
+    useGetAssignmentRepo(org, classroom, assignment, user?.login)
+  const showAccept =
+    !showTeacherUi && roleResolved && !repoLoading && !studentRepo
 
   return (
     <>
@@ -376,6 +393,24 @@ const AssignmentSidebarMenu = ({
             </>
           ) : (
             <>
+              {showAccept && (
+                <Tip label="Accept Assignment">
+                  <Link
+                    to="/$org/$classroom/assignments/$assignment/accept"
+                    params={{ org, classroom, assignment }}
+                  >
+                    <li
+                      aria-current={onAccept ? "page" : undefined}
+                      className={navItemClass(onAccept, collapsed)}
+                    >
+                      <FilePlus2 className="shrink-0" />
+                      {!collapsed && (
+                        <span className="truncate">Accept Assignment</span>
+                      )}
+                    </li>
+                  </Link>
+                </Tip>
+              )}
               <Tip label="My Submission">
                 <Link
                   to="/$org/$classroom/assignments/$assignment/submission"
