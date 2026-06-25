@@ -116,9 +116,8 @@ function useGithubAuthState() {
     [queryClient],
   )
 
-  // Tear down the device-flow poll loop and the pending success-screen timer if
-  // the provider unmounts mid-flow, so neither keeps running (or calls setState)
-  // after teardown.
+  // On unmount mid-flow, abort the device poll loop and clear the pending
+  // success-screen timer so neither runs (or setStates) after teardown.
   useEffect(
     () => () => {
       abortRef.current?.abort()

@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react"
 
-// Copies text to the clipboard and flips a `copied` flag that auto-resets after
-// `resetMs`. Clears a pending reset before re-arming, cleans up on unmount, and
-// leaves `copied` false if the clipboard write rejects (e.g. a non-secure
-// context). Returns the flag plus a copy callback to wire to a button.
+// Copies text and flips a `copied` flag that auto-resets after `resetMs`.
+// Clears the pending reset before re-arming and on unmount; leaves `copied`
+// false if the write rejects (e.g. a non-secure context).
 export function useCopyToClipboard(text: string, resetMs = 2000) {
   const [copied, setCopied] = useState(false)
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -20,8 +19,7 @@ export function useCopyToClipboard(text: string, resetMs = 2000) {
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(text)
-      // The component may have unmounted while the clipboard write was pending;
-      // don't setState or arm a timer against a dead component.
+      // Guard against unmount during the await.
       if (!mountedRef.current) return
       setCopied(true)
       if (resetTimerRef.current) clearTimeout(resetTimerRef.current)

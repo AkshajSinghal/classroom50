@@ -114,8 +114,7 @@ const TestRow = ({ test }: { test: ResultJson["tests"][number] }) => {
 const ResultLinks = ({ result }: { result: ResultJson }) => {
   const links: { label: string; href: string; icon: React.ReactNode }[] = []
   // result.json comes from the student's own repo (artifacts branch), so its
-  // link fields are untrusted: only render genuine http(s) URLs to keep a
-  // `javascript:`/`data:` value from becoming a clickable script sink.
+  // link fields are untrusted: render only genuine http(s) URLs.
   const commit = safeHttpUrl(result.commit)
   const release = safeHttpUrl(result.release)
   const review = safeHttpUrl(result.review)
@@ -201,9 +200,9 @@ const SubmissionBody = ({
     error,
   } = useGetSubmissionResult(org, classroom, assignment, user?.login)
   // Distinguish "never accepted" (no repo) from "accepted but not yet graded".
-  // getRepo returns null only on a true 404; a 403/5xx throws, so we must read
-  // the repo query's error too — otherwise a transient/permission failure falls
-  // through to the "haven't accepted yet" CTA and misdirects the student.
+  // getRepo returns null only on a true 404; a 403/5xx throws, so read the repo
+  // query's error too — otherwise a transient/permission failure falls through
+  // to the "haven't accepted yet" CTA and misdirects the student.
   const {
     assignment: studentRepo,
     isLoading: repoLoading,

@@ -655,14 +655,11 @@ export async function ensureOrgMembership(
   }
 }
 
-// Resend an org invitation without ever leaving the student invite-less.
-//
-// The previous order (cancel -> recreate) stranded a student with no invite if
-// the recreate failed (rate limit / 5xx) after the cancel succeeded. Instead we
-// recreate first and only cancel the stale invite once a replacement exists. If
-// the stale invite still occupies the slot (createOrgInvitation 422s because the
-// student is already "pending"), the existing invite is itself the live one, so
-// we leave it in place rather than cancelling a still-valid invitation.
+// Resend an org invite without ever leaving the student invite-less. The old
+// cancel-then-recreate order stranded a student if the recreate failed; instead
+// recreate first and cancel the stale invite only once a replacement exists. If
+// a still-pending invite blocks the recreate (createOrgInvitation 422s), that
+// existing invite is the live one, so leave it in place.
 export async function resendOrgInvitation(
   client: GitHubClient,
   input: {
@@ -676,8 +673,8 @@ export async function resendOrgInvitation(
 
   const result = await ensureOrgMembership(client, { org, username, inviteeId })
 
-  // Only a freshly created invite makes the prior one stale; if the student was
-  // already active/pending we created nothing and must not cancel their invite.
+  // A fresh invite makes the prior one stale; an already active/pending student
+  // means we created nothing, so don't cancel their invite.
   if (invitationId !== undefined && result.state === "invited") {
     await cancelOrgInvitation(client, { org, invitationId })
   }
