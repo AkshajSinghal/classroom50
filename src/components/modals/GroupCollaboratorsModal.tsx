@@ -10,8 +10,10 @@ import useRemoveRepoCollaborator from "@/hooks/useRemoveRepoCollaborator"
 import { getName } from "@/util/students"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import type { Student } from "@/types/classroom"
+import { GROUP_SIZE_MIN } from "@/types/classroom"
 
-const normalizeUsername = (username: string) => username.trim().toLowerCase()
+const normalizeUsername = (username: string) =>
+  username.trim().replace(/^@/, "").toLowerCase()
 
 // The usernames whose settled promise rejected, by index into the input list.
 const rejectedItems = <T,>(
@@ -89,6 +91,10 @@ export function GroupCollaboratorsModal({
 }: GroupCollaboratorsModalProps) {
   const dialogRef = useRef<HTMLDialogElement | null>(null)
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Synchronous re-entrancy guard: isSaving derives from mutation.isPending,
+  // which updates a tick late, so a rapid double-click could otherwise start two
+  // overlapping save passes (double DELETE -> spurious failure).
+  const savingRef = useRef(false)
   const { user } = useGithubAuth()
 
   const {
@@ -109,8 +115,9 @@ export function GroupCollaboratorsModal({
   )
 
   // max_group_size includes the owner, so the addable count is one less
-  // (size 2 = owner + 1 collaborator).
-  const maxCollaborators = Math.max((maxGroupSize ?? 1) - 1, 0)
+  // (size 2 = owner + 1 collaborator). Fall back to the schema minimum when the
+  // size is unknown, so a group assignment never locks to owner-only.
+  const maxCollaborators = Math.max((maxGroupSize ?? GROUP_SIZE_MIN) - 1, 0)
 
   const ownerLoginResolved = normalizeUsername(ownerLogin)
 
@@ -253,81 +260,88 @@ export function GroupCollaboratorsModal({
   }
 
   const handleSave = async () => {
-    if (tooMany || hasDuplicates || isSaving) return
+    if (tooMany || hasDuplicates || isSaving || savingRef.current) return
+    savingRef.current = true
 
-    setSubmitError(null)
-    setInvalidCollaborators(new Set())
-    setSaved(false)
+    try {
+      setSubmitError(null)
+      setInvalidCollaborators(new Set())
+      setSaved(false)
 
-    const next = draftCollaborators.map(normalizeUsername).filter(Boolean)
-    const previous = new Set(initialCollaborators)
-    const nextSet = new Set(next)
+      const next = draftCollaborators.map(normalizeUsername).filter(Boolean)
+      const previous = new Set(initialCollaborators)
+      const nextSet = new Set(next)
 
-    const toAdd = [...nextSet].filter((username) => !previous.has(username))
-    const toRemove = [...previous].filter((username) => !nextSet.has(username))
+      const toAdd = [...nextSet].filter((username) => !previous.has(username))
+      const toRemove = [...previous].filter(
+        (username) => !nextSet.has(username),
+      )
 
-    // Remove before add so a swap at max group size frees a slot first.
-    const removeResults = await Promise.allSettled(
-      toRemove.map(async (username) => {
-        await removeCollaboratorMutation.mutateAsync({
-          org,
-          repo: repoName,
-          username,
-        })
-        return username
-      }),
-    )
+      // Remove before add so a swap at max group size frees a slot first.
+      const removeResults = await Promise.allSettled(
+        toRemove.map(async (username) => {
+          await removeCollaboratorMutation.mutateAsync({
+            org,
+            repo: repoName,
+            username,
+          })
+          return username
+        }),
+      )
 
-    const addResults = await Promise.allSettled(
-      toAdd.map(async (username) => {
-        await addCollaboratorMutation.mutateAsync({
-          org,
-          repo: repoName,
-          username,
-          permission: "push",
-        })
-        return username
-      }),
-    )
+      const addResults = await Promise.allSettled(
+        toAdd.map(async (username) => {
+          await addCollaboratorMutation.mutateAsync({
+            org,
+            repo: repoName,
+            username,
+            permission: "push",
+          })
+          return username
+        }),
+      )
 
-    const failedAdds = rejectedItems(addResults, toAdd)
-    const failedRemoves = rejectedItems(removeResults, toRemove)
+      const failedAdds = rejectedItems(addResults, toAdd)
+      const failedRemoves = rejectedItems(removeResults, toRemove)
 
-    if (failedAdds.length || failedRemoves.length) {
-      setInvalidCollaborators(new Set(failedAdds.map(normalizeUsername)))
+      if (failedAdds.length || failedRemoves.length) {
+        setInvalidCollaborators(new Set(failedAdds.map(normalizeUsername)))
 
-      const firstReason =
-        [...addResults, ...removeResults].find(
-          (r) => r.status === "rejected",
-        ) ?? null
-      const detail =
-        firstReason && firstReason.status === "rejected"
-          ? describeFailure(firstReason.reason)
-          : null
-      const suffix = detail ? ` ${detail}` : ""
+        const firstReason =
+          [...addResults, ...removeResults].find(
+            (r) => r.status === "rejected",
+          ) ?? null
+        const detail =
+          firstReason && firstReason.status === "rejected"
+            ? describeFailure(firstReason.reason)
+            : null
+        const suffix = detail ? ` ${detail}` : ""
 
-      if (failedAdds.length && failedRemoves.length) {
-        setSubmitError(
-          `Some collaborators could not be added or removed. Check the highlighted usernames and try again.${suffix}`,
-        )
-      } else if (failedAdds.length) {
-        setSubmitError(
-          `Some collaborators could not be added. Check the highlighted usernames and try again.${suffix}`,
-        )
-      } else {
-        setSubmitError(
-          `Some collaborators could not be removed. Refresh and try again.${suffix}`,
-        )
+        if (failedAdds.length && failedRemoves.length) {
+          setSubmitError(
+            `Some collaborators could not be added or removed. Check the highlighted usernames and try again.${suffix}`,
+          )
+        } else if (failedAdds.length) {
+          setSubmitError(
+            `Some collaborators could not be added. Check the highlighted usernames and try again.${suffix}`,
+          )
+        } else {
+          setSubmitError(
+            `Some collaborators could not be removed. Refresh and try again.${suffix}`,
+          )
+        }
+
+        await refetchCollaborators()
+        return
       }
 
       await refetchCollaborators()
-      return
+      setSaved(true)
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+      savedTimerRef.current = setTimeout(() => setSaved(false), 3000)
+    } finally {
+      savingRef.current = false
     }
-
-    await refetchCollaborators()
-    setSaved(true)
-    if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
-    savedTimerRef.current = setTimeout(() => setSaved(false), 3000)
   }
 
   // Prefer the roster/collaborator casing of the owner login for display.

@@ -360,13 +360,15 @@ const CreateAssignmentForm = ({
           errors.max_group_size = "Max group size must be a valid number."
         } else if (
           value.mode === "group" &&
-          (Number(value.max_group_size) < GROUP_SIZE_MIN ||
+          (!Number.isInteger(Number(value.max_group_size)) ||
+            Number(value.max_group_size) < GROUP_SIZE_MIN ||
             Number(value.max_group_size) > GROUP_SIZE_MAX)
         ) {
-          // The CLI's schema bounds group size to [GROUP_SIZE_MIN,
-          // GROUP_SIZE_MAX]; an out-of-range value would make the whole
-          // assignments.json unparseable.
-          errors.max_group_size = `Group size must be between ${GROUP_SIZE_MIN} and ${GROUP_SIZE_MAX}.`
+          // The CLI's schema bounds group size to a whole number in
+          // [GROUP_SIZE_MIN, GROUP_SIZE_MAX]; a non-integer or out-of-range
+          // value would make the whole assignments.json unparseable. Mirrors the
+          // buildAssignmentEntry guard so the form rejects it inline too.
+          errors.max_group_size = `Group size must be a whole number between ${GROUP_SIZE_MIN} and ${GROUP_SIZE_MAX}.`
         }
 
         // Mirrors gh-teacher's write-time validation so a bad test is
