@@ -64,6 +64,7 @@ function sleep(ms: number, signal: AbortSignal) {
 function useGithubAuthState() {
   const queryClient = useQueryClient()
   const abortRef = useRef<AbortController | null>(null)
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [screen, setScreen] = useState<GithubAuthScreen>("config")
   const [clientId, setClientId] = useState(GITHUB_OAUTH_CLIENT_ID)
@@ -107,11 +108,23 @@ function useGithubAuthState() {
         queryFn: () => fetchGithubUser(data.access_token),
       })
 
-      window.setTimeout(() => {
+      if (successTimerRef.current) clearTimeout(successTimerRef.current)
+      successTimerRef.current = setTimeout(() => {
         setScreen("authed")
       }, 3500)
     },
     [queryClient],
+  )
+
+  // Tear down the device-flow poll loop and the pending success-screen timer if
+  // the provider unmounts mid-flow, so neither keeps running (or calls setState)
+  // after teardown.
+  useEffect(
+    () => () => {
+      abortRef.current?.abort()
+      if (successTimerRef.current) clearTimeout(successTimerRef.current)
+    },
+    [],
   )
 
   useEffect(() => {
