@@ -4,7 +4,7 @@ import { useForm } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import useEnsureTeam from "@/hooks/useEnsureTeam"
-import { githubKeys } from "@/hooks/github/queries"
+import { githubKeys, invalidateInviteQueries } from "@/hooks/github/queries"
 import { enrollStudentInClassroom } from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 
@@ -57,15 +57,7 @@ const AddByGithubUsername = ({
       // Enroll sends an org invite, so the new student should show as
       // "Pending invite" — refresh the invitation/member lists that drive the
       // roster status badges (without these, the stale lists show "Not in org").
-      queryClient.invalidateQueries({
-        queryKey: githubKeys.orgInvitations(org),
-      })
-      queryClient.invalidateQueries({
-        queryKey: githubKeys.orgFailedInvitations(org),
-      })
-      queryClient.invalidateQueries({
-        queryKey: ["orgs", "list", "members", org],
-      })
+      invalidateInviteQueries(queryClient, org)
     },
   })
 

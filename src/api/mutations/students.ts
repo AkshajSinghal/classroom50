@@ -16,6 +16,7 @@ import { getRawFile, getUser } from "@/hooks/github/queries"
 import { getAuthenticatedUser } from "@/api/queries/users"
 import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
 import { GitHubAPIError } from "@/hooks/github/errors"
+import { isSameGitHubUser } from "@/util/students"
 import type { Student } from "@/types/classroom"
 
 // The classroom team slug is authoritative in classroom.json: on a name
@@ -755,23 +756,18 @@ export async function unenrollStudent(
   //  - active member: only remove if the teacher opted in (removeFromOrg).
   //  - neither: nothing to do.
   // DELETE /orgs/{org}/memberships/{username} handles both cancel and remove.
-  let orgRemoved = false
-  let selfRemovalBlocked = false
   const orgState = await orgStatePromise
 
-  // Never remove the authenticated teacher from their own org. Match on numeric
-  // id (authoritative), falling back to a case-insensitive login compare.
+  // Never remove the authenticated teacher from their own org (e.g. an owner who
+  // added themselves as a test student) — GitHub would otherwise remove a
+  // non-sole owner, or 403 on the last owner.
   const viewer = await viewerPromise.catch(() => null)
-  const isSelf =
-    viewer != null &&
-    (String(viewer.id) === String(toRemoveStudent.github_id) ||
-      viewer.login.toLowerCase() === normalizedUsername.toLowerCase())
+  const isSelf = isSameGitHubUser(viewer, toRemoveStudent)
 
   const shouldRemoveFromOrg =
     orgState === "pending" || (orgState === "active" && removeFromOrg === true)
 
   if (shouldRemoveFromOrg && isSelf) {
-    selfRemovalBlocked = true
     warnings.push(
       `${toRemoveStudent.username} was removed from the roster. Their ` +
         `organization membership was kept because they are the signed-in ` +
@@ -781,7 +777,6 @@ export async function unenrollStudent(
   } else if (shouldRemoveFromOrg) {
     try {
       await removeOrgMembership(client, { org, username: normalizedUsername })
-      orgRemoved = true
     } catch (err) {
       console.error("org membership removal failed (student unenrolled):", err)
       const detail = getErrorMessage(err)
@@ -800,9 +795,6 @@ export async function unenrollStudent(
     newTreeSha: tree.sha,
     newCommitSha: newCommit.sha,
     updatedRef,
-    orgState,
-    orgRemoved,
-    selfRemovalBlocked,
     teamWarning: warnings.length > 0 ? warnings.join(" ") : undefined,
   }
 }
