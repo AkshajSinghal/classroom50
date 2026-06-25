@@ -38,10 +38,10 @@ const scoreToBadgeType = (score: number, max: number) => {
   return "badge-success"
 }
 
-// Compact group identity for the submissions table: the shared repo plus a
-// stacked avatar group of the live repo collaborators (same source as the
-// Members modal, so the two stay in sync). Falls back to the scores.json
-// `usernames` snapshot while the live list loads or if it's unavailable.
+// Compact group identity: shared repo + stacked avatars. Renders from the
+// scores.json `usernames` snapshot and never fetches (enabled: false) to avoid
+// a per-row GitHub call on mount; reads the shared collaborators cache so the
+// avatars upgrade to live data once the Members modal populates it.
 const MAX_VISIBLE_AVATARS = 4
 
 const GroupMembers = ({
@@ -59,10 +59,13 @@ const GroupMembers = ({
   repoHref: string
   repoLabel: string
 }) => {
-  const { data: collaborators } = useGetRepoCollaborators(org, repoName)
+  // enabled: false — reads the cache the Members modal populates, never fetches.
+  const { data: liveCollaborators } = useGetRepoCollaborators(org, repoName, {
+    enabled: false,
+  })
   const memberLogins =
-    collaborators && collaborators.length > 0
-      ? collaborators.map((c) => c.login)
+    liveCollaborators && liveCollaborators.length > 0
+      ? liveCollaborators.map((c) => c.login)
       : usernames
 
   const visible = memberLogins.slice(0, MAX_VISIBLE_AVATARS)

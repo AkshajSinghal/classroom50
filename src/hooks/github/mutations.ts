@@ -1853,12 +1853,17 @@ export async function addRepoCollaborator(params: {
 }) {
   const { client, org, repo, username, permission = "push" } = params
 
-  // Throws (404) if the user isn't an org member, aborting the add before the
-  // PUT — the modal surfaces that as a "not a member of the org" error.
-  const userReq = await client.requestRaw(
-    `/orgs/${encodeURIComponent(org)}/members/${encodeURIComponent(username)}`,
-  )
-  console.log("user req for " + username, userReq)
+  // Only a definitive 404 (not an org member) blocks the add; transient errors
+  // (rate limit, 5xx, private-membership 403) fall through to the authoritative
+  // PUT rather than falsely rejecting a valid member.
+  try {
+    const userReq = await client.requestRaw(
+      `/orgs/${encodeURIComponent(org)}/members/${encodeURIComponent(username)}`,
+    )
+    console.log("user req for " + username, userReq)
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.isNotFound) throw err
+  }
 
   const res = await client.requestRaw(
     `/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/collaborators/${encodeURIComponent(username)}`,

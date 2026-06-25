@@ -364,10 +364,8 @@ const CreateAssignmentForm = ({
             Number(value.max_group_size) < GROUP_SIZE_MIN ||
             Number(value.max_group_size) > GROUP_SIZE_MAX)
         ) {
-          // The CLI's schema bounds group size to a whole number in
-          // [GROUP_SIZE_MIN, GROUP_SIZE_MAX]; a non-integer or out-of-range
-          // value would make the whole assignments.json unparseable. Mirrors the
-          // buildAssignmentEntry guard so the form rejects it inline too.
+          // Mirror the buildAssignmentEntry guard: the CLI schema needs a whole
+          // number in [MIN, MAX] or assignments.json becomes unparseable.
           errors.max_group_size = `Group size must be a whole number between ${GROUP_SIZE_MIN} and ${GROUP_SIZE_MAX}.`
         }
 
