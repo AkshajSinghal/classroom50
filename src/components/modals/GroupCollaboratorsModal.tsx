@@ -13,9 +13,8 @@ import type { Student } from "@/types/classroom"
 
 const normalizeUsername = (username: string) => username.trim().toLowerCase()
 
-// Turn a rejected add/remove into a human-readable reason. GitHub's status
-// codes mean very different things here, so collapsing everything into "bad
-// username" misleads users (e.g. a 429 rate limit or a 403 permission error).
+// Map a rejected add/remove to a human-readable reason. Collapsing every
+// status into "bad username" hides real causes like a 429 rate limit or a 403.
 const describeFailure = (reason: unknown): string | null => {
   if (reason instanceof GitHubAPIError) {
     if (reason.isRateLimited)
@@ -31,15 +30,35 @@ const describeFailure = (reason: unknown): string | null => {
   return reason instanceof Error ? reason.message : null
 }
 
+// Two-line identity when we have a roster name (name + @handle), else just the
+// @handle. Shared by the owner, member, and marked-for-removal rows.
+const CollaboratorIdentity = ({
+  login,
+  students,
+}: {
+  login: string
+  students: Student[]
+}) => {
+  const name = getName(login, students)
+  return name ? (
+    <>
+      <span className="block truncate text-sm font-medium">{name}</span>
+      <span className="block truncate font-mono text-xs text-base-content/60">
+        @{login}
+      </span>
+    </>
+  ) : (
+    <span className="block truncate font-mono text-sm">@{login}</span>
+  )
+}
+
 type GroupCollaboratorsModalProps = {
   open: boolean
   onClose: () => void
   org: string
   repoName: string
-  // The group founder / repository owner — the student who accepted the
-  // assignment. This is the `owner` segment of the repo name, NOT inferred from
-  // GitHub admin permissions (org owners hold admin on every repo and would
-  // otherwise be mistaken for the founder).
+  // The founder, from the repo-name `owner` segment — never inferred from admin
+  // permissions, since org owners hold admin on every repo.
   ownerLogin: string
   repoUrl?: string
   assignmentName?: string
@@ -80,18 +99,16 @@ export function GroupCollaboratorsModal({
     () => new Set(),
   )
 
-  const maxCollaborators = maxGroupSize ?? 1
+  // max_group_size includes the owner, so the addable count is one less
+  // (size 2 = owner + 1 collaborator).
+  const maxCollaborators = Math.max((maxGroupSize ?? 1) - 1, 0)
 
-  // The repository owner (group founder) is always the repo name's `owner`
-  // segment, passed in as `ownerLogin` — never inferred from admin permissions,
-  // because org owners hold admin on every repo.
   const ownerLoginResolved = normalizeUsername(ownerLogin)
 
-  // The viewer can manage collaborators if they are the founder OR hold admin on
-  // this specific repo. We read the viewer's *effective* repo permission from
-  // the repo object (which reflects inherited org-owner admin) rather than the
-  // collaborator list, because the list is `affiliation=direct` and omits
-  // inherited access — so an org-owner teacher would otherwise be locked out.
+  // Manage access = founder, or admin on this repo. We read the viewer's
+  // effective permission from the repo object (which includes inherited
+  // org-owner admin) rather than the affiliation=direct collaborator list,
+  // which omits inherited access and would lock out org-owner teachers.
   const { data: repo } = useGetRepo(org, repoName)
   const viewerLogin = user?.login ? normalizeUsername(user.login) : null
   const canManage = Boolean(
@@ -99,8 +116,7 @@ export function GroupCollaboratorsModal({
     (viewerLogin === ownerLoginResolved || repo?.permissions?.admin === true),
   )
 
-  // Members are every collaborator that isn't the founder. (The list is already
-  // `affiliation=direct`, so inherited org-owner access doesn't appear here.)
+  // Members = every direct collaborator except the founder.
   const initialCollaborators = useMemo(
     () =>
       collaborators
@@ -109,11 +125,9 @@ export function GroupCollaboratorsModal({
     [collaborators, ownerLoginResolved],
   )
 
-  // Seed the editable draft from the live collaborators once per open, and again
-  // when the underlying repo changes (the shared modal in the teacher table
-  // switches between groups without closing). A background refetch — e.g.
-  // refetchOnWindowFocus — must NOT reseed, or it would clobber unsaved edits;
-  // so we key the seed on `open` + `repoName`, not on the collaborators identity.
+  // Seed the draft once per open and per repo change (the teacher table reuses
+  // one modal across groups). Keying on open+repoName — not the collaborators
+  // identity — stops a background refetch from clobbering unsaved edits.
   const seededKeyRef = useRef<string | null>(null)
   useEffect(() => {
     if (!open) {
@@ -180,12 +194,54 @@ export function GroupCollaboratorsModal({
   }
 
   const tooMany = draftCollaborators.length > maxCollaborators
+  const isFull = draftCollaborators.length >= maxCollaborators
   const hasDuplicates =
     new Set(draftCollaborators.map(normalizeUsername)).size !==
     draftCollaborators.length
 
   const isSaving =
     addCollaboratorMutation.isPending || removeCollaboratorMutation.isPending
+
+  // Dropped from the draft but still a live collaborator: removed only on Save,
+  // and restorable via undo until then.
+  const draftSet = useMemo(
+    () => new Set(draftCollaborators.map(normalizeUsername)),
+    [draftCollaborators],
+  )
+  const markedForRemoval = useMemo(
+    () => initialCollaborators.filter((login) => !draftSet.has(login)),
+    [initialCollaborators, draftSet],
+  )
+  const hasChanges =
+    markedForRemoval.length > 0 ||
+    draftCollaborators.some(
+      (login) => !initialCollaborators.includes(normalizeUsername(login)),
+    )
+
+  const removeFromDraft = (username: string) => {
+    clearInvalidCollaborator(username)
+    setDraftCollaborators((current) =>
+      current.filter(
+        (entry) => normalizeUsername(entry) !== normalizeUsername(username),
+      ),
+    )
+  }
+
+  const restoreToDraft = (username: string) => {
+    clearInvalidCollaborator(username)
+    setDraftCollaborators((current) =>
+      current.map(normalizeUsername).includes(normalizeUsername(username))
+        ? current
+        : [...current, username],
+    )
+  }
+
+  const discardChanges = () => {
+    setInvalidCollaborators(new Set())
+    setSubmitError(null)
+    setNewCollaborator("")
+    setDraftCollaborators(initialCollaborators)
+  }
 
   const handleSave = async () => {
     if (tooMany || hasDuplicates || isSaving) return
@@ -201,8 +257,7 @@ export function GroupCollaboratorsModal({
     const toAdd = [...nextSet].filter((username) => !previous.has(username))
     const toRemove = [...previous].filter((username) => !nextSet.has(username))
 
-    // Removes run before adds so a member swap at max group size frees a slot
-    // before the replacement is added.
+    // Remove before add so a swap at max group size frees a slot first.
     const removeResults = await Promise.allSettled(
       toRemove.map(async (username) => {
         await removeCollaboratorMutation.mutateAsync({
@@ -375,20 +430,10 @@ export function GroupCollaboratorsModal({
                 <div className="flex items-center gap-2 rounded-2xl border border-base-200 bg-base-50 p-2 pl-4">
                   <GitHub className="size-6 shrink-0" />
                   <span className="min-w-0 flex-1 leading-tight">
-                    {getName(ownerDisplayLogin, students) ? (
-                      <>
-                        <span className="block truncate text-sm font-medium">
-                          {getName(ownerDisplayLogin, students)}
-                        </span>
-                        <span className="block truncate font-mono text-xs text-base-content/60">
-                          @{ownerDisplayLogin}
-                        </span>
-                      </>
-                    ) : (
-                      <span className="block truncate font-mono text-sm">
-                        @{ownerDisplayLogin}
-                      </span>
-                    )}
+                    <CollaboratorIdentity
+                      login={ownerDisplayLogin}
+                      students={students}
+                    />
                   </span>
                   <span className="badge badge-primary badge-soft">Owner</span>
                 </div>
@@ -400,13 +445,12 @@ export function GroupCollaboratorsModal({
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {draftCollaborators.map((username, index) => {
+                  {draftCollaborators.map((username) => {
                     const normalized = normalizeUsername(username)
                     const isInvalid = invalidCollaborators.has(normalized)
-                    const name = getName(normalized, students)
 
                     return (
-                      <div key={`${username}-${index}`} className="space-y-1">
+                      <div key={username} className="space-y-1">
                         <div
                           className={[
                             "flex items-center gap-2 rounded-2xl border p-2 pl-4 transition-colors",
@@ -423,20 +467,10 @@ export function GroupCollaboratorsModal({
                           />
 
                           <span className="min-w-0 flex-1 leading-tight">
-                            {name ? (
-                              <>
-                                <span className="block truncate text-sm font-medium">
-                                  {name}
-                                </span>
-                                <span className="block truncate font-mono text-xs text-base-content/60">
-                                  @{username}
-                                </span>
-                              </>
-                            ) : (
-                              <span className="block truncate font-mono text-sm">
-                                @{username}
-                              </span>
-                            )}
+                            <CollaboratorIdentity
+                              login={username}
+                              students={students}
+                            />
                           </span>
 
                           {canManage && (
@@ -444,12 +478,7 @@ export function GroupCollaboratorsModal({
                               type="button"
                               className="btn btn-ghost btn-sm btn-square text-error"
                               aria-label={`Remove ${username}`}
-                              onClick={() => {
-                                clearInvalidCollaborator(username)
-                                setDraftCollaborators((current) =>
-                                  current.filter((_, i) => i !== index),
-                                )
-                              }}
+                              onClick={() => removeFromDraft(username)}
                             >
                               <Trash2 className="size-4" />
                             </button>
@@ -469,9 +498,43 @@ export function GroupCollaboratorsModal({
                 </div>
               )}
 
+              {markedForRemoval.length > 0 && (
+                <div className="space-y-2 rounded-2xl border border-warning/40 bg-warning/5 p-3">
+                  <p className="text-xs font-medium text-base-content/70">
+                    Marked for removal — applied when you save
+                  </p>
+                  {markedForRemoval.map((username) => {
+                    return (
+                      <div
+                        key={`remove-${username}`}
+                        className="flex items-center gap-2 rounded-2xl border border-base-200 bg-base-100 p-2 pl-4"
+                      >
+                        <GitHub className="size-6 shrink-0 text-base-content/40" />
+                        <span className="min-w-0 flex-1 leading-tight line-through opacity-60">
+                          <CollaboratorIdentity
+                            login={username}
+                            students={students}
+                          />
+                        </span>
+                        {canManage && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => restoreToDraft(username)}
+                          >
+                            Undo
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
               {tooMany && (
                 <p className="text-sm text-error">
-                  Assignment has a max group size of {maxCollaborators}.
+                  This assignment has a maximum group size of{" "}
+                  {maxGroupSize ?? 1} (including the owner).
                 </p>
               )}
               {hasDuplicates && (
@@ -480,7 +543,7 @@ export function GroupCollaboratorsModal({
                 </p>
               )}
 
-              {canManage && (
+              {canManage && !isFull && (
                 <div className="rounded-2xl border border-base-200 bg-base-200/30 p-4">
                   <div className="flex flex-col gap-3 sm:flex-row">
                     <input
@@ -499,7 +562,6 @@ export function GroupCollaboratorsModal({
                       type="button"
                       className="btn btn-outline"
                       onClick={addPendingUsername}
-                      disabled={draftCollaborators.length >= maxCollaborators}
                     >
                       <Plus className="size-4" />
                       Add
@@ -510,6 +572,12 @@ export function GroupCollaboratorsModal({
                     access when you save.
                   </p>
                 </div>
+              )}
+
+              {canManage && isFull && (
+                <p className="text-xs text-base-content/60">
+                  This group is full. Remove a collaborator to add someone else.
+                </p>
               )}
             </div>
           </>
@@ -522,14 +590,28 @@ export function GroupCollaboratorsModal({
             disabled={isSaving}
             onClick={() => onClose()}
           >
-            Close
+            Cancel
           </button>
+          {canManage && hasChanges && (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={isSaving}
+              onClick={discardChanges}
+            >
+              Discard changes
+            </button>
+          )}
           {canManage && (
             <button
               type="button"
               className="btn btn-primary"
               disabled={
-                loadingCollaborators || isSaving || tooMany || hasDuplicates
+                loadingCollaborators ||
+                isSaving ||
+                tooMany ||
+                hasDuplicates ||
+                !hasChanges
               }
               onClick={() => void handleSave()}
             >
