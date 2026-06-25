@@ -67,8 +67,9 @@ const SubmissionsPage = () => {
       setCopiedSubmitLink(false)
     }, 1500)
   }
-  const assignmentInfo =
-    assignmentData?.assignments.find((a) => a.slug === assignment)
+  const assignmentInfo = assignmentData?.assignments.find(
+    (a) => a.slug === assignment,
+  )
   const isGroupAssignment = assignmentInfo?.mode === "group"
   const scoresInfo = scoresData?.submissions?.[assignment] || []
 
@@ -207,8 +208,8 @@ const SubmissionsPage = () => {
                 )}
                 {collectScores.phase === "timeout" && (
                   <p className="mt-1 text-sm text-base-content/70">
-                    Still running after a while. Check its progress on GitHub, or
-                    refresh this page once it finishes.
+                    Still running after a while. Check its progress on GitHub,
+                    or refresh this page once it finishes.
                   </p>
                 )}
               </div>
@@ -335,6 +336,8 @@ const SubmissionsPage = () => {
             org={org}
             classroom={classroom}
             assignment={assignment}
+            assignmentName={assignmentInfo?.name}
+            maxGroupSize={assignmentInfo?.max_group_size}
           />
         </DrawerContent>
         <DrawerSidebar selected="assignments" />
