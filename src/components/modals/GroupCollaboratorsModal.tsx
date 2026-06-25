@@ -13,6 +13,15 @@ import type { Student } from "@/types/classroom"
 
 const normalizeUsername = (username: string) => username.trim().toLowerCase()
 
+// The usernames whose settled promise rejected, by index into the input list.
+const rejectedItems = <T,>(
+  results: PromiseSettledResult<unknown>[],
+  items: T[],
+): T[] =>
+  results.flatMap((result, i) =>
+    result.status === "rejected" ? [items[i]] : [],
+  )
+
 // Map a rejected add/remove to a human-readable reason. Collapsing every
 // status into "bad username" hides real causes like a 429 rate limit or a 403.
 const describeFailure = (reason: unknown): string | null => {
@@ -281,17 +290,8 @@ export function GroupCollaboratorsModal({
       }),
     )
 
-    const failedAdds = addResults
-      .map((result, index) =>
-        result.status === "rejected" ? toAdd[index] : null,
-      )
-      .filter(Boolean) as string[]
-
-    const failedRemoves = removeResults
-      .map((result, index) =>
-        result.status === "rejected" ? toRemove[index] : null,
-      )
-      .filter(Boolean) as string[]
+    const failedAdds = rejectedItems(addResults, toAdd)
+    const failedRemoves = rejectedItems(removeResults, toRemove)
 
     if (failedAdds.length || failedRemoves.length) {
       setInvalidCollaborators(new Set(failedAdds.map(normalizeUsername)))
@@ -335,6 +335,8 @@ export function GroupCollaboratorsModal({
     collaborators?.find(
       (c) => normalizeUsername(c.login) === ownerLoginResolved,
     )?.login ?? ownerLogin
+
+  const personCount = draftCollaborators.length + (ownerDisplayLogin ? 1 : 0)
 
   return (
     <dialog
@@ -410,11 +412,7 @@ export function GroupCollaboratorsModal({
               <div className="mb-2 flex items-center justify-between gap-4">
                 <span className="text-sm font-medium">Group members</span>
                 <span className="text-xs text-base-content/60">
-                  {(() => {
-                    const count =
-                      draftCollaborators.length + (ownerDisplayLogin ? 1 : 0)
-                    return `${count} ${count === 1 ? "person" : "people"}`
-                  })()}
+                  {personCount} {personCount === 1 ? "person" : "people"}
                 </span>
               </div>
 
