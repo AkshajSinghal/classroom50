@@ -1853,6 +1853,8 @@ export async function addRepoCollaborator(params: {
 }) {
   const { client, org, repo, username, permission = "push" } = params
 
+  // Throws (404) if the user isn't an org member, aborting the add before the
+  // PUT — the modal surfaces that as a "not a member of the org" error.
   const userReq = await client.requestRaw(
     `/orgs/${encodeURIComponent(org)}/members/${encodeURIComponent(username)}`,
   )
