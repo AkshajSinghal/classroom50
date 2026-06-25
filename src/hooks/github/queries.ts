@@ -1,4 +1,5 @@
 import { queryOptions } from "@tanstack/react-query"
+import type { QueryClient } from "@tanstack/react-query"
 import Papa from "papaparse"
 
 import type { GitHubClient } from "./client"
@@ -37,6 +38,9 @@ export const githubKeys = {
 
   orgFailedInvitations: (org: string) =>
     [...githubKeys.all, "org-failed-invitations", org] as const,
+
+  orgMembers: (org: string) =>
+    ["orgs", "list", "members", org] as const,
 
   orgRunners: (org: string) => [...githubKeys.all, "org-runners", org] as const,
 
@@ -82,6 +86,21 @@ export const githubKeys = {
 
   serviceToken: (owner: string) =>
     [...githubKeys.all, "serviceToken", owner] as const,
+}
+
+// Refresh the lists that drive roster invite status after a change that may
+// have created, cancelled, or accepted an org invitation (enroll, resend,
+// unenroll). A resend moves an invite between the pending and failed lists, and
+// accepting moves a user into members, so all three are invalidated.
+export function invalidateInviteQueries(
+  queryClient: QueryClient,
+  org: string,
+) {
+  queryClient.invalidateQueries({ queryKey: githubKeys.orgInvitations(org) })
+  queryClient.invalidateQueries({
+    queryKey: githubKeys.orgFailedInvitations(org),
+  })
+  queryClient.invalidateQueries({ queryKey: githubKeys.orgMembers(org) })
 }
 
 export function viewerQuery(client: GitHubClient) {

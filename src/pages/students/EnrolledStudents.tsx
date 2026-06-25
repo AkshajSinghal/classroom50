@@ -1,6 +1,6 @@
 import { Check, Copy, Send, Trash } from "lucide-react"
 
-import { getName, getInitials } from "@/util/students"
+import { getName, getInitials, isSameGitHubUser } from "@/util/students"
 import { formatInvitedAt } from "@/util/formatDate"
 import Avatar from "@/components/avatar"
 import type { Student } from "@/types/classroom"
@@ -10,7 +10,10 @@ import { unenrollStudent } from "@/api/mutations/students"
 import type { UnenrollStudentInput } from "@/api/mutations/students"
 import { resendOrgInvitation, getErrorMessage } from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
-import { githubKeys } from "@/hooks/github/queries"
+import {
+  githubKeys,
+  invalidateInviteQueries as invalidateInviteQueriesForOrg,
+} from "@/hooks/github/queries"
 import useGetOrgMembers from "@/hooks/useGetOrgMembers"
 import useGetOrgInvitations from "@/hooks/useGetOrgInvitations"
 import { useGitHubViewer } from "@/hooks/github/hooks"
@@ -230,12 +233,21 @@ const InviteStatusBadge = ({ status }: { status: InviteStatus }) => {
 const InviteLink = ({ org }: { org: string }) => {
   const inviteUrl = `https://github.com/orgs/${org}/invitation`
   const [copied, setCopied] = useState(false)
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(
+    () => () => {
+      if (resetTimerRef.current) clearTimeout(resetTimerRef.current)
+    },
+    [],
+  )
 
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(inviteUrl)
       setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      if (resetTimerRef.current) clearTimeout(resetTimerRef.current)
+      resetTimerRef.current = setTimeout(() => setCopied(false), 2000)
     } catch {
       setCopied(false)
     }
@@ -352,15 +364,8 @@ const EnrolledStudents = ({
       return next
     })
 
-  const invalidateInviteQueries = () => {
-    queryClient.invalidateQueries({ queryKey: githubKeys.orgInvitations(org) })
-    queryClient.invalidateQueries({
-      queryKey: githubKeys.orgFailedInvitations(org),
-    })
-    queryClient.invalidateQueries({
-      queryKey: ["orgs", "list", "members", org],
-    })
-  }
+  const invalidateInviteQueries = () =>
+    invalidateInviteQueriesForOrg(queryClient, org)
 
   // Resend (or first-time invite) for one student. Returns true on success.
   // `none` students have no invitation id, so this is a plain create; `expired`
@@ -504,10 +509,7 @@ const EnrolledStudents = ({
             status === "pending" || status === "expired"
               ? formatInvitedAt(statusEntry?.invitedAt)
               : null
-          const isSelf =
-            viewer != null &&
-            (String(viewer.id) === String(student.github_id) ||
-              viewer.login.toLowerCase() === student.username.toLowerCase())
+          const isSelf = isSameGitHubUser(viewer, student)
 
           return (
             <li

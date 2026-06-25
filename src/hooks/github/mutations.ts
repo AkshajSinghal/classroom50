@@ -546,7 +546,7 @@ export async function removeUserFromTeam(
 // primitive — body is invitee_id + role only (no team_ids, no email). Team
 // membership is a separate PUT. invitee_id must be a number (a string 422s).
 // Owner-only.
-export function createOrgInvitation(
+function createOrgInvitation(
   client: GitHubClient,
   input: {
     org: string
@@ -624,7 +624,7 @@ export async function getOrgMembershipState(
   }
 }
 
-export type EnsureOrgMembershipResult = {
+type EnsureOrgMembershipResult = {
   // "active"/"pending" = already a member or already invited (no new invite
   // sent); "invited" = a fresh invitation was created.
   state: OrgMembershipState | "invited"
