@@ -72,7 +72,7 @@ const SubmissionsPage = () => {
     (a) => a.slug === assignment,
   )
   const isGroupAssignment = assignmentInfo?.mode === "group"
-  const scoresInfo = scoresData?.submissions?.[assignment] || []
+  const scoresInfo = scoresData?.submissions?.[assignment ?? ""] || []
 
   // Count repos whose latest submission landed after the deadline. `late` is
   // computed upstream (collect_scores.py) from the push time, not the grade
@@ -167,6 +167,14 @@ const SubmissionsPage = () => {
     link.click()
 
     URL.revokeObjectURL(url)
+  }
+
+  if (!org || !classroom || !assignment) {
+    return (
+      <div className="alert alert-error m-10">
+        Missing organization, classroom, or assignment in the URL.
+      </div>
+    )
   }
 
   return (

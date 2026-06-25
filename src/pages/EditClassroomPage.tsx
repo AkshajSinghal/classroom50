@@ -11,7 +11,11 @@ import { GitHubAPIError } from "@/hooks/github/errors"
 import { useState } from "react"
 import { githubKeys } from "@/hooks/github/queries"
 import useGetClassroom from "@/hooks/useGetClassroom"
-import { editClassroom } from "@/hooks/github/mutations"
+import {
+  editClassroom,
+  type EditClassroomInput,
+  type EditClassroomResult,
+} from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 
 const EditClassroomPage = () => {
@@ -52,7 +56,7 @@ const EditClassroomPage = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
-        queryKey: githubKeys.rawFile(org, "classroom50", `/`),
+        queryKey: githubKeys.rawFile(org ?? "", "classroom50", `/`),
       })
       setClassroomEdited(true)
     },
@@ -69,6 +73,12 @@ const EditClassroomPage = () => {
   if (!cl) {
     return (
       <div className="alert alert-error">Could not load classroom data.</div>
+    )
+  }
+
+  if (!org || !classroom) {
+    return (
+      <div className="alert alert-error">Missing organization or classroom.</div>
     )
   }
 
@@ -96,7 +106,11 @@ const EditClassroomPage = () => {
             <div className="alert alert-success mb-4">
               <div>
                 Your classroom has been edited successfully. Click{" "}
-                <Link className="underline" to={`/${org}/${classroom}`}>
+                <Link
+                  className="underline"
+                  to="/$org/$classroom"
+                  params={{ org, classroom }}
+                >
                   here
                 </Link>{" "}
                 to view your new classroom.
