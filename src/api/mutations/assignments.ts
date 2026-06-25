@@ -980,7 +980,7 @@ export async function editAssignmentWithConflictRetry(
   return withGitConflictRetry(() => editAssignment(client, input))
 }
 
-function createClassroom50Yaml(params: {
+export function createClassroom50Yaml(params: {
   classroom: string
   assignment: string
   // Repo owner identity. `id` is GitHub's immutable numeric user id, recorded
