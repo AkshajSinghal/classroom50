@@ -14,6 +14,7 @@ import Avatar from "@/components/avatar"
 import { GroupCollaboratorsModal } from "@/components/modals/GroupCollaboratorsModal"
 import type { SubmissionAttempt, SubmissionRow } from "@/hooks/useGetScores"
 import useGetFeedbackPr from "@/hooks/useGetFeedbackPr"
+import useGetRepoCollaborators from "@/hooks/useGetRepoCollaborators"
 import type { Student } from "@/types/classroom"
 
 const formatDateTime = (datetime: string) =>
@@ -37,24 +38,35 @@ const scoreToBadgeType = (score: number, max: number) => {
   return "badge-success"
 }
 
-// Compact group identity for the submissions table: the shared repo (the
-// group's identity) plus a stacked avatar group of its members. Full member
-// detail lives in the Members modal, so this stays terse.
+// Compact group identity for the submissions table: the shared repo plus a
+// stacked avatar group of the live repo collaborators (same source as the
+// Members modal, so the two stay in sync). Falls back to the scores.json
+// `usernames` snapshot while the live list loads or if it's unavailable.
 const MAX_VISIBLE_AVATARS = 4
 
 const GroupMembers = ({
+  org,
+  repoName,
   usernames,
   students,
   repoHref,
   repoLabel,
 }: {
+  org: string
+  repoName: string
   usernames: string[]
   students: Student[]
   repoHref: string
   repoLabel: string
 }) => {
-  const visible = usernames.slice(0, MAX_VISIBLE_AVATARS)
-  const overflow = usernames.length - visible.length
+  const { data: collaborators } = useGetRepoCollaborators(org, repoName)
+  const memberLogins =
+    collaborators && collaborators.length > 0
+      ? collaborators.map((c) => c.login)
+      : usernames
+
+  const visible = memberLogins.slice(0, MAX_VISIBLE_AVATARS)
+  const overflow = memberLogins.length - visible.length
 
   return (
     <div className="flex flex-col gap-2">
@@ -91,7 +103,7 @@ const GroupMembers = ({
         {overflow > 0 && (
           <div
             className="avatar avatar-placeholder"
-            title={usernames.slice(MAX_VISIBLE_AVATARS).join(", ")}
+            title={memberLogins.slice(MAX_VISIBLE_AVATARS).join(", ")}
           >
             <div className="bg-neutral text-neutral-content rounded-full w-7 border-2 border-base-100">
               <span className="text-xs">+{overflow}</span>
@@ -346,6 +358,8 @@ const SubmissionsTable = ({
                         <td>
                           {isGroup ? (
                             <GroupMembers
+                              org={org}
+                              repoName={repo}
                               usernames={usernames}
                               students={students}
                               repoHref={repoHref}

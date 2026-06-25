@@ -34,7 +34,11 @@ const EditAssignmentFormStudent = ({
 
   const [collaboratorsOpen, setCollaboratorsOpen] = useState(false)
 
-  const maxCollaborators = assignmentData?.max_group_size ?? 1
+  // max_group_size includes the owner, so the addable count is one less.
+  const maxCollaborators = Math.max(
+    (assignmentData?.max_group_size ?? 1) - 1,
+    0,
+  )
   const assignmentMode = assignmentData?.mode
 
   if (loadingPublic || loadingRepo) {
