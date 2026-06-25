@@ -17,8 +17,8 @@ export type CourseManifest = {
   }>
 }
 
-// The subset of the repo-query state the verdict depends on. Kept structural so
-// the verdict logic is a pure function we can unit-test without React Query.
+// The repo-query state the verdict depends on. Structural so the verdict logic
+// stays a pure, unit-testable function (no React Query needed).
 export type TeacherVerdictInput = {
   org: string | undefined
   isSuccess: boolean
@@ -39,18 +39,12 @@ export type TeacherVerdict = {
   showTeacherUi: boolean
 }
 
-// Pure, fail-closed role resolution against the org's `classroom50` config repo.
-//
-// - Teacher: the repo GET succeeded and the caller has any non-trivial
-//   permission on it.
-// - Student: a definitive 404 (no access to the config repo).
-// - Blocked: a definitive 403.
-// - Resolved ONLY on a definitive verdict (success / 404 / 403). A transient
-//   5xx/429/network error must NOT resolve the role — otherwise a student
-//   during a blip would be treated as a non-student and promoted into teacher
-//   UI. showTeacherUi additionally requires a positive success verdict, so a
-//   transient error leaves it false (consumers keep their pending state).
-// - An org-less route has no role to resolve.
+// Pure, fail-closed role resolution against the org's `classroom50` config repo:
+// teacher = repo GET succeeded with a non-trivial permission, student = 404,
+// blocked = 403. Resolved only on a definitive verdict (success/404/403) — a
+// transient 5xx/429/network error must NOT resolve, or a student during a blip
+// would be promoted into teacher UI. showTeacherUi also needs a positive
+// success, so a transient error keeps it false. Org-less routes have no role.
 export function resolveTeacherVerdict(
   input: TeacherVerdictInput,
 ): TeacherVerdict {

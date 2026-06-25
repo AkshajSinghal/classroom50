@@ -1,7 +1,6 @@
-// Guards hrefs that originate from data the student (or any non-trusted source)
-// can write — e.g. the `result.json` committed to their own repo's artifacts
-// branch. A `javascript:`/`data:`/`vbscript:` URL rendered into an anchor href
-// is a script-injection sink; only http(s) links are safe to render.
+// Guards hrefs built from untrusted data (e.g. a student's committed
+// `result.json`): a `javascript:`/`data:` value in an anchor href is a script
+// sink, so only http(s) links are safe to render.
 
 export function isSafeHttpUrl(
   value: string | null | undefined,
@@ -11,14 +10,12 @@ export function isSafeHttpUrl(
     const url = new URL(value)
     return url.protocol === "http:" || url.protocol === "https:"
   } catch {
-    // Not an absolute URL (or malformed). Reject — we only render absolute
-    // http(s) links from untrusted result.json fields.
+    // Not an absolute URL (or malformed) — reject.
     return false
   }
 }
 
-// Returns the URL when it is a safe http(s) link, otherwise undefined so callers
-// can omit the link rather than render an unsafe href.
+// The URL when safe, else undefined so callers can omit the link.
 export function safeHttpUrl(
   value: string | null | undefined,
 ): string | undefined {

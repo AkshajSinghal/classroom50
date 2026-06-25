@@ -385,9 +385,8 @@ export function jsonFileQuery<T>(
         { method: "GET", signal },
       )
 
-      // A truncated/hand-edited file would otherwise reject as a raw SyntaxError
-      // and surface no useful message; throw a friendly one naming the file so
-      // consumers can render it (matching submissionResultQuery).
+      // Throw a friendly error naming the file rather than a raw SyntaxError
+      // (matches submissionResultQuery).
       try {
         return JSON.parse(raw) as T
       } catch {
@@ -404,10 +403,9 @@ export function jsonFileQuery<T>(
 
 const ARTIFACTS_BRANCH = "artifacts"
 const RESULT_PATH = "result.json"
-// The result.json contract this client understands. A future result/v2 may
-// rename or reshape fields, so we fail loudly on an unrecognized version rather
-// than silently mis-rendering a v2 payload through the v1 type (mirrors
-// extractAssignments' version guard for assignments.json).
+// The result.json contract this client understands; a future result/v2 may
+// reshape fields, so reject an unrecognized version rather than mis-render it
+// (mirrors extractAssignments' version guard).
 const RESULT_SCHEMA_PREFIX = "classroom50/result/v1"
 
 // Reads the student's latest graded result from the committed `result.json` on
@@ -452,11 +450,10 @@ export function submissionResultQuery<T>(
         )
       }
 
-      // Reject an unrecognized schema version up front so a newer runner's
-      // reshaped payload fails loudly instead of mis-rendering as v1. Match the
-      // version as an exact segment (the bare prefix or `v1.x`) so a future
-      // `result/v10`/`v1x` is NOT misaccepted as v1. A missing `schema` field is
-      // tolerated for backward compatibility with older result.json files.
+      // Reject an unrecognized schema version (fail loud, don't mis-render).
+      // Match an exact segment (bare prefix or `v1.x`) so `result/v10`/`v1x`
+      // aren't misaccepted as v1. A missing `schema` field is tolerated for
+      // older result.json files.
       const schema =
         typeof parsed === "object" && parsed !== null && "schema" in parsed
           ? (parsed as { schema?: unknown }).schema

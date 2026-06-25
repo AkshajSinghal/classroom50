@@ -342,9 +342,9 @@ const EnrolledStudents = ({
 
   // Resend (or first-time invite for "none"). Returns true on success. "expired"
   // carries an invitation id we cancel first; "none" is a plain create.
-  // Returns what actually happened so callers don't over-report: "invited" =
-  // a fresh invite was sent; "pending"/"active" = no-op (already has a valid
-  // invite / already a member); "skipped" = couldn't attempt (missing id).
+  // What the resend actually did, so callers don't over-report: "invited" = a
+  // fresh invite sent; "pending"/"active" = no-op (still valid / already member);
+  // "skipped" = couldn't attempt (missing id).
   type ResendOutcome = "invited" | "pending" | "active" | "skipped"
 
   const resendForStudent = async (student: Student): Promise<ResendOutcome> => {
@@ -392,9 +392,7 @@ const EnrolledStudents = ({
   }
 
   // Sequential to respect GitHub's 50/24h invite cap and secondary rate limits.
-  // Aggregates a single summary warning. Stops early on a rate-limit error so we
-  // don't keep burning the invite cap (and risking more partial failures) once
-  // GitHub has started throttling.
+  // Stops early on a rate-limit error to avoid burning the cap further.
   const handleResendAll = async () => {
     let resent = 0
     let alreadyValid = 0
@@ -407,8 +405,8 @@ const EnrolledStudents = ({
       try {
         const outcome = await resendForStudent(student)
         if (outcome === "invited") resent++
-        // "pending"/"active" = the student already has a valid invite or is a
-        // member; no invite was re-sent, so don't count it as a failure either.
+        // "pending"/"active" = already has a valid invite / is a member; no
+        // invite was re-sent, but it isn't a failure either.
         else if (outcome === "pending" || outcome === "active") alreadyValid++
         else failures.push(student.username)
       } catch (err) {

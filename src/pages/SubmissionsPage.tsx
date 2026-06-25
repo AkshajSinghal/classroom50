@@ -79,10 +79,8 @@ const SubmissionsPageContent = () => {
   // time, so an on-time push graded after the deadline still counts as on time.
   const lateCount = scoresInfo.filter((row) => row.late).length
 
-  // Class average over numeric scores only. Guards the previous
-  // `sum / length || 1` form, where `/` bound before `||` so a NaN score (or an
-  // empty list) silently displayed "1" instead of flagging bad/absent data.
-  // `null` -> render "N/A" rather than a misleading number.
+  // Class average over numeric scores only. Guards the old `sum/length || 1`
+  // form (`/` bound before `||`, so a NaN/empty result showed "1"); null -> "N/A".
   const classAverage = (() => {
     const numericScores = scoresInfo
       .map((row) => Number(row["score"]))
