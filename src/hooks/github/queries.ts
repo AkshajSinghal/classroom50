@@ -675,6 +675,30 @@ export function pagesAssignmentUrl(org: string, classroom: string) {
   return `https://${org}.github.io/classroom50/${classroom}/assignments.json`
 }
 
+// Public, unauthenticated signal that an org is a real Classroom50 org: the
+// classroom50 repo's publish-pages workflow writes this index at the site
+// root. Anyone (including a student who can't read the private config repo)
+// can probe it to distinguish a genuine Classroom50 org from an unrelated org
+// the user merely belongs to.
+export function classroomsIndexUrl(org: string) {
+  return `https://${org}.github.io/classroom50/classrooms-index.json`
+}
+
+export async function orgPublishesClassroom50Pages(
+  org: string,
+): Promise<boolean> {
+  try {
+    const res = await fetch(classroomsIndexUrl(org), { cache: "no-store" })
+    if (!res.ok) return false
+    // Confirm it's actually the index shape, not a stray 200 (e.g. a custom
+    // 404 page served with 200).
+    const data = (await res.json()) as { classrooms?: unknown }
+    return Array.isArray(data?.classrooms)
+  } catch {
+    return false
+  }
+}
+
 export type AssignmentsJson =
   | Assignment[]
   | {
@@ -747,7 +771,12 @@ export type Classroom50OrgSummary = {
   }
 }
 
-type Classroom50Status = "ready" | "needs_setup" | "no_access" | "unknown"
+type Classroom50Status =
+  | "ready"
+  | "needs_setup"
+  | "no_access"
+  | "not_classroom50"
+  | "unknown"
 export async function getClassroom50OrgSummary(
   client: GitHubClient,
   membership: GitHubOrgMembership,
@@ -768,10 +797,18 @@ export async function getClassroom50OrgSummary(
     if (error instanceof GitHubAPIError && error.status === 404) {
       canAccessRepo = false
 
-      status =
-        membership.state === "active" && membership.role === "admin"
-          ? "needs_setup"
-          : "no_access"
+      if (membership.state === "active" && membership.role === "admin") {
+        // An admin who can't see classroom50 hasn't initialized it yet.
+        status = "needs_setup"
+      } else {
+        // A non-admin gets a 404 both when the org isn't a Classroom50 org and
+        // when it is but the config repo is private to them. Disambiguate via
+        // the public Pages index: present -> a real Classroom50 org they're
+        // enrolled in (no_access but legitimate); absent -> not a Classroom50
+        // org, so the UI can filter it out.
+        const isClassroom50 = await orgPublishesClassroom50Pages(org.login)
+        status = isClassroom50 ? "no_access" : "not_classroom50"
+      }
     } else {
       status = "unknown"
     }

@@ -184,15 +184,19 @@ const OrgsPage = () => {
   const queryClient = useQueryClient()
   const { data: orgs = [], isLoading, isFetching } = useGetOrgs()
 
+  // Orgs that are confirmed Classroom 50 orgs the user can use: a teacher's
+  // ready org, or a student's enrolled org (no_access but the public Pages
+  // index confirmed it).
   const cl50Orgs = orgs?.filter(
     (summary) =>
-      summary.classroom50.status !== "unknown" &&
-      summary.classroom50.status !== "needs_setup",
+      summary.classroom50.status === "ready" ||
+      summary.classroom50.status === "no_access",
   )
+  // Orgs where the signed-in user is an admin who hasn't set up Classroom 50
+  // yet — offered in the "Set Up" section. Unrelated orgs (not_classroom50)
+  // and indeterminate ones (unknown) are filtered out entirely.
   const nonCl50Orgs = orgs?.filter(
-    (summary) =>
-      summary.classroom50.status === "unknown" ||
-      summary.classroom50.status === "needs_setup",
+    (summary) => summary.classroom50.status === "needs_setup",
   )
 
   const handleRefresh = () =>
@@ -237,6 +241,18 @@ const OrgsPage = () => {
                       />
                     ))}
                   </div>
+                  {cl50Orgs?.length === 0 && (
+                    <div className="rounded-2xl border border-dashed border-base-300 bg-base-100 p-8 text-center">
+                      <h2 className="text-lg font-semibold">
+                        No Classroom 50 organizations yet
+                      </h2>
+                      <p className="mx-auto mt-1 max-w-md text-sm text-base-content/60">
+                        Organizations you belong to that use Classroom 50 will
+                        appear here. If you expect one, ask your instructor to
+                        confirm you've been added, then refresh.
+                      </p>
+                    </div>
+                  )}
                 </div>
                 {nonCl50Orgs.length > 0 && <div className="divider" />}
                 {nonCl50Orgs.length > 0 && (
