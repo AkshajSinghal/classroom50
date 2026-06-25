@@ -361,18 +361,15 @@ export function GroupCollaboratorsModal({
             <h3 className="text-lg font-bold">
               {assignmentName || "Group collaborators"}
             </h3>
-            <p className="text-sm font-medium text-base-content/60">
-              Group members
-            </p>
             {repoName && (
               <a
-                className="link mt-1 inline-flex items-center gap-2 font-mono text-sm"
+                className="link mt-1 inline-flex items-center gap-1.5 text-sm"
                 href={repoUrl || `https://github.com/${org}/${repoName}`}
                 target="_blank"
                 rel="noreferrer"
               >
                 <GitHub className="size-4" />
-                {`${org}/${repoName}`}
+                View repository
               </a>
             )}
           </div>
@@ -384,15 +381,6 @@ export function GroupCollaboratorsModal({
           </div>
         ) : (
           <>
-            <p className="mt-4 text-sm text-base-content/70">
-              This assignment allows up to{" "}
-              <span className="font-semibold text-base-content">
-                {maxCollaborators}
-              </span>{" "}
-              student{maxCollaborators === 1 ? "" : "s"} in addition to the
-              group owner.
-            </p>
-
             {saved && (
               <div className="alert alert-success alert-soft mt-4 text-sm">
                 Collaborators saved!
@@ -418,165 +406,155 @@ export function GroupCollaboratorsModal({
               </div>
             )}
 
-            <div className="mt-4 space-y-3">
-              <div className="flex items-center justify-between gap-4">
-                <span className="label-text font-medium">Collaborators</span>
+            <div className="mt-4">
+              <div className="mb-2 flex items-center justify-between gap-4">
+                <span className="text-sm font-medium">Group members</span>
                 <span className="text-xs text-base-content/60">
-                  {draftCollaborators.length} / {maxCollaborators}
+                  {(() => {
+                    const count =
+                      draftCollaborators.length + (ownerDisplayLogin ? 1 : 0)
+                    return `${count} ${count === 1 ? "person" : "people"}`
+                  })()}
                 </span>
               </div>
 
-              {ownerDisplayLogin && (
-                <div className="flex items-center gap-2 rounded-2xl border border-base-200 bg-base-50 p-2 pl-4">
-                  <GitHub className="size-6 shrink-0" />
-                  <span className="min-w-0 flex-1 leading-tight">
-                    <CollaboratorIdentity
-                      login={ownerDisplayLogin}
-                      students={students}
-                    />
-                  </span>
-                  <span className="badge badge-primary badge-soft">Owner</span>
-                </div>
-              )}
+              {/* One bordered list for owner + members + pending removals, so
+                  the modal reads as a single roster rather than stacked cards. */}
+              <ul className="divide-y divide-base-200 rounded-2xl border border-base-200">
+                {ownerDisplayLogin && (
+                  <li className="flex items-center gap-3 px-4 py-2.5">
+                    <GitHub className="size-5 shrink-0 text-base-content/70" />
+                    <span className="min-w-0 flex-1 leading-tight">
+                      <CollaboratorIdentity
+                        login={ownerDisplayLogin}
+                        students={students}
+                      />
+                    </span>
+                    <span className="badge badge-primary badge-soft badge-sm">
+                      Owner
+                    </span>
+                  </li>
+                )}
 
-              {draftCollaborators.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-base-300 p-6 text-center text-sm text-base-content/60">
-                  No collaborators added yet.
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {draftCollaborators.map((username) => {
-                    const normalized = normalizeUsername(username)
-                    const isInvalid = invalidCollaborators.has(normalized)
+                {draftCollaborators.map((username) => {
+                  const normalized = normalizeUsername(username)
+                  const isInvalid = invalidCollaborators.has(normalized)
 
-                    return (
-                      <div key={username} className="space-y-1">
-                        <div
-                          className={[
-                            "flex items-center gap-2 rounded-2xl border p-2 pl-4 transition-colors",
-                            isInvalid
-                              ? "border-error bg-error/5"
-                              : "border-base-200 bg-base-50",
-                          ].join(" ")}
-                        >
-                          <GitHub
-                            className={[
-                              "size-6 shrink-0",
-                              isInvalid ? "text-error" : "text-base-content/70",
-                            ].join(" ")}
-                          />
-
-                          <span className="min-w-0 flex-1 leading-tight">
-                            <CollaboratorIdentity
-                              login={username}
-                              students={students}
-                            />
-                          </span>
-
-                          {canManage && (
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm btn-square text-error"
-                              aria-label={`Remove ${username}`}
-                              onClick={() => removeFromDraft(username)}
-                            >
-                              <Trash2 className="size-4" />
-                            </button>
-                          )}
-                        </div>
-
+                  return (
+                    <li
+                      key={username}
+                      className={[
+                        "flex items-center gap-3 px-4 py-2.5",
+                        isInvalid ? "bg-error/5" : "",
+                      ].join(" ")}
+                    >
+                      <GitHub
+                        className={[
+                          "size-5 shrink-0",
+                          isInvalid ? "text-error" : "text-base-content/70",
+                        ].join(" ")}
+                      />
+                      <span className="min-w-0 flex-1 leading-tight">
+                        <CollaboratorIdentity
+                          login={username}
+                          students={students}
+                        />
                         {isInvalid && (
-                          <p className="pl-11 text-xs text-error">
-                            Could not add this user. Make sure the username is
-                            correct and that they are a member of the GitHub
-                            organization.
-                          </p>
+                          <span className="mt-0.5 block text-xs text-error">
+                            Couldn't add — check the username and org
+                            membership.
+                          </span>
                         )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
+                      </span>
+                      {canManage && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm btn-square text-base-content/50 hover:text-error"
+                          aria-label={`Remove ${username}`}
+                          onClick={() => removeFromDraft(username)}
+                        >
+                          <Trash2 className="size-4" />
+                        </button>
+                      )}
+                    </li>
+                  )
+                })}
 
-              {markedForRemoval.length > 0 && (
-                <div className="space-y-2 rounded-2xl border border-warning/40 bg-warning/5 p-3">
-                  <p className="text-xs font-medium text-base-content/70">
-                    Marked for removal — applied when you save
-                  </p>
-                  {markedForRemoval.map((username) => {
-                    return (
-                      <div
-                        key={`remove-${username}`}
-                        className="flex items-center gap-2 rounded-2xl border border-base-200 bg-base-100 p-2 pl-4"
+                {markedForRemoval.map((username) => (
+                  <li
+                    key={`remove-${username}`}
+                    className="flex items-center gap-3 bg-error/5 px-4 py-2.5"
+                  >
+                    <GitHub className="size-5 shrink-0 text-error/50" />
+                    <span className="min-w-0 flex-1 leading-tight text-error line-through opacity-70">
+                      <CollaboratorIdentity
+                        login={username}
+                        students={students}
+                      />
+                    </span>
+                    <span className="text-xs font-medium text-error/70">
+                      Removing
+                    </span>
+                    {canManage && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm text-error"
+                        onClick={() => restoreToDraft(username)}
                       >
-                        <GitHub className="size-6 shrink-0 text-base-content/40" />
-                        <span className="min-w-0 flex-1 leading-tight line-through opacity-60">
-                          <CollaboratorIdentity
-                            login={username}
-                            students={students}
-                          />
-                        </span>
-                        {canManage && (
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => restoreToDraft(username)}
-                          >
-                            Undo
-                          </button>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
+                        Undo
+                      </button>
+                    )}
+                  </li>
+                ))}
+
+                {draftCollaborators.length === 0 &&
+                  markedForRemoval.length === 0 && (
+                    <li className="px-4 py-6 text-center text-sm text-base-content/50">
+                      No collaborators yet.
+                    </li>
+                  )}
+              </ul>
 
               {tooMany && (
-                <p className="text-sm text-error">
+                <p className="mt-2 text-sm text-error">
                   This assignment has a maximum group size of{" "}
                   {maxGroupSize ?? 1} (including the owner).
                 </p>
               )}
               {hasDuplicates && (
-                <p className="text-sm text-error">
+                <p className="mt-2 text-sm text-error">
                   Collaborators must be unique.
                 </p>
               )}
 
               {canManage && !isFull && (
-                <div className="rounded-2xl border border-base-200 bg-base-200/30 p-4">
-                  <div className="flex flex-col gap-3 sm:flex-row">
-                    <input
-                      className="input input-bordered flex-1"
-                      placeholder="GitHub username (e.g. octocat)"
-                      value={newCollaborator}
-                      onChange={(e) => setNewCollaborator(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault()
-                          addPendingUsername()
-                        }
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className="btn btn-outline"
-                      onClick={addPendingUsername}
-                    >
-                      <Plus className="size-4" />
-                      Add
-                    </button>
-                  </div>
-                  <p className="mt-2 text-xs text-base-content/60">
-                    Use GitHub usernames only. Collaborators receive repository
-                    access when you save.
-                  </p>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  <input
+                    className="input input-bordered flex-1"
+                    placeholder="Add a GitHub username (e.g. octocat)"
+                    value={newCollaborator}
+                    onChange={(e) => setNewCollaborator(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        addPendingUsername()
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    onClick={addPendingUsername}
+                  >
+                    <Plus className="size-4" />
+                    Add
+                  </button>
                 </div>
               )}
 
               {canManage && isFull && (
-                <p className="text-xs text-base-content/60">
-                  This group is full. Remove a collaborator to add someone else.
+                <p className="mt-3 text-xs text-base-content/60">
+                  Group is full — remove someone to add another collaborator.
                 </p>
               )}
             </div>

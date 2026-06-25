@@ -90,13 +90,13 @@ const EditAssignmentFormStudent = ({
                 Group members
               </p>
               <a
-                className="link mt-1 inline-flex items-center gap-2 font-mono text-sm"
+                className="link mt-1 inline-flex items-center gap-1.5 text-sm"
                 href={assignmentRepo.html_url}
                 target="_blank"
                 rel="noreferrer"
               >
                 <GitHub className="size-4" />
-                {assignmentRepo.full_name}
+                View repository
               </a>
               <p className="mt-2 text-sm text-base-content/70">
                 Add or remove collaborators for this assignment repository. This
