@@ -1,4 +1,4 @@
-import { Send, Trash } from "lucide-react"
+import { Check, Copy, Send, Trash } from "lucide-react"
 
 import { getName, getInitials } from "@/util/students"
 import { formatInvitedAt } from "@/util/formatDate"
@@ -224,6 +224,60 @@ const InviteStatusBadge = ({ status }: { status: InviteStatus }) => {
   return null
 }
 
+// A copy-pasteable link teachers can share so students land on GitHub's org
+// invitation page and accept. It's the same org-wide accept URL for everyone —
+// no per-student token — so it's safe to share with the whole class.
+const InviteLink = ({ org }: { org: string }) => {
+  const inviteUrl = `https://github.com/orgs/${org}/invitation`
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(inviteUrl)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setCopied(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1 px-6 py-3 border-b border-base-300 bg-base-200/40">
+      <span className="text-xs font-medium text-base-content/60">
+        Share this link so students can accept their organization invite:
+      </span>
+      <div className="join w-full">
+        <input
+          type="text"
+          readOnly
+          value={inviteUrl}
+          aria-label="Student invite link"
+          onFocus={(event) => event.currentTarget.select()}
+          className="input input-sm input-bordered join-item w-full font-mono text-xs"
+        />
+        <button
+          type="button"
+          className="btn btn-sm join-item"
+          onClick={() => void handleCopy()}
+          aria-label="Copy invite link"
+        >
+          {copied ? (
+            <>
+              <Check className="size-4 text-success" />
+              Copied
+            </>
+          ) : (
+            <>
+              <Copy className="size-4" />
+              Copy
+            </>
+          )}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 const EnrolledStudents = ({
   students = [],
   org,
@@ -403,6 +457,8 @@ const EnrolledStudents = ({
           </div>
         </div>
       </div>
+
+      <InviteLink org={org} />
 
       {!statusAvailable ? (
         <div role="alert" className="alert alert-info alert-soft mx-6 mt-4">
