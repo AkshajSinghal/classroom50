@@ -59,3 +59,15 @@ export function onboardingRepoNameFromHash(hash: string): string {
 export async function onboardingRepoName(email: string): Promise<string> {
   return onboardingRepoNameFromHash(await emailHash(email))
 }
+
+// Self-report payload committed to ONBOARDING_YAML_PATH inside the onboarding
+// repo. github_username/github_id come from the authenticated session (GitHub-
+// attested, unforgeable); email is the claimed invited address.
+export type OnboardingPayload = {
+  email: string
+  github_username: string
+  github_id: number
+  classroom: string
+  created_at: string
+}
+
