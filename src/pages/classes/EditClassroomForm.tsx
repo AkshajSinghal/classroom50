@@ -237,11 +237,11 @@ const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
                   field.handleChange(e.target.value as OnboardingCleanupMode)
                 }
               >
-                <option value="archive">
-                  Archive (reversible, no extra permissions)
-                </option>
                 <option value="delete">
-                  Delete (needs delete_repo; falls back to archive)
+                  Delete (default; removes the repo after reconcile)
+                </option>
+                <option value="archive">
+                  Archive (reversible; hides the repo)
                 </option>
                 <option value="keep">Keep (leave the repo untouched)</option>
               </select>
