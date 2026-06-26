@@ -988,6 +988,10 @@ export function createClassroom50Yaml(params: {
   ownerUsername: string
   ownerId?: number | null
   acceptedAt?: string
+  // Optional capability-URL secret copied from the classroom's classroom.json
+  // at accept. Written only for a protected classroom; when present, submit
+  // and the autograde runner build the `<classroom>/<secret>/...` Pages path.
+  secret?: string
   // Lets `gh student submit` re-fetch instructor files; omitted when template-less.
   sourceOwner?: string
   sourceOwnerId?: number | null
@@ -1000,6 +1004,7 @@ export function createClassroom50Yaml(params: {
     ownerUsername,
     ownerId,
     acceptedAt,
+    secret,
     sourceOwner,
     sourceOwnerId,
     sourceRepo,
@@ -1014,10 +1019,19 @@ export function createClassroom50Yaml(params: {
     `schema: "classroom50/repo-config/v1"`,
     `classroom: ${JSON.stringify(classroom)}`,
     `assignment: ${JSON.stringify(assignment)}`,
+  ]
+
+  // Emit the secret right after the identity fields (matching the CLI's
+  // field order) and only when present, mirroring the CLI's `omitempty`.
+  if (secret) {
+    lines.push(`secret: ${JSON.stringify(secret)}`)
+  }
+
+  lines.push(
     `owner:`,
     `  username: ${JSON.stringify(ownerUsername)}`,
     `  id: ${idValue(ownerId)}`,
-  ]
+  )
 
   if (acceptedAt) {
     lines.push(`  accepted_at: ${JSON.stringify(acceptedAt)}`)
@@ -1138,8 +1152,14 @@ async function patchRepoSurface(
   })
 }
 
-function pagesAutograderUrl(org: string, classroom: string, name: string) {
-  return `https://${org}.github.io/classroom50/${classroom}/autograders/${name}.yaml`
+function pagesAutograderUrl(
+  org: string,
+  classroom: string,
+  name: string,
+  secret?: string,
+) {
+  const segment = secret ? `${classroom}/${secret}` : classroom
+  return `https://${org}.github.io/classroom50/${segment}/autograders/${name}.yaml`
 }
 
 function defaultAutograderWorkflow(org: string) {
@@ -1167,13 +1187,14 @@ export async function resolveAutograderWorkflow(
   org: string,
   classroom: string,
   autograder?: string,
+  secret?: string,
 ): Promise<string> {
   if (!autograder || autograder === "default") {
     return defaultAutograderWorkflow(org)
   }
 
   const workflow = await fetchTextWithFriendlyErrors(
-    pagesAutograderUrl(org, classroom, autograder),
+    pagesAutograderUrl(org, classroom, autograder, secret),
     `autograder ${autograder}`,
   )
 
@@ -1359,6 +1380,19 @@ export async function acceptAssignment(params: {
   // student may already be a member), so this isn't a tracked step.
   await acceptPendingOrgInvite(client, org)
 
+  // Resolve the classroom's optional capability-URL secret from the
+  // team-gated classroom.json (the student is on the classroom team). A
+  // protected classroom serves resources under <classroom>/<secret>/ and
+  // the secret is recorded in .classroom50.yaml so submit + the autograde
+  // runner can rebuild the URLs. An unprotected classroom (no secret, or an
+  // unreadable classroom.json) falls back to the plain path.
+  let secret: string | undefined
+  try {
+    secret = (await getClassroomJson(client, { org, classroom })).secret
+  } catch {
+    secret = undefined
+  }
+
   const assignment = await withAcceptStep(
     {
       id: "assignment",
@@ -1367,7 +1401,7 @@ export async function acceptAssignment(params: {
       doneMessage: `Found assignment ${assignmentSlug}`,
       onStepUpdate,
     },
-    () => fetchAssignmentFromPages(org, classroom, assignmentSlug),
+    () => fetchAssignmentFromPages(org, classroom, assignmentSlug, secret),
   )
 
   const sourceOwner = assignment.template?.owner
@@ -1393,7 +1427,8 @@ export async function acceptAssignment(params: {
       doneMessage: "Resolved the autograder",
       onStepUpdate,
     },
-    () => resolveAutograderWorkflow(org, classroom, assignment.autograder),
+    () =>
+      resolveAutograderWorkflow(org, classroom, assignment.autograder, secret),
   )
 
   const studentRepoNameValue = studentRepoName(
@@ -1408,6 +1443,7 @@ export async function acceptAssignment(params: {
     ownerUsername: username,
     ownerId: user.id,
     acceptedAt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+    secret,
     sourceOwner,
     sourceOwnerId,
     sourceRepo,

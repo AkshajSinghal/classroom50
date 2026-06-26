@@ -107,6 +107,7 @@ const CreateClassroomPage = () => {
                       classroom: values.slug,
                       org,
                       term: values.term,
+                      secret: values.secret || undefined,
                     })
                   }}
                 />

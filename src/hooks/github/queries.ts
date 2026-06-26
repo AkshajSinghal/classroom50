@@ -657,8 +657,13 @@ export async function fetchJson<T>(url: string): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export function pagesAssignmentUrl(org: string, classroom: string) {
-  return `https://${org}.github.io/classroom50/${classroom}/assignments.json`
+export function pagesAssignmentUrl(
+  org: string,
+  classroom: string,
+  secret?: string,
+) {
+  const segment = secret ? `${classroom}/${secret}` : classroom
+  return `https://${org}.github.io/classroom50/${segment}/assignments.json`
 }
 
 // Public, unauthenticated signal that an org is a real Classroom50 org: the
@@ -719,9 +724,10 @@ export function extractAssignments(json: AssignmentsJson): Assignment[] {
 export async function fetchPagesAssignments(
   org: string,
   classroom: string,
+  secret?: string,
 ): Promise<Assignment[]> {
   const json = await fetchJson<AssignmentsJson>(
-    pagesAssignmentUrl(org, classroom),
+    pagesAssignmentUrl(org, classroom, secret),
   )
   const assignments = extractAssignments(json)
 

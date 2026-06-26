@@ -71,9 +71,10 @@ export async function fetchAssignmentFromPages(
   org: string,
   classroom: string,
   assignmentSlug: string,
+  secret?: string,
 ): Promise<Assignment> {
   const json = await fetchJson<AssignmentsJson>(
-    pagesAssignmentUrl(org, classroom),
+    pagesAssignmentUrl(org, classroom, secret),
   )
 
   const assignments = extractAssignments(json)
