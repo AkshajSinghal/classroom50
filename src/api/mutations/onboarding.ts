@@ -9,6 +9,7 @@ import {
 import {
   getBranchRefRepo,
   getCommitByRepo,
+  isTeamMember,
   withFreshRepoRetry,
 } from "@/hooks/github/queries"
 import type { GitHubRepo } from "@/hooks/github/types"
@@ -17,6 +18,7 @@ import { acceptPendingOrgInvite } from "@/api/mutations/users"
 import {
   ONBOARDING_YAML_PATH,
   onboardingRepoName,
+  onboardingRepoNameByGithubId,
   type OnboardingPayload,
 } from "@/util/onboarding"
 import { stringifyOnboardingYaml } from "@/util/yaml"
@@ -24,6 +26,7 @@ import { stringifyOnboardingYaml } from "@/util/yaml"
 export type OnboardingResult = {
   status: "created" | "already-onboarded"
   repo: GitHubRepo
+  repoName: string
   payload: OnboardingPayload
 }
 
@@ -56,7 +59,18 @@ export async function submitOnboarding(
     created_at: new Date().toISOString(),
   }
 
-  const repoName = await onboardingRepoName(email)
+  // Repo naming branches on classroom-team access. If the student is already on
+  // the classroom team they came via the username invite flow (their roster row
+  // already has github_id), so the teacher reconciles by github_id -> name the
+  // repo by id. Otherwise it's the email-first flow (roster row keyed on email
+  // hash). The derived team slug is good enough for a membership probe; on a
+  // false negative we just fall back to email-hash naming, which is the safe
+  // default (email is known in both flows). Reconcile mirrors this branch.
+  const teamSlug = `classroom50-${classroom}`
+  const onTeam = await isTeamMember(client, org, teamSlug, user.login)
+  const repoName = onTeam
+    ? onboardingRepoNameByGithubId(user.id)
+    : await onboardingRepoName(email)
 
   let repo: GitHubRepo
   let status: OnboardingResult["status"] = "created"
@@ -179,5 +193,5 @@ export async function submitOnboarding(
     // Non-fatal: the payload is committed and reconcilable regardless.
   }
 
-  return { status, repo, payload }
+  return { status, repo, repoName, payload }
 }

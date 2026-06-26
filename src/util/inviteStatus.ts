@@ -1,7 +1,12 @@
 import type { Student } from "@/types/classroom"
 import type { GitHubOrgInvitation, GitHubUser } from "@/hooks/github/types"
 
-export type InviteStatus = "member" | "pending" | "expired" | "none"
+export type InviteStatus =
+  | "member"
+  | "pending"
+  | "expired"
+  | "onboarding"
+  | "none"
 
 export type StudentInviteStatus = {
   status: InviteStatus
@@ -70,6 +75,20 @@ export function buildInviteStatusLookup(
         invitationId: failed.id,
         invitedAt: failed.created_at,
       }
+    }
+
+    // An email-first row that's been invited/onboarded but not yet reconciled
+    // has no username/github_id to match against the member list, so it would
+    // otherwise fall through to "none" even after the student accepted. Surface
+    // it as "onboarding" (awaiting the teacher's reconcile) instead of "not in
+    // org", which is misleading.
+    const enrollment = student.enrollment_status
+    if (
+      (enrollment === "invited" || enrollment === "onboarded") &&
+      !student.github_id &&
+      !student.username
+    ) {
+      return { status: "onboarding" }
     }
 
     return { status: "none" }

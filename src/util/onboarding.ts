@@ -54,6 +54,16 @@ export function onboardingRepoNameFromHash(hash: string): string {
   return `${ONBOARDING_REPO_PREFIX}${hash}`
 }
 
+// Repo name keyed on the immutable GitHub user id, used when the student is
+// already on the classroom team (the username invite flow, where the roster row
+// carries github_id). The teacher reconciles such rows by looking the repo up
+// directly from the row's github_id — no email hashing needed.
+export function onboardingRepoNameByGithubId(
+  githubId: number | string,
+): string {
+  return `${ONBOARDING_REPO_PREFIX}ghid-${githubId}`
+}
+
 // Repo name from a raw email. Async (awaits emailHash); use at invite/onboard
 // time where the email is the input.
 export async function onboardingRepoName(email: string): Promise<string> {

@@ -8,13 +8,14 @@ import {
 } from "lucide-react"
 import GitHub from "@/assets/github.svg?react"
 import { Link, useParams, useSearch } from "@tanstack/react-router"
-import { useMutation } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useGithubAuth } from "@/auth/useGithubAuth"
 import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
 import { submitOnboarding } from "@/api/mutations/onboarding"
-import { isValidEmail } from "@/util/onboarding"
+import { getRepo } from "@/hooks/github/queries"
+import { isValidEmail, onboardingRepoNameByGithubId } from "@/util/onboarding"
 
 const OnboardNavbar = () => (
   <div className="navbar bg-base-100 shadow-sm">
@@ -85,6 +86,40 @@ const NotOrgMember = ({
   </div>
 )
 
+const OnboardingStatus = ({
+  classroom,
+  title,
+  message,
+}: {
+  classroom?: string
+  title: string
+  message: string
+}) => (
+  <div className="min-h-screen bg-base-100">
+    <OnboardNavbar />
+    <OnboardCard>
+      <div className="card-body gap-6">
+        <div>
+          <span className="badge badge-primary badge-soft gap-2">
+            <Mail className="size-4" />
+            Onboarding
+          </span>
+          <h1 className="mt-6 text-2xl font-bold">{title}</h1>
+          {classroom && (
+            <p className="mt-2 text-sm text-base-content/60">{classroom}</p>
+          )}
+        </div>
+        <div className="rounded-2xl border border-success/20 bg-success/5 p-5">
+          <div className="flex gap-3">
+            <CheckCircle2 className="size-6 shrink-0 text-success" />
+            <p className="text-sm text-base-content/70">{message}</p>
+          </div>
+        </div>
+      </div>
+    </OnboardCard>
+  </div>
+)
+
 const OnboardingPage = () => {
   const { org, classroom } = useParams({ strict: false })
   // The invited email may travel in the link as a prefill (an individual link
@@ -102,6 +137,20 @@ const OnboardingPage = () => {
   const { data: orgMembership, isLoading: loadingMembership } =
     useGetOwnOrgMembership(org)
 
+  // Detect a prior onboarding on re-visit. The github-id-based repo name is
+  // always knowable from the authenticated user (no email needed), so we probe
+  // it once the student is a member: it exists & active -> onboarding already
+  // kicked off, awaiting the teacher's reconcile; exists & archived -> the
+  // teacher reconciled (complete). A missing repo is ambiguous (never onboarded
+  // OR reconciled+deleted), so we fall back to showing the form, where a
+  // re-submit is harmless (idempotent).
+  const ghidRepoName = user ? onboardingRepoNameByGithubId(user.id) : ""
+  const { data: existingRepo, isLoading: loadingExisting } = useQuery({
+    queryKey: ["github", "repo", org, ghidRepoName],
+    queryFn: () => getRepo(client, org ?? "", ghidRepoName),
+    enabled: Boolean(org && ghidRepoName && orgMembership),
+  })
+
   const emailValid = isValidEmail(email)
 
   const onboardMutation = useMutation({
@@ -113,7 +162,7 @@ const OnboardingPage = () => {
       }),
   })
 
-  if (loadingMembership) {
+  if (loadingMembership || (orgMembership && loadingExisting)) {
     return (
       <div className="min-h-screen bg-base-100">
         <OnboardNavbar />
@@ -128,7 +177,32 @@ const OnboardingPage = () => {
     return <NotOrgMember org={org} classroom={classroom} />
   }
 
-  const done = onboardMutation.isSuccess
+  // A just-submitted onboarding, or a pre-existing active onboarding repo found
+  // on re-visit, means the process kicked off and is awaiting the teacher.
+  const justSubmitted = onboardMutation.isSuccess
+  const priorInProgress = Boolean(existingRepo) && !existingRepo?.archived
+  const priorComplete = Boolean(existingRepo?.archived)
+  const inProgress = justSubmitted || priorInProgress
+
+  if (inProgress) {
+    return (
+      <OnboardingStatus
+        classroom={classroom}
+        title="Enrollment submitted"
+        message="We've recorded your details and notified your instructor. They'll confirm your enrollment shortly — there's nothing more for you to do here."
+      />
+    )
+  }
+
+  if (priorComplete) {
+    return (
+      <OnboardingStatus
+        classroom={classroom}
+        title="You're all set"
+        message="Your enrollment has been confirmed by your instructor. You can now accept assignments shared with you."
+      />
+    )
+  }
 
   return (
     <div className="min-h-screen bg-base-100">
@@ -179,7 +253,7 @@ const OnboardingPage = () => {
                 value={email}
                 placeholder="student@university.edu"
                 className="input w-full"
-                disabled={done || onboardMutation.isPending}
+                disabled={onboardMutation.isPending}
                 onChange={(e) => setEmail(e.target.value)}
               />
             </div>
@@ -198,38 +272,21 @@ const OnboardingPage = () => {
             </div>
           )}
 
-          {done ? (
-            <div className="rounded-2xl border border-success/20 bg-success/5 p-5">
-              <div className="flex gap-3">
-                <CheckCircle2 className="size-6 shrink-0 text-success" />
-                <div>
-                  <h2 className="font-semibold text-base-content">
-                    You&apos;re all set
-                  </h2>
-                  <p className="mt-1 text-sm text-base-content/70">
-                    Your instructor will see you on the roster shortly. You can
-                    now accept assignments shared with you.
-                  </p>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              className="btn btn-primary w-full bg-[#4e80ee]"
-              disabled={onboardMutation.isPending || !emailValid}
-              onClick={() => onboardMutation.mutate()}
-            >
-              {onboardMutation.isPending ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Confirming...
-                </>
-              ) : (
-                "Confirm enrollment"
-              )}
-            </button>
-          )}
+          <button
+            type="button"
+            className="btn btn-primary w-full bg-[#4e80ee]"
+            disabled={onboardMutation.isPending || !emailValid}
+            onClick={() => onboardMutation.mutate()}
+          >
+            {onboardMutation.isPending ? (
+              <>
+                <Loader2 className="size-4 animate-spin" />
+                Confirming...
+              </>
+            ) : (
+              "Confirm enrollment"
+            )}
+          </button>
         </div>
       </OnboardCard>
     </div>
