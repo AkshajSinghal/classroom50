@@ -45,6 +45,29 @@ const usePeriodicRerender = (intervalMs = 30_000) => {
   }, [intervalMs])
 }
 
+// Shared presentational copy button: a primary outline button that swaps to a
+// success check while `copied`. The clipboard state itself is owned by the
+// caller (via useCopyToClipboard) so each button tracks its own copy.
+const CopyIconButton = ({
+  copied,
+  onCopy,
+  label,
+}: {
+  copied: boolean
+  onCopy: () => void
+  label: string
+}) => (
+  <button
+    type="button"
+    className={`btn ${copied ? "btn-success" : "btn-primary"} btn-sm btn-outline mr-2`}
+    onClick={onCopy}
+    aria-label={label}
+    title={label}
+  >
+    {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+  </button>
+)
+
 const SubmissionsPageContent = () => {
   const { org, classroom, assignment } = useParams({ strict: false })
   const {
@@ -71,8 +94,7 @@ const SubmissionsPageContent = () => {
   const assignmentSubmitUrl =
     `${window.location.origin}/${org}/${classroom}/assignments/${assignment}/accept` +
     (secret ? `?k=${secret}` : "")
-  // The CLI equivalent students can run instead of the browser link.
-  // Includes --key only for a protected classroom.
+  // The CLI equivalent of the browser accept link, for students who prefer it.
   const assignmentSubmitCli =
     `gh student accept ${org} ${classroom} ${assignment}` +
     (secret ? ` --key ${secret}` : "")
@@ -375,23 +397,11 @@ const SubmissionsPageContent = () => {
                 <pre className="overflow-x-auto px-4 py-3 text-sm">
                   <code>{assignmentSubmitUrl}</code>
                 </pre>
-                <button
-                  type="button"
-                  className={`btn ${copiedSubmitLink ? "btn-success" : "btn-primary"} btn-sm btn-outline mr-2`}
-                  onClick={copySubmitLink}
-                  aria-label="Copy accept link"
-                  title="Copy accept link"
-                >
-                  {copiedSubmitLink ? (
-                    <>
-                      <Check className="size-4" />
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="size-4" />
-                    </>
-                  )}
-                </button>
+                <CopyIconButton
+                  copied={copiedSubmitLink}
+                  onCopy={copySubmitLink}
+                  label="Copy accept link"
+                />
               </div>
 
               <details className="group">
@@ -403,23 +413,11 @@ const SubmissionsPageContent = () => {
                   <pre className="overflow-x-auto px-4 py-3 text-sm">
                     <code>{assignmentSubmitCli}</code>
                   </pre>
-                  <button
-                    type="button"
-                    className={`btn ${copiedSubmitCli ? "btn-success" : "btn-primary"} btn-sm btn-outline mr-2`}
-                    onClick={copySubmitCli}
-                    aria-label="Copy CLI command"
-                    title="Copy CLI command"
-                  >
-                    {copiedSubmitCli ? (
-                      <>
-                        <Check className="size-4" />
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="size-4" />
-                      </>
-                    )}
-                  </button>
+                  <CopyIconButton
+                    copied={copiedSubmitCli}
+                    onCopy={copySubmitCli}
+                    label="Copy CLI command"
+                  />
                 </div>
               </details>
             </div>

@@ -5,7 +5,7 @@
 // classroom has one, its published Pages resources live under
 // `<classroom>/<secret>/...` instead of the guessable `<classroom>/...`.
 
-export const SECRET_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
+const SECRET_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 // Default generated length when a teacher opts in without typing their own.
 // 8 chars of [a-z0-9] is ~41 bits — ample for anti-discovery (this is
