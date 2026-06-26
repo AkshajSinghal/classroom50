@@ -153,10 +153,7 @@ function StatusBadge({ url }: { url: string }) {
 
   if (status === "public") {
     return (
-      <span
-        ref={ref}
-        className="badge badge-success badge-soft badge-sm gap-1"
-      >
+      <span ref={ref} className="badge badge-success badge-soft badge-sm gap-1">
         <Globe className="size-3" />
         Public
       </span>
