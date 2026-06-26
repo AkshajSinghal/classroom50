@@ -79,7 +79,12 @@ export async function submitOnboarding(
   await withFreshRepoRetry(async () => {
     const ref = await getBranchRefRepo(client, org, repoName, branch)
     const parentSha = ref.object.sha
-    const currentCommit = await getCommitByRepo(client, org, repoName, parentSha)
+    const currentCommit = await getCommitByRepo(
+      client,
+      org,
+      repoName,
+      parentSha,
+    )
     const baseTreeSha = currentCommit.tree?.sha
 
     if (!parentSha || !baseTreeSha) {

@@ -135,4 +135,3 @@ describe("onboarding yaml round-trip", () => {
     ).toThrow()
   })
 })
-

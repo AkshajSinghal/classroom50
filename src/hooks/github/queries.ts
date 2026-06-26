@@ -515,6 +515,27 @@ export async function getClassroom50Yaml(
   return decodeBase64Utf8(file.content)
 }
 
+// Read a file from an arbitrary repo's default branch. Used by onboarding
+// reconciliation to read the self-report YAML out of each onboarding repo.
+export async function getRepoFile(
+  client: GitHubClient,
+  org: string,
+  repo: string,
+  path: string,
+): Promise<string> {
+  const file = await client.request<{
+    type: "file"
+    encoding: "base64"
+    content: string
+  }>(`/repos/${org}/${repo}/contents/${path}`)
+
+  if (file.type !== "file") {
+    throw new Error(`${path} is not a file in ${repo}`)
+  }
+
+  return decodeBase64Utf8(file.content)
+}
+
 export function listOrgMembers(client: GitHubClient, org: string, page = 1) {
   return client.request<GitHubUser[]>(
     `/orgs/${org}/members?per_page=100&page=${page}`,

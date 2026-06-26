@@ -70,4 +70,3 @@ export type OnboardingPayload = {
   classroom: string
   created_at: string
 }
-

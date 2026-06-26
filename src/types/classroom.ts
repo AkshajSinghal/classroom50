@@ -117,4 +117,3 @@ export type Student = {
   invited_at?: string
   reconciled_at?: string
 }
-

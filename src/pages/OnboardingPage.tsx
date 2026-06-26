@@ -132,9 +132,7 @@ const OnboardingPage = () => {
               <Mail className="size-4" />
               Onboarding
             </span>
-            <h1 className="mt-6 text-2xl font-bold">
-              Confirm your enrollment
-            </h1>
+            <h1 className="mt-6 text-2xl font-bold">Confirm your enrollment</h1>
             <p className="mt-2 text-base text-base-content/70">
               This links your GitHub account to your instructor&apos;s class
               roster for{" "}
