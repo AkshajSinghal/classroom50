@@ -97,7 +97,17 @@ func runRosterList(client githubapi.Client, out, errOut io.Writer, org, classroo
 	if asJSON {
 		entries := make([]rosterListEntry, 0, len(rows))
 		for _, r := range rows {
-			entries = append(entries, rosterListEntry(r))
+			// Only the canonical fields are part of the documented
+			// `roster list --json` contract; the preserved onboarding
+			// columns (r.Extra) are internal round-trip state, not output.
+			entries = append(entries, rosterListEntry{
+				Username:  r.Username,
+				FirstName: r.FirstName,
+				LastName:  r.LastName,
+				Email:     r.Email,
+				Section:   r.Section,
+				GitHubID:  r.GitHubID,
+			})
 		}
 		data, err := output.JSONPretty(entries)
 		if err != nil {

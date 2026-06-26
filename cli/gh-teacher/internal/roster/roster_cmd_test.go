@@ -145,7 +145,7 @@ func TestRunRosterUpdate(t *testing.T) {
 		if alice.FirstName != "Alice" || alice.LastName != "A" || alice.Section != "s1" || alice.GitHubID != 1 {
 			t.Errorf("alice non-email fields changed: %#v", alice)
 		}
-		if (bob != configrepo.RosterRow{Username: "bob", FirstName: "Bob", LastName: "B", Email: "b@x.edu", Section: "s1", GitHubID: 2}) {
+		if bob.Username != "bob" || bob.FirstName != "Bob" || bob.LastName != "B" || bob.Email != "b@x.edu" || bob.Section != "s1" || bob.GitHubID != 2 {
 			t.Errorf("unrelated row (bob) changed: %#v", bob)
 		}
 	})
@@ -181,6 +181,134 @@ func TestRunRosterUpdate(t *testing.T) {
 		}
 		if len(mock.blobs) != 0 {
 			t.Errorf("expected no blob POSTed on no-op, got %d", len(mock.blobs))
+		}
+	})
+
+	// The web app appends onboarding columns to students.csv; a `roster update`
+	// (which patches only canonical fields) must round-trip them so it never
+	// silently wipes a student's onboarding state. This drives the actual
+	// command path (LoadRoster -> UpdateRosterRow -> EncodeRoster), not just the
+	// configrepo helpers.
+	t.Run("preserves web onboarding columns on both edited and unrelated rows", func(t *testing.T) {
+		onboardingRoster := rosterCSVContent(t,
+			configrepo.RosterRow{
+				Username: "alice", FirstName: "Alice", LastName: "A", Email: "a@x.edu", Section: "s1", GitHubID: 1,
+				Extra:      map[string]string{"enrollment_status": "reconciled", "email_hash": "abcd1234ef567890"},
+				ExtraOrder: []string{"enrollment_status", "email_hash"},
+			},
+			configrepo.RosterRow{
+				Username: "bob", FirstName: "Bob", LastName: "B", Email: "b@x.edu", Section: "s1", GitHubID: 2,
+				Extra:      map[string]string{"enrollment_status": "invited", "invite_token": "tok123"},
+				ExtraOrder: []string{"enrollment_status", "invite_token"},
+			},
+		)
+		mock := &rosterWriteMock{files: map[string]string{"cs-principles/students.csv": onboardingRoster}}
+		server := httptest.NewServer(mock.handler(t))
+		t.Cleanup(server.Close)
+		client := githubtest.NewTestClient(t, server)
+
+		var out bytes.Buffer
+		if err := runRosterUpdate(client, &out, "o", "cs-principles", "alice", configrepo.RosterPatch{Email: strptr("alice@new.edu")}); err != nil {
+			t.Fatalf("runRosterUpdate: %v", err)
+		}
+		if len(mock.blobs) != 1 {
+			t.Fatalf("got %d blobs POSTed, want 1", len(mock.blobs))
+		}
+		rows, err := configrepo.ParseRoster([]byte(mock.blobs[0]))
+		if err != nil {
+			t.Fatalf("parse re-encoded roster: %v\n%s", err, mock.blobs[0])
+		}
+		var alice, bob configrepo.RosterRow
+		for _, r := range rows {
+			switch r.Username {
+			case "alice":
+				alice = r
+			case "bob":
+				bob = r
+			}
+		}
+		if alice.Email != "alice@new.edu" {
+			t.Errorf("alice email = %q, want alice@new.edu", alice.Email)
+		}
+		if alice.Extra["enrollment_status"] != "reconciled" || alice.Extra["email_hash"] != "abcd1234ef567890" {
+			t.Errorf("edited row lost onboarding columns: %#v", alice.Extra)
+		}
+		if bob.Extra["enrollment_status"] != "invited" || bob.Extra["invite_token"] != "tok123" {
+			t.Errorf("unrelated row lost onboarding columns: %#v", bob.Extra)
+		}
+	})
+}
+
+// TestRunRosterRemove covers the `roster remove` command path. With no
+// classroom.json mocked, ResolveClassroomTeam returns ok=false and the
+// team-removal step is skipped, so the test exercises the LoadRoster ->
+// RemoveRosterRow -> EncodeRoster write without needing team endpoints.
+func TestRunRosterRemove(t *testing.T) {
+	t.Run("removes the row and commits once", func(t *testing.T) {
+		roster := rosterCSVContent(t,
+			configrepo.RosterRow{Username: "alice", FirstName: "Alice", LastName: "A", Email: "a@x.edu", Section: "s1", GitHubID: 1},
+			configrepo.RosterRow{Username: "bob", FirstName: "Bob", LastName: "B", Email: "b@x.edu", Section: "s1", GitHubID: 2},
+		)
+		mock := &rosterWriteMock{files: map[string]string{"cs-principles/students.csv": roster}}
+		server := httptest.NewServer(mock.handler(t))
+		t.Cleanup(server.Close)
+		client := githubtest.NewTestClient(t, server)
+
+		var out bytes.Buffer
+		if err := runRosterRemove(client, &out, "o", "cs-principles", "alice"); err != nil {
+			t.Fatalf("runRosterRemove: %v", err)
+		}
+		if !strings.Contains(out.String(), "removed alice") {
+			t.Errorf("stdout = %q, want 'removed alice'", out.String())
+		}
+		if len(mock.blobs) != 1 {
+			t.Fatalf("got %d blobs POSTed, want 1", len(mock.blobs))
+		}
+		rows, err := configrepo.ParseRoster([]byte(mock.blobs[0]))
+		if err != nil {
+			t.Fatalf("parse re-encoded roster: %v\n%s", err, mock.blobs[0])
+		}
+		if len(rows) != 1 || rows[0].Username != "bob" {
+			t.Fatalf("after removing alice, want only bob, got %#v", rows)
+		}
+	})
+
+	// Removing one student must not wipe the onboarding columns of the
+	// surviving students.
+	t.Run("preserves web onboarding columns on surviving rows", func(t *testing.T) {
+		roster := rosterCSVContent(t,
+			configrepo.RosterRow{
+				Username: "alice", FirstName: "Alice", LastName: "A", Email: "a@x.edu", Section: "s1", GitHubID: 1,
+				Extra:      map[string]string{"enrollment_status": "reconciled"},
+				ExtraOrder: []string{"enrollment_status"},
+			},
+			configrepo.RosterRow{
+				Username: "bob", FirstName: "Bob", LastName: "B", Email: "b@x.edu", Section: "s1", GitHubID: 2,
+				Extra:      map[string]string{"enrollment_status": "invited", "invite_token": "tok123"},
+				ExtraOrder: []string{"enrollment_status", "invite_token"},
+			},
+		)
+		mock := &rosterWriteMock{files: map[string]string{"cs-principles/students.csv": roster}}
+		server := httptest.NewServer(mock.handler(t))
+		t.Cleanup(server.Close)
+		client := githubtest.NewTestClient(t, server)
+
+		var out bytes.Buffer
+		if err := runRosterRemove(client, &out, "o", "cs-principles", "alice"); err != nil {
+			t.Fatalf("runRosterRemove: %v", err)
+		}
+		if len(mock.blobs) != 1 {
+			t.Fatalf("got %d blobs POSTed, want 1", len(mock.blobs))
+		}
+		rows, err := configrepo.ParseRoster([]byte(mock.blobs[0]))
+		if err != nil {
+			t.Fatalf("parse re-encoded roster: %v\n%s", err, mock.blobs[0])
+		}
+		if len(rows) != 1 || rows[0].Username != "bob" {
+			t.Fatalf("after removing alice, want only bob, got %#v", rows)
+		}
+		if rows[0].Extra["enrollment_status"] != "invited" || rows[0].Extra["invite_token"] != "tok123" {
+			t.Errorf("surviving row lost onboarding columns: %#v", rows[0].Extra)
 		}
 	})
 }
