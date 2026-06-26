@@ -9,6 +9,7 @@ import type { AssignmentTestDraft } from "@/util/assignmentTests"
 import { draftToTest, makeSetupTest } from "@/util/assignmentTests"
 import { buildDueFields } from "@/util/formatDate"
 import { studentRepoName } from "@/util/studentRepo"
+import { classroomPagesSegment } from "@/util/secret"
 import { parseRunnerLabels } from "@/util/runners"
 import { parseAllowedFiles, validateAllowedFiles } from "@/util/allowedFiles"
 import {
@@ -988,6 +989,10 @@ export function createClassroom50Yaml(params: {
   ownerUsername: string
   ownerId?: number | null
   acceptedAt?: string
+  // Optional capability-URL secret copied from the classroom's classroom.json
+  // at accept. Written only for a protected classroom; when present, submit
+  // and the autograde runner build the `<classroom>/<secret>/...` Pages path.
+  secret?: string
   // Lets `gh student submit` re-fetch instructor files; omitted when template-less.
   sourceOwner?: string
   sourceOwnerId?: number | null
@@ -1000,6 +1005,7 @@ export function createClassroom50Yaml(params: {
     ownerUsername,
     ownerId,
     acceptedAt,
+    secret,
     sourceOwner,
     sourceOwnerId,
     sourceRepo,
@@ -1014,10 +1020,19 @@ export function createClassroom50Yaml(params: {
     `schema: "classroom50/repo-config/v1"`,
     `classroom: ${JSON.stringify(classroom)}`,
     `assignment: ${JSON.stringify(assignment)}`,
+  ]
+
+  // Emit the secret right after the identity fields (matching the CLI's
+  // field order) and only when present, mirroring the CLI's `omitempty`.
+  if (secret) {
+    lines.push(`secret: ${JSON.stringify(secret)}`)
+  }
+
+  lines.push(
     `owner:`,
     `  username: ${JSON.stringify(ownerUsername)}`,
     `  id: ${idValue(ownerId)}`,
-  ]
+  )
 
   if (acceptedAt) {
     lines.push(`  accepted_at: ${JSON.stringify(acceptedAt)}`)
@@ -1138,8 +1153,15 @@ async function patchRepoSurface(
   })
 }
 
-function pagesAutograderUrl(org: string, classroom: string, name: string) {
-  return `https://${org}.github.io/classroom50/${classroom}/autograders/${name}.yaml`
+function pagesAutograderUrl(params: {
+  org: string
+  classroom: string
+  name: string
+  secret?: string
+}) {
+  const { org, classroom, name, secret } = params
+  const segment = classroomPagesSegment(classroom, secret)
+  return `https://${org}.github.io/classroom50/${segment}/autograders/${name}.yaml`
 }
 
 function defaultAutograderWorkflow(org: string) {
@@ -1163,17 +1185,19 @@ jobs:
 `
 }
 
-export async function resolveAutograderWorkflow(
-  org: string,
-  classroom: string,
-  autograder?: string,
-): Promise<string> {
+export async function resolveAutograderWorkflow(params: {
+  org: string
+  classroom: string
+  autograder?: string
+  secret?: string
+}): Promise<string> {
+  const { org, classroom, autograder, secret } = params
   if (!autograder || autograder === "default") {
     return defaultAutograderWorkflow(org)
   }
 
   const workflow = await fetchTextWithFriendlyErrors(
-    pagesAutograderUrl(org, classroom, autograder),
+    pagesAutograderUrl({ org, classroom, name: autograder, secret }),
     `autograder ${autograder}`,
   )
 
@@ -1338,9 +1362,16 @@ export async function acceptAssignment(params: {
   org: string
   classroom: string
   assignmentSlug: string
+  // Capability-URL access key from the accept link (?k=). Selects the
+  // <classroom>/<secret>/ Pages path for a protected classroom and is
+  // written into .classroom50.yaml so submit + the runner can rebuild the
+  // URLs. Undefined for an unprotected classroom (plain path). Not read
+  // from classroom.json — students can't access the private config repo.
+  secret?: string
   onStepUpdate?: OnAcceptStepUpdate
 }): Promise<AcceptAssignmentResult> {
-  const { client, org, classroom, assignmentSlug, onStepUpdate } = params
+  const { client, org, classroom, assignmentSlug, secret, onStepUpdate } =
+    params
 
   const user = await withAcceptStep(
     {
@@ -1367,7 +1398,7 @@ export async function acceptAssignment(params: {
       doneMessage: `Found assignment ${assignmentSlug}`,
       onStepUpdate,
     },
-    () => fetchAssignmentFromPages(org, classroom, assignmentSlug),
+    () => fetchAssignmentFromPages(org, classroom, assignmentSlug, secret),
   )
 
   const sourceOwner = assignment.template?.owner
@@ -1393,7 +1424,13 @@ export async function acceptAssignment(params: {
       doneMessage: "Resolved the autograder",
       onStepUpdate,
     },
-    () => resolveAutograderWorkflow(org, classroom, assignment.autograder),
+    () =>
+      resolveAutograderWorkflow({
+        org,
+        classroom,
+        autograder: assignment.autograder,
+        secret,
+      }),
   )
 
   const studentRepoNameValue = studentRepoName(
@@ -1408,6 +1445,7 @@ export async function acceptAssignment(params: {
     ownerUsername: username,
     ownerId: user.id,
     acceptedAt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+    secret,
     sourceOwner,
     sourceOwnerId,
     sourceRepo,
