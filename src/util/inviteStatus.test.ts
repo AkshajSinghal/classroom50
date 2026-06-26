@@ -90,4 +90,24 @@ describe("buildInviteStatusLookup", () => {
     )
     expect(lookup(student()).status).toBe("member")
   })
+
+  it("classifies an accepted-but-unreconciled email row as onboarding", () => {
+    const lookup = buildInviteStatusLookup([], [], [])
+    const emailRow = student({
+      username: "",
+      github_id: "",
+      enrollment_status: "invited",
+    })
+    expect(lookup(emailRow).status).toBe("onboarding")
+  })
+
+  it("does not treat a plain unmatched row as onboarding", () => {
+    const lookup = buildInviteStatusLookup([], [], [])
+    const emailRow = student({
+      username: "",
+      github_id: "",
+      enrollment_status: "",
+    })
+    expect(lookup(emailRow).status).toBe("none")
+  })
 })

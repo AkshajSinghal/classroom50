@@ -220,6 +220,9 @@ const InviteStatusBadge = ({ status }: { status: InviteStatus }) => {
   if (status === "expired") {
     return <span className="badge badge-error badge-soft">Expired invite</span>
   }
+  if (status === "onboarding") {
+    return <span className="badge badge-info badge-soft">Onboarding</span>
+  }
   if (status === "none") {
     return <span className="badge badge-ghost badge-soft">Not in org</span>
   }
@@ -358,24 +361,31 @@ const EnrolledStudents = ({
     [members, invitations, failedInvitations],
   )
 
-  const statusByUsername = useMemo(() => {
+  // Stable per-row identity: email rows have no username yet, so fall back to
+  // email (and an index guard) to avoid empty-string key collisions across
+  // multiple email-only rows.
+  const studentKey = (student: Student, index: number) =>
+    student.username || student.email || `row-${index}`
+
+  const statusByKey = useMemo(() => {
     const map = new Map<string, StudentInviteStatus>()
     if (statusLoading || !statusAvailable) return map
-    for (const student of students) {
-      map.set(student.username, getStatus(student))
-    }
+    students.forEach((student, index) => {
+      map.set(studentKey(student, index), getStatus(student))
+    })
     return map
   }, [students, getStatus, statusLoading, statusAvailable])
 
-  // Every non-member (pending, expired, or never invited): the "Resend invites"
-  // target.
+  // Every non-member (pending, expired, onboarding, or never invited): the
+  // "Resend invites" target. Onboarding rows are excluded — they've accepted and
+  // just need reconciliation, not another invite.
   const nonMemberStudents = useMemo(
     () =>
-      students.filter((student) => {
-        const status = statusByUsername.get(student.username)?.status
-        return status != null && status !== "member"
+      students.filter((student, index) => {
+        const status = statusByKey.get(studentKey(student, index))?.status
+        return status != null && status !== "member" && status !== "onboarding"
       }),
-    [students, statusByUsername],
+    [students, statusByKey],
   )
 
   const setWarning = (username: string, message: string) =>
@@ -408,7 +418,7 @@ const EnrolledStudents = ({
       return "skipped"
     }
 
-    const status = statusByUsername.get(student.username)
+    const status = getStatus(student)
     const result = await resendOrgInvitation(client, {
       org,
       username: student.username,
@@ -629,8 +639,9 @@ const EnrolledStudents = ({
       ))}
 
       <ul className="divide-y divide-base-300">
-        {students?.map((student) => {
-          const statusEntry = statusByUsername.get(student.username)
+        {students?.map((student, index) => {
+          const rowKey = studentKey(student, index)
+          const statusEntry = statusByKey.get(rowKey)
           const status = statusEntry?.status
           const showResend = status === "expired" || status === "none"
           const isResending = resendingUsernames.has(student.username)
@@ -639,16 +650,26 @@ const EnrolledStudents = ({
               ? formatInvitedAt(statusEntry?.invitedAt)
               : null
           const isSelf = isSameGitHubUser(viewer, student)
+          // Email-only rows have no username yet; show the email so the row is
+          // identifiable before reconciliation fills in the GitHub handle.
+          const displayName = student.username
+            ? getName(student.username, students)
+            : student.email
+          const displayHandle = student.username || student.email
 
           return (
             <li
-              key={student.username}
+              key={rowKey}
               className="flex items-center gap-4 px-6 py-4 justify-between"
             >
               <Avatar
-                name={getName(student.username, students)}
-                github={student.username}
-                initials={getInitials(student.username, students)}
+                name={displayName}
+                github={displayHandle}
+                initials={
+                  student.username
+                    ? getInitials(student.username, students)
+                    : (student.email[0]?.toUpperCase() ?? "?")
+                }
               />
 
               <div className="flex items-center gap-2">

@@ -896,6 +896,26 @@ export async function getRepo(
   }
 }
 
+// Whether `username` is a member of the org team `teamSlug`. GET .../memberships
+// 404s when they're not a member (or the team/slug is unknown) -> false. Any
+// other error also degrades to false so a transient read can't misroute the
+// onboarding repo-naming decision toward the team path.
+export async function isTeamMember(
+  client: GitHubClient,
+  org: string,
+  teamSlug: string,
+  username: string,
+): Promise<boolean> {
+  try {
+    const membership = await client.request<{ state?: string }>(
+      `/orgs/${org}/teams/${teamSlug}/memberships/${username}`,
+    )
+    return membership.state === "active"
+  } catch {
+    return false
+  }
+}
+
 export type GitHubPullRequest = {
   number: number
   html_url: string

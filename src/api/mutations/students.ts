@@ -23,6 +23,7 @@ import { GitHubAPIError } from "@/hooks/github/errors"
 import { isSameGitHubUser } from "@/util/students"
 import {
   emailHash,
+  onboardingRepoNameByGithubId,
   onboardingRepoNameFromHash,
   ONBOARDING_YAML_PATH,
 } from "@/util/onboarding"
@@ -440,22 +441,34 @@ export async function reconcileOnboarding(
   )
 
   const targets = roster.filter(
-    (row) => row.enrollment_status !== "reconciled" && row.email_hash,
+    (row) =>
+      row.enrollment_status !== "reconciled" &&
+      (row.email_hash || row.github_id),
   )
 
   if (targets.length === 0) {
     return result
   }
 
-  // email_hash -> resolved identity + onboarding repo, for the batched write
-  // and the post-commit cleanup.
+  // key -> resolved identity + onboarding repo, for the batched write and the
+  // post-commit cleanup. Keyed by the same field we'll match the row on below
+  // (github_id when present, else email_hash).
   const resolved = new Map<
     string,
     { username: string; github_id: string; repo: string }
   >()
 
   for (const row of targets) {
-    const repo = onboardingRepoNameFromHash(row.email_hash)
+    // Mirror the create-side naming branch: a row that already carries a
+    // github_id (username invite flow) is reconciled by id; an email-only row
+    // by its email hash. Both stay direct-GET (no org scan).
+    const byGithubId = Boolean(row.github_id)
+    const repo = byGithubId
+      ? onboardingRepoNameByGithubId(row.github_id)
+      : onboardingRepoNameFromHash(row.email_hash)
+    const rowKey = byGithubId
+      ? `id:${row.github_id}`
+      : `email:${row.email_hash}`
     let payload
     try {
       payload = parseOnboardingYaml(
@@ -465,7 +478,7 @@ export async function reconcileOnboarding(
       // 404 = student hasn't onboarded yet (not an error). Anything else is an
       // onboarding repo we found but couldn't read/parse — surface it.
       if (err instanceof GitHubAPIError && err.isNotFound) {
-        result.pending.push(row.email)
+        result.pending.push(row.email || row.username)
       } else {
         result.unmatched.push({ repo, reason: getErrorMessage(err) })
       }
@@ -499,13 +512,13 @@ export async function reconcileOnboarding(
       continue
     }
 
-    resolved.set(row.email_hash, {
+    resolved.set(rowKey, {
       username: payload.github_username,
       github_id: String(payload.github_id),
       repo,
     })
     result.reconciled.push({
-      email: row.email,
+      email: row.email || payload.email,
       username: payload.github_username,
     })
   }
@@ -529,7 +542,14 @@ export async function reconcileOnboarding(
 
     const now = new Date().toISOString()
     const next = current.map((row) => {
-      const match = row.email_hash ? resolved.get(row.email_hash) : undefined
+      // Recompute the same key used when resolving, so the match is stable
+      // whether the row was keyed by github_id or email_hash.
+      const rowKey = row.github_id
+        ? `id:${row.github_id}`
+        : row.email_hash
+          ? `email:${row.email_hash}`
+          : undefined
+      const match = rowKey ? resolved.get(rowKey) : undefined
       if (!match || row.enrollment_status === "reconciled") {
         return row
       }
