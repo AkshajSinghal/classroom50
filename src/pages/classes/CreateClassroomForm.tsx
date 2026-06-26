@@ -218,11 +218,16 @@ const CreateClassroomForm = ({
                   }}
                 />
                 <span>
-                  <span className="font-bold">Protect published resources</span>
+                  <span className="font-bold">
+                    Use an unlisted link for this classroom
+                  </span>
                   <span className="block text-sm text-base-content/60">
-                    Serve this classroom&apos;s assignment data behind an
-                    unguessable URL so it isn&apos;t discoverable by guessing
-                    the org name. Off by default.
+                    Publishes this classroom&apos;s assignment data at an
+                    unguessable URL instead of one anyone can reach by guessing
+                    the org name. This is obscurity, not real access control:
+                    anyone who gets the link can read it, and links can leak
+                    (browser history, referrers, search crawlers). Off by
+                    default.
                   </span>
                 </span>
               </label>
@@ -237,7 +242,7 @@ const CreateClassroomForm = ({
                             htmlFor={secretField.name}
                             className="label font-bold"
                           >
-                            Secret key
+                            Access key
                           </label>
                           <div className="flex gap-2">
                             <input
@@ -266,9 +271,11 @@ const CreateClassroomForm = ({
                           </div>
                           <p className="mt-1 text-xs text-base-content/50">
                             {SECRET_PATTERN_DESCRIPTION}. Accept the generated
-                            key or type your own. This becomes part of every
-                            published URL for this classroom and can&apos;t be
-                            changed later without re-accepting assignments.
+                            key or type your own. It becomes part of every
+                            published URL for this classroom, so treat it like a
+                            shared password — anyone who has the link can read
+                            the data. It can&apos;t be changed later without
+                            re-accepting assignments.
                           </p>
                           {secretField.state.meta.errors.length > 0 && (
                             <p className="text-error text-sm mt-1">

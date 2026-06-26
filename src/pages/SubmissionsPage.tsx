@@ -364,7 +364,7 @@ const SubmissionsPageContent = () => {
                       Share this link with students so they can accept this
                       assignment.
                       {secret
-                        ? " This classroom is protected, so the link includes the access key — share it as-is."
+                        ? " This classroom uses an unlisted URL, so the link includes the access key — treat it like a shared password and send the full link as-is."
                         : ""}
                     </p>
                   </div>

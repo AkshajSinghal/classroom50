@@ -269,9 +269,9 @@ function ClassroomResources({
           <div className="flex items-center gap-2">
             <h3 className="truncate font-semibold">{classroom}</h3>
             {secret ? (
-              <span className="badge badge-success badge-soft badge-sm gap-1">
+              <span className="badge badge-warning badge-soft badge-sm gap-1">
                 <ShieldAlert className="size-3" />
-                Protected
+                Unlisted
               </span>
             ) : (
               <span className="badge badge-ghost badge-sm">Public path</span>
@@ -280,7 +280,7 @@ function ClassroomResources({
           <p className="text-xs text-base-content/50">
             {resources.length} published resource
             {resources.length === 1 ? "" : "s"}
-            {secret ? " · served behind a secret URL" : ""}
+            {secret ? " · served at an unlisted URL" : ""}
           </p>
         </div>
         <ChevronDown
@@ -292,14 +292,16 @@ function ClassroomResources({
       {open && (
         <div className="flex flex-col gap-3 border-t border-base-200 p-5">
           {secret && (
-            <div className="flex items-start gap-2 rounded-lg border border-success/30 bg-success/10 p-3 text-xs text-base-content/70">
-              <ShieldAlert className="mt-0.5 size-4 shrink-0 text-success" />
+            <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-base-content/70">
+              <ShieldAlert className="mt-0.5 size-4 shrink-0 text-warning" />
               <span>
-                This classroom is protected: its resources are served under an
-                unguessable secret path segment. The URL itself is the access
-                token — anyone with a full URL below can read that file. Share
-                the per-assignment accept link or CLI command (with the key)
-                from each assignment&apos;s page.
+                This classroom uses an unlisted URL: its resources are served at
+                an unguessable path instead of a guessable one. This is
+                obscurity, not access control — the link is the only thing
+                guarding the data, anyone who has it can read the file, and
+                links can leak (browser history, referrers, search crawlers).
+                Share the per-assignment accept link or CLI command (which
+                include the key) from each assignment&apos;s page.
               </span>
             </div>
           )}
@@ -356,7 +358,9 @@ export const PublishedResourcesPane = ({ org }: { org: string }) => {
             and the autograder fetch these files without authenticating. Only
             the allow-listed files below are published; anything else in the
             repo (your roster, internal classroom fields, service token) stays
-            private.
+            private. A classroom can use an unlisted URL to make its files
+            harder to find, but that is obscurity, not access control — the
+            files are still public to anyone who has the link.
           </p>
         </div>
       </div>
