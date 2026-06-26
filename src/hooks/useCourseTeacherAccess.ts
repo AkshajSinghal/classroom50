@@ -17,6 +17,57 @@ export type CourseManifest = {
   }>
 }
 
+// The repo-query state the verdict depends on. Structural so the verdict logic
+// stays a pure, unit-testable function (no React Query needed).
+export type TeacherVerdictInput = {
+  org: string | undefined
+  isSuccess: boolean
+  permissions?: {
+    admin?: boolean
+    maintain?: boolean
+    push?: boolean
+    pull?: boolean
+  }
+  error: unknown
+}
+
+export type TeacherVerdict = {
+  isTeacher: boolean
+  isStudent: boolean
+  isBlocked: boolean
+  roleResolved: boolean
+  showTeacherUi: boolean
+}
+
+// Pure, fail-closed role resolution against the org's `classroom50` config repo:
+// teacher = repo GET succeeded with a non-trivial permission, student = 404,
+// blocked = 403. Resolved only on a definitive verdict (success/404/403) — a
+// transient 5xx/429/network error must NOT resolve, or a student during a blip
+// would be promoted into teacher UI. showTeacherUi also needs a positive
+// success, so a transient error keeps it false. Org-less routes have no role.
+export function resolveTeacherVerdict(
+  input: TeacherVerdictInput,
+): TeacherVerdict {
+  const { org, isSuccess, permissions, error } = input
+
+  const isTeacher =
+    isSuccess &&
+    Boolean(
+      permissions?.admin ||
+      permissions?.maintain ||
+      permissions?.push ||
+      permissions?.pull,
+    )
+
+  const isStudent = error instanceof GitHubAPIError && error.status === 404
+  const isBlocked = error instanceof GitHubAPIError && error.status === 403
+
+  const roleResolved = !org || isSuccess || isStudent || isBlocked
+  const showTeacherUi = Boolean(org) && isTeacher
+
+  return { isTeacher, isStudent, isBlocked, roleResolved, showTeacherUi }
+}
+
 export function useCourseTeacherAccess(org: string | undefined) {
   const teacherRepo = "classroom50"
   // Bounded retry on transient errors only: a 404 (student) / 403 (blocked) is
@@ -34,40 +85,16 @@ export function useCourseTeacherAccess(org: string | undefined) {
     },
   })
 
-  const isTeacher =
-    repoQuery.isSuccess &&
-    Boolean(
-      repoQuery.data.permissions?.admin ||
-      repoQuery.data.permissions?.maintain ||
-      repoQuery.data.permissions?.push ||
-      repoQuery.data.permissions?.pull,
-    )
-
-  const isStudent =
-    repoQuery.error instanceof GitHubAPIError && repoQuery.error.status === 404
-
-  const isBlocked =
-    repoQuery.error instanceof GitHubAPIError && repoQuery.error.status === 403
-
-  // Resolved only on a DEFINITIVE verdict: success (teacher), 404 (student), or
-  // 403 (blocked). A transient 5xx/429/network error must NOT resolve the role
-  // — otherwise a student during a blip would be treated as a non-student and
-  // promoted into teacher UI. An org-less route has no role to resolve.
-  const roleResolved = !org || repoQuery.isSuccess || isStudent || isBlocked
-
-  // Teacher UI requires a positive success verdict — fail-closed for students.
-  // No longer derived from "resolved && not-student", so a transient error
-  // leaves showTeacherUi false (consumers keep their pending state) rather than
-  // optimistically granting teacher access.
-  const showTeacherUi = Boolean(org) && isTeacher
+  const verdict = resolveTeacherVerdict({
+    org,
+    isSuccess: repoQuery.isSuccess,
+    permissions: repoQuery.data?.permissions,
+    error: repoQuery.error,
+  })
 
   return {
     ...repoQuery,
     teacherRepo,
-    isTeacher,
-    isStudent,
-    isBlocked,
-    roleResolved,
-    showTeacherUi,
+    ...verdict,
   }
 }

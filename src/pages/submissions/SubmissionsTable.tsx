@@ -10,6 +10,7 @@ import { Fragment, useRef, useState } from "react"
 import GitHub from "@/assets/github.svg?react"
 import { getName, getInitials } from "@/util/students"
 import { studentRepoName, studentRepoUrl } from "@/util/studentRepo"
+import { safeHttpUrl } from "@/util/url"
 import Avatar from "@/components/avatar"
 import { GroupCollaboratorsModal } from "@/components/modals/GroupCollaboratorsModal"
 import type { SubmissionAttempt, SubmissionRow } from "@/hooks/useGetScores"
@@ -259,24 +260,38 @@ const SubmissionHistory = ({
           </span>
         ) : null}
         <span className="ml-auto flex gap-3">
-          <a
-            className="link link-hover inline-flex items-center gap-1"
-            href={s.commit}
-            target="_blank"
-            rel="noreferrer"
-          >
-            <SquareArrowOutUpRight className="size-3.5" />
-            Commit
-          </a>
-          <a
-            className="link link-hover inline-flex items-center gap-1"
-            href={s.release}
-            target="_blank"
-            rel="noreferrer"
-          >
-            <ChartColumnIncreasing className="size-3.5" />
-            Details
-          </a>
+          {safeHttpUrl(s.commit) ? (
+            <a
+              className="link link-hover inline-flex items-center gap-1"
+              href={safeHttpUrl(s.commit)}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <SquareArrowOutUpRight className="size-3.5" />
+              Commit
+            </a>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-base-content/40">
+              <SquareArrowOutUpRight className="size-3.5" />
+              Commit
+            </span>
+          )}
+          {safeHttpUrl(s.release) ? (
+            <a
+              className="link link-hover inline-flex items-center gap-1"
+              href={safeHttpUrl(s.release)}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <ChartColumnIncreasing className="size-3.5" />
+              Details
+            </a>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-base-content/40">
+              <ChartColumnIncreasing className="size-3.5" />
+              Details
+            </span>
+          )}
         </span>
       </li>
     ))}
@@ -464,29 +479,43 @@ const SubmissionsTable = ({
                               </div>
                             )}
                             <div>
-                              <a
-                                className="flex gap-2"
-                                href={rest.commit}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                <SquareArrowOutUpRight />
-                                <span>Commit</span>
-                              </a>
+                              {safeHttpUrl(rest.commit) ? (
+                                <a
+                                  className="flex gap-2"
+                                  href={safeHttpUrl(rest.commit)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  <SquareArrowOutUpRight />
+                                  <span>Commit</span>
+                                </a>
+                              ) : (
+                                <span className="flex gap-2 text-base-content/40">
+                                  <SquareArrowOutUpRight />
+                                  <span>Commit</span>
+                                </span>
+                              )}
                             </div>
                             <div>
                               <ReviewButton org={org} repo={repo} />
                             </div>
                             <div>
-                              <a
-                                className="flex gap-2"
-                                href={rest.release}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                <ChartColumnIncreasing />
-                                <span>Details</span>
-                              </a>
+                              {safeHttpUrl(rest.release) ? (
+                                <a
+                                  className="flex gap-2"
+                                  href={safeHttpUrl(rest.release)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  <ChartColumnIncreasing />
+                                  <span>Details</span>
+                                </a>
+                              ) : (
+                                <span className="flex gap-2 text-base-content/40">
+                                  <ChartColumnIncreasing />
+                                  <span>Details</span>
+                                </span>
+                              )}
                             </div>
                           </div>
                         </td>

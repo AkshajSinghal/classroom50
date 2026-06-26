@@ -655,8 +655,11 @@ export async function ensureOrgMembership(
   }
 }
 
-// Resend: cancel the existing invitation (when invitationId is given, e.g. an
-// expired invite) then re-create. Omit invitationId for a never-invited student.
+// Resend an org invite without ever leaving the student invite-less. The old
+// cancel-then-recreate order stranded a student if the recreate failed; instead
+// recreate first and cancel the stale invite only once a replacement exists. If
+// a still-pending invite blocks the recreate (createOrgInvitation 422s), that
+// existing invite is the live one, so leave it in place.
 export async function resendOrgInvitation(
   client: GitHubClient,
   input: {
@@ -668,11 +671,15 @@ export async function resendOrgInvitation(
 ): Promise<EnsureOrgMembershipResult> {
   const { org, username, inviteeId, invitationId } = input
 
-  if (invitationId !== undefined) {
+  const result = await ensureOrgMembership(client, { org, username, inviteeId })
+
+  // A fresh invite makes the prior one stale; an already active/pending student
+  // means we created nothing, so don't cancel their invite.
+  if (invitationId !== undefined && result.state === "invited") {
     await cancelOrgInvitation(client, { org, invitationId })
   }
 
-  return ensureOrgMembership(client, { org, username, inviteeId })
+  return result
 }
 
 export {
@@ -1980,10 +1987,9 @@ export async function addRepoCollaborator(params: {
   // (rate limit, 5xx, private-membership 403) fall through to the authoritative
   // PUT rather than falsely rejecting a valid member.
   try {
-    const userReq = await client.requestRaw(
+    await client.requestRaw(
       `/orgs/${encodeURIComponent(org)}/members/${encodeURIComponent(username)}`,
     )
-    console.log("user req for " + username, userReq)
   } catch (err) {
     if (err instanceof GitHubAPIError && err.isNotFound) throw err
   }
@@ -1998,7 +2004,6 @@ export async function addRepoCollaborator(params: {
     },
   )
 
-  console.log("request raw for add repo member", res)
   return res
 }
 
@@ -2097,16 +2102,12 @@ export async function editClassroom(
   client: GitHubClient,
   input: EditClassroomInput,
 ) {
-  console.log("editing classroom...")
   const { org, slug, term, name } = input
 
-  console.log("fetching ref...")
   const ref = await getBranchRef(client, org)
 
-  console.log("fetching commit...")
   const commit = await getCommit(client, org, ref.object.sha)
 
-  console.log("fetching classroom json...")
   const current = await getClassroomJson(client, {
     org,
     classroom: slug,
@@ -2125,13 +2126,11 @@ export async function editClassroom(
     term,
   }
 
-  console.log("creating blob...")
   const blob = await createBlob(client, {
     org,
     content: JSON.stringify(next, null, 2) + "\n",
   })
 
-  console.log("creating tree...")
   const tree = await createTreeFromEntries(client, {
     org,
     base_tree: commit.tree.sha,
@@ -2145,7 +2144,6 @@ export async function editClassroom(
     ],
   })
 
-  console.log("creating new commit...")
   const newCommit = await createCommit(client, {
     org,
     message: `Update classroom ${slug}`,
@@ -2155,7 +2153,6 @@ export async function editClassroom(
     term,
   })
 
-  console.log("updating ref...")
   const updatedRef = await updateRef(client, org, newCommit.sha)
 
   return {

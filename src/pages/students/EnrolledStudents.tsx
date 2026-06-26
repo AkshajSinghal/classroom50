@@ -9,6 +9,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { unenrollStudent } from "@/api/mutations/students"
 import type { UnenrollStudentInput } from "@/api/mutations/students"
 import { resendOrgInvitation, getErrorMessage } from "@/hooks/github/mutations"
+import { GitHubAPIError } from "@/hooks/github/errors"
+import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import {
   githubKeys,
@@ -228,26 +230,7 @@ const InviteStatusBadge = ({ status }: { status: InviteStatus }) => {
 // URL for everyone (no per-student token).
 const InviteLink = ({ org }: { org: string }) => {
   const inviteUrl = `https://github.com/orgs/${org}/invitation`
-  const [copied, setCopied] = useState(false)
-  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  useEffect(
-    () => () => {
-      if (resetTimerRef.current) clearTimeout(resetTimerRef.current)
-    },
-    [],
-  )
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(inviteUrl)
-      setCopied(true)
-      if (resetTimerRef.current) clearTimeout(resetTimerRef.current)
-      resetTimerRef.current = setTimeout(() => setCopied(false), 2000)
-    } catch {
-      setCopied(false)
-    }
-  }
+  const { copied, copy } = useCopyToClipboard(inviteUrl)
 
   return (
     <div className="flex flex-col gap-1 px-6 py-3 border-b border-base-300 bg-base-200/40">
@@ -266,7 +249,7 @@ const InviteLink = ({ org }: { org: string }) => {
         <button
           type="button"
           className="btn btn-sm join-item"
-          onClick={() => void handleCopy()}
+          onClick={() => void copy()}
           aria-label="Copy invite link"
         >
           {copied ? (
@@ -359,24 +342,29 @@ const EnrolledStudents = ({
 
   // Resend (or first-time invite for "none"). Returns true on success. "expired"
   // carries an invitation id we cancel first; "none" is a plain create.
-  const resendForStudent = async (student: Student): Promise<boolean> => {
+  // What the resend actually did, so callers don't over-report: "invited" = a
+  // fresh invite sent; "pending"/"active" = no-op (still valid / already member);
+  // "skipped" = couldn't attempt (missing id).
+  type ResendOutcome = "invited" | "pending" | "active" | "skipped"
+
+  const resendForStudent = async (student: Student): Promise<ResendOutcome> => {
     const inviteeId = Number(student.github_id)
     if (!Number.isFinite(inviteeId) || inviteeId <= 0) {
       setWarning(
         student.username,
         `Can't re-send the invite for ${student.username}: missing GitHub id. Re-add them to the roster.`,
       )
-      return false
+      return "skipped"
     }
 
     const status = statusByUsername.get(student.username)
-    await resendOrgInvitation(client, {
+    const result = await resendOrgInvitation(client, {
       org,
       username: student.username,
       inviteeId,
       invitationId: status?.invitationId,
     })
-    return true
+    return result.state
   }
 
   const resendMutation = useMutation({
@@ -404,34 +392,57 @@ const EnrolledStudents = ({
   }
 
   // Sequential to respect GitHub's 50/24h invite cap and secondary rate limits.
-  // Aggregates a single summary warning.
+  // Stops early on a rate-limit error to avoid burning the cap further.
   const handleResendAll = async () => {
-    let succeeded = 0
+    let resent = 0
+    let alreadyValid = 0
     const failures: string[] = []
+    let rateLimited = false
+    let stoppedAt = 0
 
     for (const student of nonMemberStudents) {
+      stoppedAt++
       try {
-        const ok = await resendForStudent(student)
-        if (ok) succeeded++
+        const outcome = await resendForStudent(student)
+        if (outcome === "invited") resent++
+        // "pending"/"active" = already has a valid invite / is a member; no
+        // invite was re-sent, but it isn't a failure either.
+        else if (outcome === "pending" || outcome === "active") alreadyValid++
         else failures.push(student.username)
       } catch (err) {
         failures.push(student.username)
         console.error(`resend failed for ${student.username}:`, err)
+        if (err instanceof GitHubAPIError && err.isRateLimited) {
+          rateLimited = true
+          break
+        }
       }
     }
 
     invalidateInviteQueries()
 
+    const remaining = nonMemberStudents.length - stoppedAt
+    const alreadyNote =
+      alreadyValid > 0 ? ` ${alreadyValid} already had a pending invite.` : ""
     const summaryKey = "__resend_all__"
-    if (failures.length === 0) {
+    if (rateLimited) {
+      const failedList = failures.length ? ` (${failures.join(", ")})` : ""
       setWarning(
         summaryKey,
-        `Re-sent ${succeeded} invite${succeeded === 1 ? "" : "s"}.`,
+        `Re-sent ${resent} before GitHub rate-limited the request; ` +
+          `${failures.length} failed${failedList}` +
+          (remaining > 0 ? `, ${remaining} not attempted` : "") +
+          `. Wait a bit and try again.`,
+      )
+    } else if (failures.length === 0) {
+      setWarning(
+        summaryKey,
+        `Re-sent ${resent} invite${resent === 1 ? "" : "s"}.${alreadyNote}`,
       )
     } else {
       setWarning(
         summaryKey,
-        `Re-sent ${succeeded} of ${nonMemberStudents.length}; ${failures.length} failed (${failures.join(", ")}).`,
+        `Re-sent ${resent} of ${nonMemberStudents.length}; ${failures.length} failed (${failures.join(", ")}).${alreadyNote}`,
       )
     }
   }
