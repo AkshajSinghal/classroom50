@@ -20,6 +20,8 @@ import { useCourseTeacherAccess } from "../../hooks/useCourseTeacherAccess"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetPublicAssignment from "@/hooks/useGetPublicAssignment"
+import useDotClassroom50 from "@/hooks/useDotClassroom50"
+import { studentRepoName } from "@/util/studentRepo"
 import useGetAssignmentRepo from "@/hooks/useGetAssignmentRepo"
 import type { Classroom } from "@/types/classroom"
 import {
@@ -286,6 +288,7 @@ const AssignmentSidebarMenu = ({
   const { collapsed } = useSidebarCollapse()
   const { showTeacherUi, roleResolved } = useCourseTeacherAccess(org)
   const matchRoute = useMatchRoute()
+  const { user } = useGithubAuth()
 
   // Resolve the display name from whichever source the role can read. The
   // teacher config-repo source is gated on role so a student doesn't fire a
@@ -296,10 +299,23 @@ const AssignmentSidebarMenu = ({
     classroom,
     { enabled: showTeacherUi },
   )
+  // For a protected classroom the public Pages fetch needs the capability
+  // secret. A student reads it from their own repo's .classroom50.yaml (the
+  // only source they can access); a teacher gets it from classroom.json.
+  const studentRepoNameForSecret = user?.login
+    ? studentRepoName(classroom, assignment, user.login)
+    : ""
+  const { secret: studentSecret } = useDotClassroom50(
+    org,
+    studentRepoNameForSecret,
+  )
+  const { data: classroomMeta } = useGetClassroom(org, classroom)
+  const secret = studentSecret || classroomMeta?.secret
   const { assignment: publicAssignment } = useGetPublicAssignment(
     org,
     classroom,
     assignment,
+    secret,
   )
   const assignmentName =
     teacherAssignments?.assignments.find((a) => a.slug === assignment)?.name ||
@@ -325,7 +341,6 @@ const AssignmentSidebarMenu = ({
 
   // Students only: surface "Accept" until they have their repo. Hidden while
   // loading to avoid a flash that then disappears once we learn they accepted.
-  const { user } = useGithubAuth()
   const { assignment: studentRepo, isLoading: repoLoading } =
     useGetAssignmentRepo(org, classroom, assignment, user?.login)
   const showAccept =
