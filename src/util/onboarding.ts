@@ -1,0 +1,51 @@
+// Deterministic naming for the email-first onboarding flow. A student invited
+// by email (before their GitHub account is known) self-reports their identity
+// by creating an onboarding repo from inside an authenticated session. The repo
+// name is derived deterministically from the invited email so the teacher can
+// fetch it directly (GET /repos/{org}/<name>) without scanning the org.
+//
+// The repo name is an opaque pointer, NOT a reversible encoding of the email:
+// the authoritative email lives inside .classroom50-onboarding.yaml (exact,
+// unmunged), alongside the GitHub-attested username/id. Both the student-create
+// path and the teacher-reconcile path import these helpers so the two sides are
+// guaranteed to compute the same name.
+
+export const ONBOARDING_REPO_PREFIX = "classroom50-onboarding-"
+
+// Path of the self-report payload committed into the onboarding repo.
+export const ONBOARDING_YAML_PATH = ".classroom50-onboarding.yaml"
+
+// Canonical form used for hashing so the same human inbox maps to one name.
+// Lowercase + trim only: we deliberately do NOT strip Gmail-style `+tags` or
+// dots, because those transforms are provider-specific and would collapse
+// genuinely distinct addresses (rongxinliu.g@ vs rongxinliu-g@) onto one repo.
+// Whatever the teacher typed at invite time is hashed verbatim (post-normalize)
+// and the student onboarding link carries that same email, so the two agree.
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase()
+}
+
+// Lower-cased hex SHA-256 of the normalized email, truncated to 16 chars
+// (64 bits). Collision risk is negligible for a classroom, and hex is always a
+// valid repo-name segment. Async because Web Crypto's subtle.digest returns a
+// Promise.
+export async function emailHash(email: string): Promise<string> {
+  const data = new TextEncoder().encode(normalizeEmail(email))
+  const digest = await crypto.subtle.digest("SHA-256", data)
+  const hex = Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+  return hex.slice(0, 16)
+}
+
+// Repo name from an already-computed hash. Sync, so the reconcile loop (which
+// reads email_hash from the roster) avoids re-hashing every row.
+export function onboardingRepoNameFromHash(hash: string): string {
+  return `${ONBOARDING_REPO_PREFIX}${hash}`
+}
+
+// Repo name from a raw email. Async (awaits emailHash); use at invite/onboard
+// time where the email is the input.
+export async function onboardingRepoName(email: string): Promise<string> {
+  return onboardingRepoNameFromHash(await emailHash(email))
+}
