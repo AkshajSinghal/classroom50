@@ -4,6 +4,7 @@ import Papa from "papaparse"
 import {
   ArrowDownWideNarrow,
   Check,
+  ChevronRight,
   Copy,
   ExternalLink,
   HardDriveDownload,
@@ -360,10 +361,10 @@ const SubmissionsPageContent = () => {
                   <div>
                     <h2 className="font-bold">How students accept</h2>
                     <p className="text-sm text-base-content/60">
-                      Share either of these with students to accept this
-                      assignment — a browser link or the CLI command.
+                      Share this link with students so they can accept this
+                      assignment.
                       {secret
-                        ? " This classroom is protected, so both include the access key — share them as-is."
+                        ? " This classroom is protected, so the link includes the access key — share it as-is."
                         : ""}
                     </p>
                   </div>
@@ -393,28 +394,34 @@ const SubmissionsPageContent = () => {
                 </button>
               </div>
 
-              <div className="flex justify-between bg-base-200 text-base-content border border-base-300 items-center">
-                <pre className="overflow-x-auto px-4 py-3 text-sm">
-                  <code>{assignmentSubmitCli}</code>
-                </pre>
-                <button
-                  type="button"
-                  className={`btn ${copiedSubmitCli ? "btn-success" : "btn-primary"} btn-sm btn-outline mr-2`}
-                  onClick={copySubmitCli}
-                  aria-label="Copy CLI command"
-                  title="Copy CLI command"
-                >
-                  {copiedSubmitCli ? (
-                    <>
-                      <Check className="size-4" />
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="size-4" />
-                    </>
-                  )}
-                </button>
-              </div>
+              <details className="group">
+                <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-sm text-base-content/60 hover:text-base-content">
+                  <ChevronRight className="size-4 transition-transform group-open:rotate-90" />
+                  Prefer the command line?
+                </summary>
+                <div className="mt-2 flex justify-between bg-base-200 text-base-content border border-base-300 items-center">
+                  <pre className="overflow-x-auto px-4 py-3 text-sm">
+                    <code>{assignmentSubmitCli}</code>
+                  </pre>
+                  <button
+                    type="button"
+                    className={`btn ${copiedSubmitCli ? "btn-success" : "btn-primary"} btn-sm btn-outline mr-2`}
+                    onClick={copySubmitCli}
+                    aria-label="Copy CLI command"
+                    title="Copy CLI command"
+                  >
+                    {copiedSubmitCli ? (
+                      <>
+                        <Check className="size-4" />
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="size-4" />
+                      </>
+                    )}
+                  </button>
+                </div>
+              </details>
             </div>
           </div>{" "}
           <div className="grid grid-cols-12 gap-4 mb-6">
