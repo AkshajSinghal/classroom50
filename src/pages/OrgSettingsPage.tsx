@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Drawer, {
   DrawerContent,
   DrawerSidebar,
@@ -45,6 +45,72 @@ const TOKEN_STATUS_BANNER = {
     title: "Couldn’t check the service token",
   },
 } as const
+
+export function ServiceTokenHeader() {
+  const [open, setOpen] = useState(false)
+  const popupRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        popupRef.current &&
+        !popupRef.current.contains(event.target as Node)
+      ) {
+        setOpen(false)
+      }
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false)
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown)
+    document.addEventListener("keydown", handleKeyDown)
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown)
+      document.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [open])
+
+  return (
+    <div className="flex items-center gap-2">
+      <h2 className="text-xl font-bold">Service Token</h2>
+
+      <div ref={popupRef} className="dropdown">
+        <button
+          type="button"
+          className="btn btn-circle btn-ghost btn-xs text-base-content/60 hover:text-base-content"
+          aria-label="What is the service token?"
+          aria-expanded={open}
+          onClick={() => setOpen((open) => !open)}
+        >
+          <span className="flex h-4 w-4 items-center justify-center rounded-full border border-current text-[11px] font-bold">
+            i
+          </span>
+        </button>
+
+        {open && (
+          <div className="dropdown-content z-50 mt-2 w-80 rounded-box border border-base-300 bg-base-100 p-4 text-sm shadow-xl">
+            <p className="text-base-content/70">
+              Classroom 50 needs a service token, a fine-grained Personal Access
+              Token (PAT) with read access to the repositories in your
+              classroom’s GitHub organization. It is stored as the{" "}
+              <code className="text-xs">CLASSROOM50_SERVICE_TOKEN</code> secret
+              on your <span className="font-semibold">classroom50</span> config
+              repo, where the nightly score-collection workflow uses it to read
+              student submissions.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
   const client = useGitHubClient()
@@ -107,16 +173,7 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
   return (
     <div>
       <div className="mt-8">
-        <h2 className="text-xl font-bold">Service Token</h2>
-        <p className="mt-2 text-sm text-base-content/60">
-          Classroom 50 needs a service token, a fine-grained Personal Access
-          Token (PAT) with read access to the repositories in your classroom’s
-          GitHub organization. It is stored as the{" "}
-          <code className="text-xs">CLASSROOM50_SERVICE_TOKEN</code> secret on
-          your <span className="font-semibold">classroom50</span> config repo,
-          where the nightly score-collection workflow uses it to read student
-          submissions.
-        </p>
+        <ServiceTokenHeader />
 
         {!tokenStatusLoading &&
           tokenStatus &&
