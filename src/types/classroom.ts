@@ -135,6 +135,11 @@ export type Student = {
   // Cached emailHash(email) — the deterministic onboarding-repo key, so the
   // teacher reconcile loop fetches the repo directly without re-hashing.
   email_hash?: string
+  // Per-student secure-link token (optional). Present only when the teacher
+  // sent a unique onboarding link; it names the onboarding repo unguessably
+  // (`classroom50-onboarding-tok-<token>`) so only the link holder can create
+  // it. Absent on the classroom-wide-link / username flows.
+  invite_token?: string
   invited_at?: string
   reconciled_at?: string
 }

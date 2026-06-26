@@ -15,7 +15,12 @@ import { useGithubAuth } from "@/auth/useGithubAuth"
 import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
 import { submitOnboarding } from "@/api/mutations/onboarding"
 import { getRepo } from "@/hooks/github/queries"
-import { isValidEmail, onboardingRepoNameByGithubId } from "@/util/onboarding"
+import {
+  isValidEmail,
+  isValidInviteToken,
+  onboardingRepoNameByGithubId,
+  onboardingRepoNameByToken,
+} from "@/util/onboarding"
 
 const OnboardNavbar = () => (
   <div className="navbar bg-base-100 shadow-sm">
@@ -128,8 +133,15 @@ const OnboardingPage = () => {
   // deterministic repo name + claimed-email field; the authenticated session is
   // what actually authorizes everything, and reconciliation re-verifies the
   // commit author against the claimed identity.
-  const search = useSearch({ strict: false }) as { email?: string }
+  const search = useSearch({ strict: false }) as { email?: string; t?: string }
   const prefilledEmail = typeof search.email === "string" ? search.email : ""
+  // Secure-link token: names the onboarding repo unguessably so only the link
+  // holder can create it. Validated before use; an absent/garbage value just
+  // degrades to the classroom-wide (email-hash) flow.
+  const inviteToken =
+    typeof search.t === "string" && isValidInviteToken(search.t)
+      ? search.t.trim()
+      : undefined
   const [email, setEmail] = useState(prefilledEmail)
   const [firstName, setFirstName] = useState("")
   const [lastName, setLastName] = useState("")
@@ -139,18 +151,24 @@ const OnboardingPage = () => {
   const { data: orgMembership, isLoading: loadingMembership } =
     useGetOwnOrgMembership(org)
 
-  // Detect a prior onboarding on re-visit. The github-id-based repo name is
-  // always knowable from the authenticated user (no email needed), so we probe
-  // it once the student is a member: it exists & active -> onboarding already
-  // kicked off, awaiting the teacher's reconcile; exists & archived -> the
-  // teacher reconciled (complete). A missing repo is ambiguous (never onboarded
-  // OR reconciled+deleted), so we fall back to showing the form, where a
-  // re-submit is harmless (idempotent).
-  const ghidRepoName = user ? onboardingRepoNameByGithubId(user.id) : ""
+  // Detect a prior onboarding on re-visit. With a secure token the repo name is
+  // known directly; otherwise the github-id-based name is knowable from the
+  // authenticated user (no email needed), so we probe it once the student is a
+  // member: it exists & active -> onboarding already kicked off, awaiting the
+  // teacher's reconcile; exists & archived -> the teacher reconciled
+  // (complete). A missing repo is ambiguous — under the default "delete"
+  // cleanup a reconciled student's repo is gone, so we fall back to showing the
+  // form, where a re-submit is idempotent on the SAME repo name (the token or
+  // github-id name); it does not strand an orphan because the name is stable.
+  const probeRepoName = inviteToken
+    ? onboardingRepoNameByToken(inviteToken)
+    : user
+      ? onboardingRepoNameByGithubId(user.id)
+      : ""
   const { data: existingRepo, isLoading: loadingExisting } = useQuery({
-    queryKey: ["github", "repo", org, ghidRepoName],
-    queryFn: () => getRepo(client, org ?? "", ghidRepoName),
-    enabled: Boolean(org && ghidRepoName && orgMembership),
+    queryKey: ["github", "repo", org, probeRepoName],
+    queryFn: () => getRepo(client, org ?? "", probeRepoName),
+    enabled: Boolean(org && probeRepoName && orgMembership),
   })
 
   const emailValid = isValidEmail(email)
@@ -165,6 +183,7 @@ const OnboardingPage = () => {
         email: email.trim(),
         first_name: firstName.trim(),
         last_name: lastName.trim(),
+        invite_token: inviteToken,
       }),
   })
 
