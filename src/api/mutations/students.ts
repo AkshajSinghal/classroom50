@@ -649,9 +649,10 @@ export async function reconcileOnboarding(
     let deleteScopeMissing = false
 
     for (const { repo } of resolved.values()) {
-      // "delete" needs the delete_repo scope (not in DEFAULT_GITHUB_SCOPE); on a
-      // 403 we fall back to archiving so cleanup still happens, and warn once so
-      // the teacher knows why repos were archived instead of deleted.
+      // "delete" needs the delete_repo scope (now requested by default, but an
+      // older session's token may lack it); on a 403 we fall back to archiving
+      // so cleanup still happens, and warn once so the teacher knows to
+      // re-authorize.
       if (cleanupMode === "delete" && !deleteScopeMissing) {
         try {
           await deleteRepo(client, { owner: org, repo })
@@ -684,9 +685,9 @@ export async function reconcileOnboarding(
 
     if (deleteScopeMissing) {
       result.cleanupWarning =
-        "Cleanup is set to delete, but this app isn't authorized to delete " +
-        "repositories, so the onboarding repos were archived instead. To enable " +
-        "deletion, re-authorize with the delete_repo scope, or change the " +
+        "Cleanup is set to delete, but your current session isn't authorized to " +
+        "delete repositories, so the onboarding repos were archived instead. " +
+        "Sign out and back in to grant the delete permission, or change the " +
         "classroom cleanup setting to archive."
     }
   }
