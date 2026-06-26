@@ -243,25 +243,35 @@ def review_url(server_url: str, repository: str, base_sha: str | None, head_sha:
     return commit_url(server_url, repository, head_sha)
 
 
-def bundle_url(pages_base_url: str, classroom: str, assignment: str) -> str:
-    """The Pages URL for an assignment's bundle (autograder.py +
-    sibling fixtures, packaged by publish-pages.yaml)."""
+def _classroom_segment(classroom: str, secret: str) -> str:
+    """The per-classroom Pages path segment. When the classroom opted into
+    protected resources a capability-URL secret is present and everything is
+    served under `<classroom>/<secret>`; otherwise the plain `<classroom>`.
+    Both parts are URL-quoted by the callers."""
     safe_classroom = urllib.parse.quote(classroom, safe="")
+    if not secret:
+        return safe_classroom
+    return f"{safe_classroom}/{urllib.parse.quote(secret, safe='')}"
+
+
+def bundle_url(pages_base_url: str, classroom: str, assignment: str, secret: str = "") -> str:
+    """The Pages URL for an assignment's bundle (autograder.py +
+    sibling fixtures, packaged by publish-pages.yaml). Secret-aware:
+    inserts the capability-URL segment when the classroom is protected."""
     safe_slug = urllib.parse.quote(assignment, safe="")
-    return f"{pages_base_url}/{safe_classroom}/autograders/{safe_slug}.tar.gz"
+    return f"{pages_base_url}/{_classroom_segment(classroom, secret)}/autograders/{safe_slug}.tar.gz"
 
 
-def classroom_default_autograder_url(pages_base_url: str, classroom: str) -> str:
+def classroom_default_autograder_url(pages_base_url: str, classroom: str, secret: str = "") -> str:
     """The Pages URL for a classroom's default autograder.py.
 
     Published verbatim by publish-pages.yaml from the repo path
     `<classroom>/autograder.py` to the Pages path
-    `<classroom>/autograder.py`. Optional — classrooms that haven't
-    run `gh teacher autograder set-default` won't have one, and the
+    `<classroom>/[<secret>/]autograder.py`. Optional — classrooms that
+    haven't run `gh teacher autograder set-default` won't have one, and the
     runner falls back to a vacuous-pass result for those.
     """
-    safe_classroom = urllib.parse.quote(classroom, safe="")
-    return f"{pages_base_url}/{safe_classroom}/{ENTRYPOINT_FILENAME}"
+    return f"{pages_base_url}/{_classroom_segment(classroom, secret)}/{ENTRYPOINT_FILENAME}"
 
 
 def actor_identity() -> dict[str, Any] | None:
@@ -1599,13 +1609,13 @@ def run_declarative(tests_path: pathlib.Path, finalize: Finalizer,
 
 
 def fetch_bundle(finalize: Finalizer, *, pages_base_url: str, classroom: str,
-                 assignment: str, runtime_dir: pathlib.Path) -> int | None:
+                 assignment: str, runtime_dir: pathlib.Path, secret: str = "") -> int | None:
     """Download the per-assignment bundle from Pages and extract it into
     `runtime_dir`. A 404 means "no per-assignment override" — fine, the
     entrypoint resolver falls through to the classroom default. Returns an
     rc (already finalized as an error) on a hard fetch/extract failure, or
     None to continue."""
-    burl = bundle_url(pages_base_url, classroom, assignment)
+    burl = bundle_url(pages_base_url, classroom, assignment, secret)
     print(f"runner: fetching bundle {burl}")
     try:
         bundle = fetch_url(burl)
@@ -1623,7 +1633,7 @@ def fetch_bundle(finalize: Finalizer, *, pages_base_url: str, classroom: str,
 
 def resolve_entrypoint(
     finalize: Finalizer, *, pages_base_url: str, classroom: str, assignment: str,
-    runtime_dir: pathlib.Path,
+    runtime_dir: pathlib.Path, secret: str = "",
 ) -> tuple[pathlib.Path | None, int | None]:
     """Resolve the grading entrypoint, most-specific first:
         per-assignment autograder.py
@@ -1654,7 +1664,7 @@ def resolve_entrypoint(
         print(f"runner: grading per-assignment declarative tests {per_assignment_tests}")
         return None, run_declarative(per_assignment_tests, finalize, runtime_dir / assignment)
 
-    durl = classroom_default_autograder_url(pages_base_url, classroom)
+    durl = classroom_default_autograder_url(pages_base_url, classroom, secret)
     print(
         f"runner: no per-assignment {ENTRYPOINT_FILENAME}; "
         f"fetching classroom default from {durl}"
@@ -1806,6 +1816,19 @@ def main() -> int:
         )
         return 1
 
+    # Optional capability-URL secret (set by the workflow from the student
+    # repo's .classroom50.yaml). Present -> resources at <classroom>/<secret>/;
+    # absent -> plain path. The setup job already validates it; re-check here
+    # as defense-in-depth since it composes into a URL.
+    secret = os.environ.get("SECRET", "").strip()
+    if secret and not re.fullmatch(r"[a-z0-9]{4,64}", secret):
+        print(
+            f"::error::SECRET {secret!r} is malformed (must be [a-z0-9]{{4,64}}) — "
+            "re-run `gh student accept` to regenerate .classroom50.yaml",
+            file=sys.stderr,
+        )
+        return 1
+
     repository = os.environ.get("GITHUB_REPOSITORY", "")
     sha = os.environ.get("GITHUB_SHA", "")
     server_url = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
@@ -1893,14 +1916,14 @@ def main() -> int:
         # Each stage returns an rc when terminal, else None to continue.
         rc = fetch_bundle(
             finalize, pages_base_url=pages_base_url, classroom=classroom,
-            assignment=assignment, runtime_dir=runtime_dir,
+            assignment=assignment, secret=secret, runtime_dir=runtime_dir,
         )
         if rc is not None:
             return rc
 
         entrypoint, rc = resolve_entrypoint(
             finalize, pages_base_url=pages_base_url, classroom=classroom,
-            assignment=assignment, runtime_dir=runtime_dir,
+            assignment=assignment, secret=secret, runtime_dir=runtime_dir,
         )
         if entrypoint is None:
             return rc  # declarative grader ran, vacuous pass, or fetch error

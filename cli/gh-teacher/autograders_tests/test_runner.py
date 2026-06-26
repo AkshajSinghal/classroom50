@@ -121,6 +121,29 @@ class TestUrlConstruction:
             "cs principles",
         ) == "https://cs50.github.io/classroom50/cs%20principles/autograder.py"
 
+    def test_bundle_url_with_secret(self):
+        # A protected classroom inserts the capability-URL segment between
+        # the classroom and the resource. Must match publish-pages.yaml's
+        # <classroom>/<secret>/autograders/<slug>.tar.gz layout exactly.
+        assert ag.bundle_url(
+            "https://cs50.github.io/classroom50", "cs-principles", "hello", "abc123"
+        ) == "https://cs50.github.io/classroom50/cs-principles/abc123/autograders/hello.tar.gz"
+
+    def test_bundle_url_empty_secret_is_plain_path(self):
+        # An empty secret (unprotected classroom, the default) must
+        # produce exactly the legacy path — disabling the feature is a
+        # true no-op.
+        assert ag.bundle_url(
+            "https://cs50.github.io/classroom50", "cs-principles", "hello", ""
+        ) == ag.bundle_url(
+            "https://cs50.github.io/classroom50", "cs-principles", "hello"
+        )
+
+    def test_classroom_default_autograder_url_with_secret(self):
+        assert ag.classroom_default_autograder_url(
+            "https://cs50.github.io/classroom50", "cs-principles", "abc123",
+        ) == "https://cs50.github.io/classroom50/cs-principles/abc123/autograder.py"
+
     def test_commit_url(self):
         assert ag.commit_url(
             "https://github.com", "cs50/cs-principles-hello-alice", "abc123"

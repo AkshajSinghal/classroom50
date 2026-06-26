@@ -133,7 +133,7 @@ func enforceGroupSize(cmd *cobra.Command, client githubapi.Client, org, repo, in
 		return nil // target repo isn't this assignment's group repo → skip
 	}
 
-	entry, err := assignments.FetchEntry(cmd.Context(), org, cfg.Classroom, cfg.Assignment)
+	entry, err := assignments.FetchEntry(cmd.Context(), org, cfg.Classroom, cfg.Secret, cfg.Assignment)
 	if err != nil {
 		// The local config points at an assignment we can't resolve. If it's
 		// genuinely not published, that's a "not a group repo we can check"

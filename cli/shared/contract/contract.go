@@ -42,4 +42,18 @@ const (
 	// them. Mirror runner.py's RESULT_FILENAME / RELEASE_BODY_FILENAME.
 	ResultFilename      = "result.json"
 	ReleaseBodyFilename = "release-body.md"
+
+	// SecretPattern is the anchored regex a per-classroom capability-URL
+	// secret must match: 4-64 lowercase-alphanumeric chars (a single safe URL
+	// path segment for `<classroom>/<secret>/...`). Single-sourced here
+	// because the rule is a cross-binary AND cross-language contract. Both Go
+	// modules compile their regex from this (configrepo.SecretPattern,
+	// classroomcfg secretPattern); the non-importable copies (runner.py,
+	// autograde-runner.yaml, publish-pages.yaml, both schemas/, the web GUI)
+	// must stay byte-identical and are pinned by contract_test.go.
+	SecretPattern = "^[a-z0-9]{4,64}$"
+
+	// SecretPatternDescription is the human-readable summary in the "invalid
+	// secret" error, kept in lockstep with SecretPattern.
+	SecretPatternDescription = "4-64 lowercase letters or digits ([a-z0-9])"
 )

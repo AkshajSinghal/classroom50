@@ -51,6 +51,7 @@ jobs:
       base-url:       ${{ steps.read.outputs.base-url }}
       classroom:      ${{ steps.read.outputs.classroom }}
       assignment:     ${{ steps.read.outputs.assignment }}
+      secret:         ${{ steps.read.outputs.secret }}
       feedback-pr:    ${{ steps.read.outputs.feedback-pr }}
       mode:           ${{ steps.read.outputs.mode }}
       allowed-files:  ${{ steps.read.outputs.allowed-files }}
@@ -178,6 +179,7 @@ jobs:
           import yaml
 
           _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,38}$")
+          _SECRET = re.compile(r"^[a-z0-9]{4,64}$")
           _LANG = re.compile(r"^[A-Za-z0-9._+-]{1,32}$")
           _APT  = re.compile(r"^[a-z0-9][a-z0-9.+-]{0,63}$")
           _IMAGE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$")
@@ -211,6 +213,13 @@ jobs:
           classroom  = safe((cfg.get("classroom") or "").strip(),  "classroom",  _SLUG)
           assignment = safe((cfg.get("assignment") or "").strip(), "assignment", _SLUG)
 
+          # Optional capability-URL secret. Present -> resources at
+          # <classroom>/<secret>/; absent -> plain path. Validated against the
+          # same strict regex as the other fields since it composes into a URL.
+          secret = (cfg.get("secret") or "").strip()
+          if secret and not _SECRET.match(secret):
+              fail(f".classroom50.yaml field 'secret' has invalid value {secret!r} (must match {_SECRET.pattern!r}) — re-run `gh student accept`")
+
           owner = os.environ["REPO_OWNER"]
           base_url = f"https://{owner}.github.io/classroom50"
 
@@ -228,7 +237,15 @@ jobs:
                           time.sleep(2 ** attempt); continue
                       raise
 
-          manifest_url = f"{base_url}/{classroom}/assignments.json"
+          # Secret-aware classroom path segment, mirroring runner.py's
+          # _classroom_segment and publish-pages.yaml's dest_prefix. Defined
+          # locally because this setup step runs before runner.py is fetched;
+          # keep it byte-identical to those copies (pinned by
+          # cli/shared/contract/contract_test.go).
+          def classroom_segment(classroom, secret):
+              return f"{classroom}/{secret}" if secret else classroom
+
+          manifest_url = f"{base_url}/{classroom_segment(classroom, secret)}/assignments.json"
           try:
               with get(manifest_url) as resp:
                   manifest = json.load(resp)
@@ -485,6 +502,7 @@ jobs:
           emit("base-url", base_url)
           emit("classroom", classroom)
           emit("assignment", assignment)
+          emit("secret", secret)
           emit("feedback-pr", "true" if feedback_pr else "false")
           emit("mode", mode)
           emit("allowed-files", allowed_files_json)
@@ -510,6 +528,9 @@ jobs:
       CLASSROOM:      ${{ needs.setup.outputs.classroom }}
       ASSIGNMENT:     ${{ needs.setup.outputs.assignment }}
       SUBMISSION_TAG: ${{ needs.setup.outputs.submission-tag }}
+      # Optional capability-URL secret from .classroom50.yaml (via setup).
+      # runner.py inserts it into the fetch URLs; empty = plain path.
+      SECRET:         ${{ needs.setup.outputs.secret }}
       # Assignment mode (individual | group) from assignments.json, so
       # runner.py validates a group autograder's multi-username result.json
       # instead of rejecting it. Defaults to the stricter individual rule

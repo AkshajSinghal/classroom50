@@ -12,10 +12,12 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/foundation50/classroom50-cli-shared/contract"
 	"github.com/foundation50/classroom50-cli-shared/ghutil"
 	"github.com/foundation50/gh-student/internal/githubapi"
 )
@@ -48,6 +50,11 @@ const SchemaRepoConfigV1 = "classroom50/repo-config/v1"
 // / `.github/` on each push. source is omitted for a template-less
 // assignment (nothing to re-fetch).
 //
+// Secret is the optional capability-URL path segment, written here at accept
+// so submit and the autograde runner can rebuild the `<classroom>/<secret>/...`
+// Pages URLs without an org read. Omitted (plain path) for an unprotected
+// classroom.
+//
 // The runner derives its config-repo coordinates from the calling repo's
 // org (security-pinned at workflow runtime) and the classroom slug, so no
 // `config:` block is needed on disk.
@@ -55,6 +62,7 @@ type Config struct {
 	Schema     string    `yaml:"schema,omitempty"`
 	Classroom  string    `yaml:"classroom"`
 	Assignment string    `yaml:"assignment"`
+	Secret     string    `yaml:"secret,omitempty"`
 	Owner      *Identity `yaml:"owner,omitempty"`
 	Source     *Source   `yaml:"source,omitempty"`
 }
@@ -214,6 +222,33 @@ func ReadConfig(path string) (*Config, error) {
 	if config.Source != nil && config.Source.Owner == "" {
 		return nil, fmt.Errorf("source block present but missing source.owner (omit the whole source block for a template-less assignment): %s", path)
 	}
+	// Re-validate the optional secret in lockstep with every other consumer
+	// (the same ^[a-z0-9]{4,64}$ rule) before submit/invite compose it into a
+	// URL: empty = unprotected, a present-but-malformed value fails fast here
+	// instead of building a 404-ing path.
+	if config.Secret != "" {
+		if err := ValidateSecret(config.Secret); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+	}
 
 	return &config, nil
 }
+
+// ValidateSecret checks a --key access key against secretPattern. Empty is
+// rejected; callers allowing "no key" (unprotected) must branch on emptiness
+// first. Mirrors the teacher-side configrepo.ValidateSecret.
+func ValidateSecret(secret string) error {
+	if !secretPattern.MatchString(secret) {
+		return fmt.Errorf("invalid --key %q: must be %s", secret, secretPatternDescription)
+	}
+	return nil
+}
+
+// secretPattern / secretPatternDescription are compiled from the
+// single-sourced contract.SecretPattern so the teacher and student halves
+// can't drift; the non-importable copies (runner.py, the workflow YAMLs, the
+// JSON Schemas, the web GUI) are pinned by contract_test.go's change-detector.
+var secretPattern = regexp.MustCompile(contract.SecretPattern)
+
+const secretPatternDescription = contract.SecretPatternDescription

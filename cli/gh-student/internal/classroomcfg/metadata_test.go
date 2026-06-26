@@ -238,3 +238,20 @@ func TestIsHTTPNotFound(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateSecret(t *testing.T) {
+	valid := []string{"abcd", "abc123", "dhkrm4ih", "zzzz9999"}
+	for _, s := range valid {
+		if err := ValidateSecret(s); err != nil {
+			t.Errorf("ValidateSecret(%q) = %v, want nil", s, err)
+		}
+	}
+	// Separators/uppercase/too-short are rejected so a bad --key can't become
+	// an unsafe path segment; empty is rejected here (callers branch first).
+	invalid := []string{"", "abc", "ABC123", "abc-123", "abc/123", "abc 123", "abc.123"}
+	for _, s := range invalid {
+		if err := ValidateSecret(s); err == nil {
+			t.Errorf("ValidateSecret(%q) = nil, want error", s)
+		}
+	}
+}

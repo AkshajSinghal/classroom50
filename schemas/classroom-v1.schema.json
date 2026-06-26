@@ -49,6 +49,11 @@
         "id": { "type": "integer", "description": "Immutable GitHub team id; the handle `classroom remove` deletes by." },
         "slug": { "type": "string", "minLength": 1, "description": "GitHub team slug; the authoritative addressing key for membership and repo-grant operations." }
       }
+    },
+    "secret": {
+      "type": "string",
+      "pattern": "^[a-z0-9]{4,64}$",
+      "description": "Optional access key for an unlisted classroom. When present, publish-pages serves this classroom's resources at an unguessable URL (`<classroom>/<secret>/...`) that every consumer inserts; when omitted, the plain `<classroom>/...` path. Obscurity, not access control — anyone with the link can read the files. Opt-in via `gh teacher classroom add --unlisted`."
     }
   },
   "$defs": {

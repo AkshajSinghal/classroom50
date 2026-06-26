@@ -146,7 +146,7 @@ func TestFetchAllowedFiles_FetchFailureReturnsNil(t *testing.T) {
 	// because the runner enforces the allowlist authoritatively.
 	orig := fetchEntryFn
 	t.Cleanup(func() { fetchEntryFn = orig })
-	fetchEntryFn = func(ctx context.Context, org, classroom, assignment string) (assignments.Entry, error) {
+	fetchEntryFn = func(ctx context.Context, org, classroom, secret, assignment string) (assignments.Entry, error) {
 		return assignments.Entry{}, errors.New("pages 404")
 	}
 
@@ -161,7 +161,7 @@ func TestFetchAllowedFiles_FetchFailureReturnsNil(t *testing.T) {
 func TestFetchAllowedFiles_SuccessReturnsPatterns(t *testing.T) {
 	orig := fetchEntryFn
 	t.Cleanup(func() { fetchEntryFn = orig })
-	fetchEntryFn = func(ctx context.Context, org, classroom, assignment string) (assignments.Entry, error) {
+	fetchEntryFn = func(ctx context.Context, org, classroom, secret, assignment string) (assignments.Entry, error) {
 		return assignments.Entry{AllowedFiles: []string{"*", "!hello.py"}}, nil
 	}
 

@@ -87,24 +87,34 @@ type assignmentsFile struct {
 // in the shared contract package.
 const assignmentsSchemaV1 = contract.AssignmentsSchemaV1
 
-// pagesAssignmentsURL: Pages URL for a classroom's assignments.json.
-// Pages on `<org>/classroom50` serves under
-// `<org>.github.io/classroom50/` per publish-pages.yaml.
-func pagesAssignmentsURL(org, classroom string) string {
-	return fmt.Sprintf("https://%s.github.io/%s/%s/assignments.json", org, configRepoName, classroom)
+// classroomPathSegment returns the per-classroom Pages path prefix:
+// `<classroom>/<secret>` for a protected (unlisted) classroom, else the
+// plain `<classroom>`. Empty secret means unprotected.
+func classroomPathSegment(classroom, secret string) string {
+	if secret == "" {
+		return classroom
+	}
+	return classroom + "/" + secret
+}
+
+// pagesAssignmentsURL: Pages URL for a classroom's assignments.json, served
+// under `<org>.github.io/classroom50/` per publish-pages.yaml. secret-aware.
+func pagesAssignmentsURL(org, classroom, secret string) string {
+	return fmt.Sprintf("https://%s.github.io/%s/%s/assignments.json", org, configRepoName, classroomPathSegment(classroom, secret))
 }
 
 // pagesAutograderURL: Pages URL for a classroom's autograder workflow.
-// Mirrors publish-pages.yaml's allow-list pattern.
-func pagesAutograderURL(org, classroom, name string) string {
-	return fmt.Sprintf("https://%s.github.io/%s/%s/autograders/%s.yaml", org, configRepoName, classroom, name)
+// Mirrors publish-pages.yaml's allow-list pattern (secret-aware).
+func pagesAutograderURL(org, classroom, secret, name string) string {
+	return fmt.Sprintf("https://%s.github.io/%s/%s/autograders/%s.yaml", org, configRepoName, classroomPathSegment(classroom, secret), name)
 }
 
 // FetchEntry: find the entry by slug from the Pages `assignments.json`.
-// No auth — the Pages site is public by design. Thin wrapper around
-// fetchEntryFromURL so tests can inject an httptest URL.
-func FetchEntry(ctx context.Context, org, classroom, assignment string) (Entry, error) {
-	entry, err := fetchEntryFromURL(ctx, pagesAssignmentsURL(org, classroom), assignment)
+// No auth — the Pages site is public by design. secret is the optional
+// capability-URL segment (empty for an unprotected classroom). Thin
+// wrapper around fetchEntryFromURL so tests can inject an httptest URL.
+func FetchEntry(ctx context.Context, org, classroom, secret, assignment string) (Entry, error) {
+	entry, err := fetchEntryFromURL(ctx, pagesAssignmentsURL(org, classroom, secret), assignment)
 	if nf := new(NotFoundError); errors.As(err, &nf) {
 		// Fill the org/classroom hints — the inner function can't
 		// include them in its
@@ -113,6 +123,16 @@ func FetchEntry(ctx context.Context, org, classroom, assignment string) (Entry, 
 		nf.Org = org
 		nf.Classroom = classroom
 		return entry, nf
+	}
+	// A whole-manifest 404 on a protected classroom is usually a wrong or
+	// missing --key (the manifest lives at <classroom>/<secret>/), not a Pages
+	// problem. The inner 404 can't tell; augment it here where the key is in
+	// scope so the student debugs the key.
+	if errors.Is(err, errManifestNotFound) {
+		if secret != "" {
+			return entry, fmt.Errorf("%w; the access key (--key) may be wrong — double-check the key your instructor gave you", err)
+		}
+		return entry, fmt.Errorf("%w; if this is an unlisted classroom, you must pass the access key your instructor gave you with `--key <key>`", err)
 	}
 	return entry, err
 }
@@ -135,7 +155,7 @@ func fetchEntryFromURL(ctx context.Context, rawURL, assignment string) (Entry, e
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return Entry{}, fmt.Errorf("%s returned 404 — the classroom may not exist yet, or `publish-pages.yaml` may not have run; ask your instructor to confirm the Pages site has deployed", rawURL)
+		return Entry{}, fmt.Errorf("%s returned 404 — the classroom may not exist yet, or `publish-pages.yaml` may not have run; ask your instructor to confirm the Pages site has deployed: %w", rawURL, errManifestNotFound)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return Entry{}, fmt.Errorf("GET %s: unexpected status %d", rawURL, resp.StatusCode)
@@ -165,6 +185,11 @@ func fetchEntryFromURL(ctx context.Context, rawURL, assignment string) (Entry, e
 		URL:        rawURL,
 	}
 }
+
+// errManifestNotFound flags a whole-manifest 404 (vs NotFoundError, which
+// means the manifest loaded but lacks the slug) so FetchEntry can add a
+// key-aware hint. Matched via errors.Is.
+var errManifestNotFound = errors.New("assignments manifest not found (404)")
 
 // NotFoundError: Pages fetch succeeded but the requested slug isn't in
 // the manifest. Typed so callers can branch without matching error text.
@@ -205,8 +230,8 @@ type AutogradeWorkflow struct {
 // from Pages. Unauth — the publish-pages allow-list keeps the directory
 // public. Thin wrapper around fetchAutograderWorkflowFromURL for
 // testability.
-func FetchAutograderWorkflow(ctx context.Context, org, classroom, name string) (AutogradeWorkflow, error) {
-	return fetchAutograderWorkflowFromURL(ctx, pagesAutograderURL(org, classroom, name), name)
+func FetchAutograderWorkflow(ctx context.Context, org, classroom, secret, name string) (AutogradeWorkflow, error) {
+	return fetchAutograderWorkflowFromURL(ctx, pagesAutograderURL(org, classroom, secret, name), name)
 }
 
 // fetchAutograderWorkflowFromURL is the HTTP-bearing core. Actionable

@@ -16,6 +16,11 @@ type ClassroomJSON struct {
 	ShortName string `json:"short_name"`
 	Term      string `json:"term"`
 	Org       string `json:"org"`
+	// Secret is the optional capability-URL path segment. When set,
+	// publish-pages serves this classroom's resources under
+	// `<classroom>/<secret>/...` (every consumer inserts it); empty = the
+	// plain path. Opt-in per classroom, so omitted on unprotected classrooms.
+	Secret string `json:"secret,omitempty"`
 	// Team is the per-classroom GitHub team that grants rostered
 	// students read on private, org-owned assignment templates.
 	// Populated by `classroom add`; omitted on classrooms created
