@@ -565,21 +565,31 @@ export async function removeUserFromTeam(
   }
 }
 
-// POST /orgs/{org}/invitations. Mirrors the CLI: body is invitee_id + role only
-// (no team_ids/email). invitee_id must be a number (a string 422s). Owner-only.
-function createOrgInvitation(
+// POST /orgs/{org}/invitations. Mirrors the CLI for the id path: body is
+// invitee_id + role (no team_ids). invitee_id must be a number (a string 422s).
+// Also supports inviting by email (GitHub matches it to a verified account at
+// accept time) for the email-first enrolment flow. Exactly one of invitee_id /
+// email must be provided. Owner-only.
+export function createOrgInvitation(
   client: GitHubClient,
   input: {
     org: string
-    invitee_id: number
+    invitee_id?: number
+    email?: string
     role?: "direct_member" | "admin"
   },
 ) {
-  const { org, invitee_id, role = "direct_member" } = input
+  const { org, invitee_id, email, role = "direct_member" } = input
+
+  if (invitee_id === undefined && !email) {
+    throw new Error("createOrgInvitation requires invitee_id or email")
+  }
+
+  const body = email !== undefined ? { email, role } : { invitee_id, role }
 
   return client.request(`/orgs/${org}/invitations`, {
     method: "POST",
-    body: { invitee_id, role },
+    body,
   })
 }
 

@@ -25,6 +25,16 @@ export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase()
 }
 
+// Minimal email shape check — a single `@` with non-empty local and domain
+// parts and a dotted domain. Deliberately permissive (GitHub, not us, is the
+// real validator at invite time); this only catches obvious typos before we
+// commit a row and fire an invite.
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+export function isValidEmail(email: string): boolean {
+  return EMAIL_PATTERN.test(email.trim())
+}
+
 // Lower-cased hex SHA-256 of the normalized email, truncated to 16 chars
 // (64 bits). Collision risk is negligible for a classroom, and hex is always a
 // valid repo-name segment. Async because Web Crypto's subtle.digest returns a
