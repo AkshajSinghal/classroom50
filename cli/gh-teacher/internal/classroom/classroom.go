@@ -84,8 +84,10 @@ func NewCmd() *cobra.Command {
 
 func classroomAddCmd() *cobra.Command {
 	var (
-		name string
-		term string
+		name     string
+		term     string
+		unlisted bool
+		key      string
 	)
 
 	cmd := &cobra.Command{
@@ -102,13 +104,21 @@ func classroomAddCmd() *cobra.Command {
 			"short-name flows into student repo names like\n" +
 			"`<short-name>-<assignment>-<username>` (see `gh student\n" +
 			"accept`).\n\n" +
+			"Unlisted resources (opt-in): pass --unlisted to publish this\n" +
+			"classroom's resources at an unguessable URL path segment\n" +
+			"(`<classroom>/<key>/...`) instead of the guessable default. This\n" +
+			"is obscurity, not access control — anyone who has the link can\n" +
+			"read the files, and links can leak. You'll be shown a generated\n" +
+			"key to accept or replace, or supply your own with --key <value>.\n" +
+			"Off by default.\n\n" +
 			"If <org>/classroom50 doesn't exist yet, run `gh teacher init\n" +
 			"<org>` first. If <short-name> already exists in the repo, the\n" +
 			"command exits with an error rather than overwriting state —\n" +
 			"use `gh teacher roster add` or `gh teacher assignment add` to\n" +
 			"modify an existing classroom.",
 		Example: "  gh teacher classroom add cs50-fall-2026 cs-principles --name \"CS Principles\" --term Spring-2026\n" +
-			"  gh teacher classroom add cs50-fall-2026 intro-java",
+			"  gh teacher classroom add cs50-fall-2026 intro-java\n" +
+			"  gh teacher classroom add cs50-fall-2026 cs-principles --unlisted",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
@@ -125,17 +135,71 @@ func classroomAddCmd() *cobra.Command {
 				return err
 			}
 
+			// Resolve the optional capability-URL key before any API call so
+			// an invalid --key fails fast. An explicit --key implies opt-in
+			// even without --unlisted.
+			resolvedSecret, err := resolveClassroomSecret(
+				cmd.InOrStdin(), cmd.ErrOrStderr(),
+				cmd.Flags().Changed("unlisted") && unlisted,
+				cmd.Flags().Changed("key"), strings.TrimSpace(key),
+			)
+			if err != nil {
+				return err
+			}
+
 			client, err := githubapi.RequireAuthClient(cmd)
 			if err != nil {
 				return err
 			}
-			return addClassroom(client, cmd.OutOrStdout(), cmd.ErrOrStderr(), org, shortName, strings.TrimSpace(name), strings.TrimSpace(term))
+			return addClassroom(client, cmd.OutOrStdout(), cmd.ErrOrStderr(), org, shortName, strings.TrimSpace(name), strings.TrimSpace(term), resolvedSecret)
 		},
 	}
 
 	cmd.Flags().StringVar(&name, "name", "", `Full display name for the classroom (e.g. "CS Principles")`)
 	cmd.Flags().StringVar(&term, "term", "", "Term identifier (e.g. Spring-2026)")
+	cmd.Flags().BoolVar(&unlisted, "unlisted", false, "Publish this classroom's resources at an unguessable URL path segment (obscurity, not access control; prompts to accept a generated key)")
+	cmd.Flags().StringVar(&key, "key", "", "Supply a specific access key for the unlisted URL (implies --unlisted); must match "+configrepo.SecretPatternDescription)
 	return cmd
+}
+
+// resolveClassroomSecret turns the --unlisted / --key flags into the key
+// string to persist (empty = a normal, guessable-URL classroom). Precedence:
+//   - an explicit --key value is validated and used verbatim (opt-in);
+//   - --unlisted with no --key generates a candidate and prompts the teacher
+//     to accept it or type their own;
+//   - neither set -> empty (guessable URL, today's behavior).
+//
+// The prompt reads one line from `in`; an empty line (just Enter) accepts
+// the generated candidate, any other line is validated as a custom key.
+func resolveClassroomSecret(in io.Reader, errOut io.Writer, unlisted bool, keySet bool, key string) (string, error) {
+	if keySet {
+		if err := configrepo.ValidateSecret(key); err != nil {
+			return "", err
+		}
+		return key, nil
+	}
+	if !unlisted {
+		return "", nil
+	}
+
+	candidate, err := configrepo.GenerateSecret(configrepo.DefaultSecretLength)
+	if err != nil {
+		return "", err
+	}
+	_, _ = fmt.Fprintf(errOut, "Generated access key for the unlisted URL: %s\n", candidate)
+	_, _ = fmt.Fprintf(errOut, "Press Enter to accept, or type your own (%s): ", configrepo.SecretPatternDescription)
+	line, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", fmt.Errorf("read access key confirmation: %w", err)
+	}
+	entered := strings.TrimSpace(line)
+	if entered == "" {
+		return candidate, nil
+	}
+	if err := configrepo.ValidateSecret(entered); err != nil {
+		return "", err
+	}
+	return entered, nil
 }
 
 // addClassroom writes the four-file scaffold in one Tree commit
@@ -143,7 +207,7 @@ func classroomAddCmd() *cobra.Command {
 // work. The existence probe runs inside the build callback so a
 // same-classroom race surfaces as "already exists" rather than
 // silently clobbering the winner.
-func addClassroom(client githubapi.Client, out, errOut io.Writer, org, shortName, name, term string) error {
+func addClassroom(client githubapi.Client, out, errOut io.Writer, org, shortName, name, term, secret string) error {
 	branch, err := configrepo.ResolveConfigRepoBranch(client, org)
 	if err != nil {
 		return err
@@ -158,7 +222,7 @@ func addClassroom(client githubapi.Client, out, errOut io.Writer, org, shortName
 		return fmt.Errorf("create classroom team: %w", err)
 	}
 
-	files, err := classroomScaffold(org, shortName, name, term, nil, nil, &team)
+	files, err := classroomScaffold(org, shortName, name, term, secret, nil, nil, &team)
 	if err != nil {
 		return err
 	}
@@ -188,6 +252,9 @@ func addClassroom(client githubapi.Client, out, errOut io.Writer, org, shortName
 	// "View at" + "Next:" hints.
 	_, _ = fmt.Fprintf(out, "%s/%s: added classroom %s (%d files)\n", org, configrepo.ConfigRepoName, shortName, len(files))
 	_, _ = fmt.Fprintf(out, "%s: classroom team %s ready\n", org, team.Slug)
+	if secret != "" {
+		_, _ = fmt.Fprintf(out, "%s: resources published at an unlisted URL (key %q); share the accept link/command from the assignment page\n", org, secret)
+	}
 	_, _ = fmt.Fprintf(errOut, "View at https://github.com/%s/%s/tree/%s/%s\n", org, configrepo.ConfigRepoName, branch, shortName)
 	_, _ = fmt.Fprintf(errOut, "Next: gh teacher roster add %s %s <username>\n", org, shortName)
 	return nil
@@ -551,13 +618,14 @@ func confirmClassroomRemove(in io.Reader, out io.Writer, shortName string) error
 // through assignment.EncodeAssignments (same normalization as
 // `gh teacher assignment add`); `migration` populates the optional
 // `migrated_from` block on classroom.json.
-func classroomScaffold(org, shortName, name, term string, entries []assignment.AssignmentEntry, migration *configrepo.MigratedFromRef, team *configrepo.TeamRef) (map[string]string, error) {
+func classroomScaffold(org, shortName, name, term, secret string, entries []assignment.AssignmentEntry, migration *configrepo.MigratedFromRef, team *configrepo.TeamRef) (map[string]string, error) {
 	classroom := configrepo.ClassroomJSON{
 		Schema:       classroomSchemaV1,
 		Name:         name,
 		ShortName:    shortName,
 		Term:         term,
 		Org:          org,
+		Secret:       secret,
 		Team:         team,
 		MigratedFrom: migration,
 	}

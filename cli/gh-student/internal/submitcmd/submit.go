@@ -215,7 +215,7 @@ func submitAssignment(ctx context.Context, client githubapi.Client, verbose bool
 	// Confirmation on stdout: the assignment's full name (falls back to
 	// the slug — see resolveAssignmentName) and the local submission time,
 	// then a link to the submitted commit.
-	displayName := resolveAssignmentName(ctx, repoOwner, config.Classroom, config.Assignment)
+	displayName := resolveAssignmentName(ctx, repoOwner, config.Classroom, config.Secret, config.Assignment)
 	localTime := time.Now().Local().Format("2006-01-02 15:04:05 MST")
 	_, _ = fmt.Fprintf(out, "Submitted assignment %q at %s\n", displayName, localTime)
 	_, _ = fmt.Fprintf(out, "View your submission at: %s/commit/%s\n", repoHTMLURL, sha)
@@ -234,7 +234,7 @@ var fetchEntryFn = assignments.FetchEntry
 func fetchAllowedFiles(ctx context.Context, org string, config *classroomcfg.Config, u *ui.UI, verbose bool) []string {
 	ctx, cancel := context.WithTimeout(ctx, assignmentNameTimeout)
 	defer cancel()
-	entry, err := fetchEntryFn(ctx, org, config.Classroom, config.Assignment)
+	entry, err := fetchEntryFn(ctx, org, config.Classroom, config.Secret, config.Assignment)
 	if err != nil {
 		if verbose {
 			u.Detail("Could not resolve allowed_files (%v); submitting all files — the autograder enforces the list", err)
@@ -251,10 +251,10 @@ func fetchAllowedFiles(ctx context.Context, org string, config *classroomcfg.Con
 // published manifest, falling back to the slug on any error/timeout. The
 // fetch is bounded (assignmentNameTimeout) and runs after the push has
 // already succeeded, so submit never fails — or stalls — over cosmetics.
-func resolveAssignmentName(ctx context.Context, org, classroom, slug string) string {
+func resolveAssignmentName(ctx context.Context, org, classroom, secret, slug string) string {
 	ctx, cancel := context.WithTimeout(ctx, assignmentNameTimeout)
 	defer cancel()
-	entry, err := assignments.FetchEntry(ctx, org, classroom, slug)
+	entry, err := assignments.FetchEntry(ctx, org, classroom, secret, slug)
 	if err != nil || strings.TrimSpace(entry.Name) == "" {
 		return slug
 	}

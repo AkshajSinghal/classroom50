@@ -35,16 +35,27 @@ func TestPagesAssignmentsURL(t *testing.T) {
 	// `<classroom>/assignments.json` at
 	// `https://<org>.github.io/classroom50/...`. A typo here would
 	// 404 every accept.
-	got := pagesAssignmentsURL("cs50-fall-2026", "cs-principles")
+	got := pagesAssignmentsURL("cs50-fall-2026", "cs-principles", "")
 	want := "https://cs50-fall-2026.github.io/classroom50/cs-principles/assignments.json"
 	if got != want {
 		t.Errorf("pagesAssignmentsURL = %q, want %q", got, want)
 	}
 }
 
+func TestPagesAssignmentsURL_WithSecret(t *testing.T) {
+	// A protected classroom inserts the capability-URL segment between
+	// the classroom and the resource. Must match publish-pages.yaml and
+	// runner.py's layout exactly or a protected accept 404s.
+	got := pagesAssignmentsURL("cs50-fall-2026", "cs-principles", "abc123")
+	want := "https://cs50-fall-2026.github.io/classroom50/cs-principles/abc123/assignments.json"
+	if got != want {
+		t.Errorf("pagesAssignmentsURL with secret = %q, want %q", got, want)
+	}
+}
+
 func TestPagesAutograderURL(t *testing.T) {
 	// Mirrors publish-pages' `*/autograders/*.yaml` allow-list.
-	got := pagesAutograderURL("cs50-fall-2026", "cs-principles", "default")
+	got := pagesAutograderURL("cs50-fall-2026", "cs-principles", "", "default")
 	want := "https://cs50-fall-2026.github.io/classroom50/cs-principles/autograders/default.yaml"
 	if got != want {
 		t.Errorf("pagesAutograderURL = %q, want %q", got, want)

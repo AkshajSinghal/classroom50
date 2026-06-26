@@ -238,7 +238,10 @@ func performMigration(client githubapi.Client, out, errOut io.Writer, plan migra
 			return nil, fmt.Errorf("classroom %q appeared in %s/%s mid-commit (concurrent writer?)",
 				plan.ShortName, plan.TargetOrg, configrepo.ConfigRepoName)
 		}
-		return classroomScaffold(plan.TargetOrg, plan.ShortName, plan.Classroom.Name, plan.Term, entries, migration, &team)
+		// Migrated classrooms get a plain (guessable) URL — unlisted is an
+		// opt-in `classroom add --unlisted` concern and a bulk import can't
+		// block on its prompt, so pass an empty key.
+		return classroomScaffold(plan.TargetOrg, plan.ShortName, plan.Classroom.Name, plan.Term, "", entries, migration, &team)
 	}
 
 	message := fmt.Sprintf("Migrate %s from GitHub Classroom %d (gh teacher classroom migrate)",

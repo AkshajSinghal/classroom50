@@ -25,6 +25,14 @@ func TestContractLiterals(t *testing.T) {
 		{"ModeGroup", ModeGroup, "group"},
 		{"ResultFilename", ResultFilename, "result.json"},
 		{"ReleaseBodyFilename", ReleaseBodyFilename, "release-body.md"},
+		// SecretPattern / SecretPatternDescription are mirrored, with NO
+		// compile-time link, in: cli/gh-teacher/skeleton/dotgithub/scripts/runner.py
+		// (re.fullmatch r"[a-z0-9]{4,64}"), autograde-runner.yaml (_SECRET),
+		// publish-pages.yaml (dest_prefix, both steps' shared helper),
+		// schemas/classroom-v1.schema.json, schemas/repo-config-v1.schema.json,
+		// and the web GUI validator. Update every copy in lockstep on change.
+		{"SecretPattern", SecretPattern, "^[a-z0-9]{4,64}$"},
+		{"SecretPatternDescription", SecretPatternDescription, "4-64 lowercase letters or digits ([a-z0-9])"},
 	}
 	for _, tc := range cases {
 		if tc.got != tc.want {

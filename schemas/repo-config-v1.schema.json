@@ -21,6 +21,11 @@
       "minLength": 1,
       "description": "Assignment slug; one of the two always-required identity fields."
     },
+    "secret": {
+      "type": "string",
+      "pattern": "^[a-z0-9]{4,64}$",
+      "description": "Optional capability-URL secret, copied from the classroom's classroom.json at accept. When present, `gh student submit` and the autograde runner build the `<classroom>/<secret>/...` Pages path; when omitted, the plain `<classroom>/...` path."
+    },
     "owner": {
       "type": "object",
       "required": ["username"],

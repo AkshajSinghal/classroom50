@@ -60,6 +60,7 @@ func renderEmbeddedShim(org string) string {
 }
 
 func acceptCmd() *cobra.Command {
+	var key string
 	cmd := &cobra.Command{
 		Use:   "accept <org> <classroom> <assignment>",
 		Short: "Accept an assignment from an organization's classroom",
@@ -67,6 +68,11 @@ func acceptCmd() *cobra.Command {
 			"<org>/<classroom>-<assignment>-<username> (lowercased). The\n" +
 			"assignment is looked up in the published assignments.json on the\n" +
 			"classroom's GitHub Pages site (no token required).\n\n" +
+			"If the classroom uses an unlisted URL, your instructor will give\n" +
+			"you an access key; pass it with `--key <key>`. The key is part\n" +
+			"of the published URL (`<classroom>/<key>/...`); without it the\n" +
+			"classroom's assignments can't be found. Normal classrooms need\n" +
+			"no key.\n\n" +
 			"If the assignment has a template repo (which may live outside\n" +
 			"<org>), the new repo is a private copy generated from it. If it\n" +
 			"has no template, an empty private repo is created carrying only\n" +
@@ -95,8 +101,9 @@ func acceptCmd() *cobra.Command {
 			"re-running the idempotent provisioning. accept only reports\n" +
 			"success once both control files are confirmed present, so an\n" +
 			"\"accepted\" repo always autogrades.",
-		Example: "  gh student accept cs50 cs50-fall-2026 hello\n",
-		Args:    cobra.ExactArgs(3),
+		Example: "  gh student accept cs50 cs50-fall-2026 hello\n" +
+			"  gh student accept cs50 cs50-fall-2026 hello --key dhkrm4ih\n",
+		Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
@@ -105,6 +112,16 @@ func acceptCmd() *cobra.Command {
 			assignment := strings.TrimSpace(args[2])
 			if org == "" || classroom == "" || assignment == "" {
 				return fmt.Errorf("invalid arguments: org, classroom, and assignment must all be non-empty")
+			}
+
+			// The --key access key is the classroom's optional capability-URL
+			// secret. Validate it before any network call so a typo fails fast
+			// instead of surfacing as a confusing 404.
+			secret := strings.TrimSpace(key)
+			if secret != "" {
+				if err := classroomcfg.ValidateSecret(secret); err != nil {
+					return err
+				}
 			}
 
 			client, err := githubapi.RequireAuthClient(cmd)
@@ -130,7 +147,7 @@ func acceptCmd() *cobra.Command {
 					}
 					switch acceptStatus.StatusCode {
 					case http.StatusOK:
-						return acceptAssignment(cmd, client, u, out, org, classroom, assignment)
+						return acceptAssignment(cmd, client, u, out, org, classroom, assignment, secret)
 					case http.StatusNotFound:
 						return fmt.Errorf("%s: no membership found for accept", org)
 					case http.StatusForbidden:
@@ -149,10 +166,11 @@ func acceptCmd() *cobra.Command {
 				return fmt.Errorf("%s: unknown status received (%d)", org, status.StatusCode)
 			}
 
-			return acceptAssignment(cmd, client, u, out, org, classroom, assignment)
+			return acceptAssignment(cmd, client, u, out, org, classroom, assignment, secret)
 		},
 	}
 
+	cmd.Flags().StringVar(&key, "key", "", "Access key for a classroom that uses an unlisted URL (provided by your instructor); omit for normal classrooms")
 	return cmd
 }
 
@@ -219,7 +237,7 @@ func checkAcceptableMode(assignment, mode string) error {
 	return nil
 }
 
-func acceptAssignment(cmd *cobra.Command, client githubapi.Client, u *ui.UI, out io.Writer, org, classroom, assignment string) error {
+func acceptAssignment(cmd *cobra.Command, client githubapi.Client, u *ui.UI, out io.Writer, org, classroom, assignment, secret string) error {
 	verbose, _ := cmd.Flags().GetBool("verbose")
 
 	// The acceptor owns the repo, so capture their immutable id and the
@@ -230,12 +248,14 @@ func acceptAssignment(cmd *cobra.Command, client githubapi.Client, u *ui.UI, out
 	}
 	acceptedAt := time.Now().UTC().Format(time.RFC3339)
 
-	// 1) Look up the assignment entry on the published Pages site
-	//    (no token; publish-pages keeps the JSON public). The entry
-	//    carries the template ref, mode, and autograder ref.
+	// 1) Look up the assignment entry on the published Pages site (no token;
+	//    publish-pages keeps the JSON public). The entry carries the template
+	//    ref, mode, and autograder ref. `secret` (the --key value) selects the
+	//    `<classroom>/<secret>/...` path for a protected classroom, else "";
+	//    it must arrive via --key since students can't read the config repo.
 	lookup := u.Spinner(fmt.Sprintf("Looking up %s in %s/%s", assignment, org, classroom))
 	lookup.Start()
-	entry, err := assignments.FetchEntry(cmd.Context(), org, classroom, assignment)
+	entry, err := assignments.FetchEntry(cmd.Context(), org, classroom, secret, assignment)
 	if err != nil {
 		lookup.Fail(fmt.Sprintf("Looking up %s", assignment))
 		return err
@@ -267,7 +287,7 @@ func acceptAssignment(cmd *cobra.Command, client githubapi.Client, u *ui.UI, out
 	if autograderName == contract.DefaultAutograderName {
 		shim = renderEmbeddedShim(org)
 	} else {
-		workflow, err := assignments.FetchAutograderWorkflow(cmd.Context(), org, classroom, autograderName)
+		workflow, err := assignments.FetchAutograderWorkflow(cmd.Context(), org, classroom, secret, autograderName)
 		if err != nil {
 			return err
 		}
@@ -322,6 +342,7 @@ func acceptAssignment(cmd *cobra.Command, client githubapi.Client, u *ui.UI, out
 		org:            org,
 		classroom:      classroom,
 		assignment:     assignment,
+		secret:         secret,
 		username:       username,
 		ownerID:        &ownerID,
 		acceptedAt:     acceptedAt,
@@ -344,6 +365,7 @@ func acceptAssignment(cmd *cobra.Command, client githubapi.Client, u *ui.UI, out
 // Pages fetch acceptAssignment does up front.
 type acceptRepoParams struct {
 	org, classroom, assignment string
+	secret                     string
 	username, repoName, branch string
 	ownerID                    *int64
 	acceptedAt                 string
@@ -393,6 +415,7 @@ func acceptIntoRepo(client githubapi.Client, u *ui.UI, verbose bool, out io.Writ
 		Schema:     classroomcfg.SchemaRepoConfigV1,
 		Classroom:  p.classroom,
 		Assignment: p.assignment,
+		Secret:     p.secret,
 		Owner: &classroomcfg.Identity{
 			Username:   p.username,
 			ID:         p.ownerID,
