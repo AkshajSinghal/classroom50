@@ -11,6 +11,7 @@ import {
   Menu,
   FileCheck2,
   FilePlus2,
+  Globe,
 } from "lucide-react"
 import { Link, useParams, useMatchRoute } from "@tanstack/react-router"
 import { useGithubAuth } from "../../auth/useGithubAuth"
@@ -686,6 +687,7 @@ export const MyClasses = ({ settings = false, selected = "" }) => {
   const { org } = useParams({ strict: false })
   const { showTeacherUi, roleResolved } = useCourseTeacherAccess(org)
   const onSettings = settings || selected === "settings"
+  const onPublished = selected === "published"
   if (!org) return null
 
   const classesLabel = showTeacherUi ? "My Classes" : "My Assignments"
@@ -703,7 +705,18 @@ export const MyClasses = ({ settings = false, selected = "" }) => {
               <SidebarItemBody
                 label={classesLabel}
                 icon={<BookText />}
-                active={!onSettings}
+                active={!onSettings && !onPublished}
+              />
+            </Link>
+          </Tip>
+        )}
+        {showTeacherUi && (
+          <Tip label="Published">
+            <Link to="/$org/published" params={{ org }}>
+              <SidebarItemBody
+                label="Published"
+                icon={<Globe />}
+                active={onPublished}
               />
             </Link>
           </Tip>

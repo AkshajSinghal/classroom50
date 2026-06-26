@@ -104,6 +104,11 @@ export type CreateClassroomInput = {
   name?: string
   classroom: string
   term: string
+  // Optional capability-URL secret (opt-in). When set, classroom.json
+  // records it and published Pages resources live under
+  // `<classroom>/<secret>/...`. Validated to `[a-z0-9]{4,64}` before the
+  // mutation runs.
+  secret?: string
 }
 export async function createClassroomFilesWithConflictRetry(
   client: GitHubClient,

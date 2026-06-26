@@ -25,6 +25,7 @@ const createClassroomMetadata = (
   name: string | undefined,
   term: string,
   team?: ClassroomTeamRef,
+  secret?: string,
 ) => ({
   schema: "classroom50/classroom/v1",
   // Fall back to the slug when no display name was supplied, so classroom.json
@@ -36,6 +37,10 @@ const createClassroomMetadata = (
   // Written only when a team was provisioned, matching the CLI's `omitempty`
   // team field. Grants rostered students read on private org templates.
   ...(team ? { team } : {}),
+  // Written only when the teacher opted into protected resources, matching
+  // the CLI's `omitempty` secret field. When present, this classroom's Pages
+  // resources publish under `<classroom>/<secret>/...`.
+  ...(secret ? { secret } : {}),
 })
 
 const STUDENTS_CSV_HEADER =
@@ -47,6 +52,7 @@ const createClassroomBody = (
   name: string | undefined,
   term: string,
   team?: ClassroomTeamRef,
+  secret?: string,
 ) => {
   const mode = "100644"
   const type = "blob"
@@ -84,7 +90,7 @@ const createClassroomBody = (
         mode,
         type,
         content: JSON.stringify(
-          createClassroomMetadata(org, classroom, name, term, team),
+          createClassroomMetadata(org, classroom, name, term, team, secret),
           null,
           2,
         ),
@@ -106,7 +112,15 @@ export function createTree(
     `/repos/${org}/classroom50/git/trees`,
     {
       method: "POST",
-      body: createClassroomBody(base_tree, org, classroom, name, term, team),
+      body: createClassroomBody(
+        base_tree,
+        org,
+        classroom,
+        name,
+        term,
+        team,
+        input.secret,
+      ),
     },
   )
 }

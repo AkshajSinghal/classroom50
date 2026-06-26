@@ -79,4 +79,31 @@ describe("createClassroom50Yaml -> parseClassroom50Yaml round trip", () => {
     const cfg = parseClassroom50Yaml(yaml)
     expect(cfg.source).toBeUndefined()
   })
+
+  it("emits and round-trips the secret when the classroom is protected", () => {
+    const yaml = createClassroom50Yaml({
+      classroom: "cs50",
+      assignment: "hw1",
+      ownerUsername: "alice",
+      ownerId: 1,
+      secret: "a1b2c3d4",
+    })
+    expect(yaml).toMatch(/^secret: "a1b2c3d4"$/m)
+
+    const cfg = parseClassroom50Yaml(yaml)
+    expect(cfg.secret).toBe("a1b2c3d4")
+  })
+
+  it("omits the secret line for an unprotected classroom", () => {
+    const yaml = createClassroom50Yaml({
+      classroom: "cs50",
+      assignment: "hw1",
+      ownerUsername: "alice",
+      ownerId: 1,
+    })
+    expect(yaml).not.toMatch(/^secret:/m)
+
+    const cfg = parseClassroom50Yaml(yaml)
+    expect(cfg.secret).toBeUndefined()
+  })
 })

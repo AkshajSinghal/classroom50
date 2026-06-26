@@ -12,6 +12,13 @@ export type Classroom = {
     id: number
     slug: string
   }
+  // Optional capability-URL secret. When present, this classroom's published
+  // Pages resources live under `<classroom>/<secret>/...` and every consumer
+  // (this GUI, the student CLI, the autograde runner) inserts it; when
+  // absent, resources live at the plain `<classroom>/...` path. Opt-in per
+  // classroom (off by default), so omitted on unprotected classrooms. Kept
+  // in lockstep with the CLI's classroom-v1 schema (`[a-z0-9]{4,64}`).
+  secret?: string
 }
 
 // Inclusive bounds for a group assignment's max_group_size (owner included).

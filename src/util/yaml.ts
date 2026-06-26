@@ -15,6 +15,10 @@ const Classroom50YamlSchema = z.object({
   schema: z.string().optional(),
   classroom: z.string().min(1),
   assignment: z.string().min(1),
+  // Optional capability-URL secret, present only for a protected classroom.
+  // Mirrors the CLI's repo-config-v1 schema; consumers use the
+  // <classroom>/<secret>/ Pages path when it's present.
+  secret: z.string().optional(),
   owner: IdentitySchema.optional(),
   source: z
     .object({
