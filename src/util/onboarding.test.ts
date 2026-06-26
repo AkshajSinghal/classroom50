@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   ONBOARDING_REPO_PREFIX,
   emailHash,
+  isValidEmail,
   normalizeEmail,
   onboardingRepoName,
   onboardingRepoNameFromHash,
@@ -52,5 +53,19 @@ describe("onboardingRepoName", () => {
     expect(await onboardingRepoName(email)).toBe(
       onboardingRepoNameFromHash(hash),
     )
+  })
+})
+
+describe("isValidEmail", () => {
+  it("accepts a typical address", () => {
+    expect(isValidEmail("student@university.edu")).toBe(true)
+    expect(isValidEmail("  a+tag@gmail.com  ")).toBe(true)
+  })
+
+  it("rejects obvious non-emails", () => {
+    expect(isValidEmail("")).toBe(false)
+    expect(isValidEmail("nope")).toBe(false)
+    expect(isValidEmail("a@b")).toBe(false)
+    expect(isValidEmail("a @b.com")).toBe(false)
   })
 })

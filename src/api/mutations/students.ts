@@ -4,6 +4,7 @@ import {
   addUserToTeam,
   createGitCommit,
   createGitTree,
+  createOrgInvitation,
   ensureOrgMembership,
   getErrorMessage,
   getOrgMembershipState,
@@ -17,6 +18,7 @@ import { getAuthenticatedUser } from "@/api/queries/users"
 import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import { isSameGitHubUser } from "@/util/students"
+import { emailHash } from "@/util/onboarding"
 import type { Student } from "@/types/classroom"
 
 // The classroom team slug is authoritative in classroom.json: on a name
@@ -231,6 +233,141 @@ export async function addStudentToClassroomWithConflictRetry(
   input: AddStudentToClassroomInput,
 ) {
   return withGitConflictRetry(() => addStudentToClassroom(client, input))
+}
+
+type AddEmailInviteToClassroomInput = {
+  org: string
+  classroom: string
+  email: string
+  first_name?: string
+  last_name?: string
+  section?: string
+}
+
+// Email-first enrolment writer. Unlike addStudentToClassroom, there is no
+// GitHub username/id to resolve yet — the row is keyed on the invited email and
+// stays in the "invited" lifecycle state until the student self-reports via the
+// onboarding repo and the teacher reconciles. Reuses the same git tree/commit/
+// updateRef machinery; dedupes on email (case-insensitive).
+export async function addEmailInviteToClassroom(
+  client: GitHubClient,
+  input: AddEmailInviteToClassroomInput,
+): Promise<AddStudentToClassroomResult> {
+  const normalizedEmail = input.email.trim()
+
+  if (!normalizedEmail) {
+    throw new Error("Email is required")
+  }
+
+  const ref = await getBranchRef(client, input.org)
+  const commit = await getCommit(client, input.org, ref.object.sha)
+
+  const studentsFilePath = `${input.classroom}/students.csv`
+
+  const currentCsv = await getRawFile(client, {
+    org: input.org,
+    path: studentsFilePath,
+    ref: ref.object.sha,
+  })
+
+  const currentStudents = parseStudentsCsv(currentCsv)
+
+  const emailKey = normalizedEmail.toLowerCase()
+  const alreadyExists = currentStudents.some(
+    (student) => student.email.toLowerCase() === emailKey,
+  )
+
+  if (alreadyExists) {
+    throw new Error(`Student already exists: ${normalizedEmail}`)
+  }
+
+  const student: StudentCsvRow = normalizeStudentRow({
+    username: "",
+    first_name: input.first_name?.trim() ?? "",
+    last_name: input.last_name?.trim() ?? "",
+    email: normalizedEmail,
+    section: input.section?.trim() ?? "",
+    github_id: "",
+    enrollment_status: "invited",
+    email_hash: await emailHash(normalizedEmail),
+    invited_at: new Date().toISOString(),
+    reconciled_at: "",
+  })
+
+  const nextStudents = [...currentStudents, student]
+  const nextCsv = stringifyStudentsCsv(nextStudents)
+
+  const tree = await createGitTree(client, {
+    org: input.org,
+    base_tree: commit.tree.sha,
+    tree: [
+      {
+        path: studentsFilePath,
+        mode: "100644",
+        type: "blob",
+        content: nextCsv,
+      },
+    ],
+  })
+
+  const newCommit = await createGitCommit(client, {
+    org: input.org,
+    message: `Invite student by email: ${input.classroom}/${normalizedEmail}`,
+    tree_sha: tree.sha,
+    parents: [ref.object.sha],
+  })
+
+  const updatedRef = await updateRef(client, input.org, newCommit.sha)
+
+  return {
+    previousCommitSha: ref.object.sha,
+    baseTreeSha: commit.tree.sha,
+    newTreeSha: tree.sha,
+    newCommitSha: newCommit.sha,
+    updatedRef,
+    student,
+  }
+}
+
+export async function addEmailInviteToClassroomWithConflictRetry(
+  client: GitHubClient,
+  input: AddEmailInviteToClassroomInput,
+) {
+  return withGitConflictRetry(() => addEmailInviteToClassroom(client, input))
+}
+
+export type InviteStudentByEmailResult = AddStudentToClassroomResult & {
+  // Set when the roster row committed but the org email-invite failed (a
+  // non-fatal warning, mirroring enrollStudentInClassroom).
+  inviteWarning?: string
+}
+
+// Commit the email-only roster row first (authoritative), then best-effort fire
+// the org email-invite. A failed invite is a non-fatal warning since the row
+// already landed — the teacher can re-send from the roster.
+export async function inviteStudentByEmail(
+  client: GitHubClient,
+  input: AddEmailInviteToClassroomInput,
+): Promise<InviteStudentByEmailResult> {
+  const result = await addEmailInviteToClassroomWithConflictRetry(client, input)
+
+  try {
+    await createOrgInvitation(client, {
+      org: input.org,
+      email: result.student.email,
+    })
+  } catch (err) {
+    console.error("org email invite failed (row committed):", err)
+    const detail = getErrorMessage(err)
+    return {
+      ...result,
+      inviteWarning:
+        `${result.student.email} was added to the roster, but sending their ` +
+        `organization invite failed (${detail}); re-send it from the roster.`,
+    }
+  }
+
+  return result
 }
 
 type AddStudentToClassroomInput = {
