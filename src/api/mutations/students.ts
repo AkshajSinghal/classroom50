@@ -15,6 +15,7 @@ import {
 } from "@/hooks/github/mutations"
 import { withGitConflictRetry, type CreateClassroomResult } from "./classrooms"
 import { getRawFile, getRepoFile, getUser } from "@/hooks/github/queries"
+import { getFileCommitAuthorIds } from "@/hooks/github/queries"
 import { getAuthenticatedUser } from "@/api/queries/users"
 import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
 import { GitHubAPIError } from "@/hooks/github/errors"
@@ -449,6 +450,33 @@ export async function reconcileOnboarding(
       continue
     }
 
+    // Trust the payload identity only if the account that wrote the self-report
+    // IS the account it claims. The repo name is a guessable function of the
+    // email, so a member could pre-create it with a forged username/id; the
+    // commit author/committer id is GitHub-attested and can't be spoofed. If
+    // they don't match, surface it as unmatched rather than binding a forged
+    // identity into the roster.
+    let authorIds: number[]
+    try {
+      authorIds = await getFileCommitAuthorIds(
+        client,
+        org,
+        repo,
+        ONBOARDING_YAML_PATH,
+      )
+    } catch (err) {
+      result.unmatched.push({ repo, reason: getErrorMessage(err) })
+      continue
+    }
+
+    if (!authorIds.includes(payload.github_id)) {
+      result.unmatched.push({
+        repo,
+        reason: `self-report identity (${payload.github_username}) does not match the account that wrote it`,
+      })
+      continue
+    }
+
     resolved.set(row.email_hash, {
       username: payload.github_username,
       github_id: String(payload.github_id),
@@ -518,6 +546,40 @@ export async function reconcileOnboarding(
 
     await updateRef(client, org, newCommit.sha)
   })
+
+  // Add reconciled students to the classroom team so they get read on private
+  // in-org templates (the email org-invite carries no team_ids, and the invite
+  // path can't add a team membership without a username). Best-effort: a
+  // failure here is non-fatal since the roster row already landed. Resolve the
+  // slug once; on a resolve failure, skip team adds entirely (can't target a
+  // team) but still proceed to cleanup.
+  let teamSlug: string | undefined
+  try {
+    teamSlug = await resolveClassroomTeamSlug(client, org, classroom)
+  } catch (err) {
+    result.unmatched.push({
+      repo: "(team)",
+      reason: `reconciled, but resolving the classroom team failed (${getErrorMessage(err)}); team membership not added`,
+    })
+  }
+
+  if (teamSlug) {
+    for (const { username } of resolved.values()) {
+      try {
+        await addUserToTeam(client, {
+          org,
+          teamSlug,
+          username,
+          role: "member",
+        })
+      } catch (err) {
+        result.unmatched.push({
+          repo: `(team:${username})`,
+          reason: `reconciled, but adding to the classroom team failed (${getErrorMessage(err)})`,
+        })
+      }
+    }
+  }
 
   // Cleanup runs ONLY after the CSV commit above succeeded, so a failed write
   // never archives an unreconciled repo. Archiving (not deleting) is reversible

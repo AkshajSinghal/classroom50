@@ -536,6 +536,35 @@ export async function getRepoFile(
   return decodeBase64Utf8(file.content)
 }
 
+// The GitHub user ids that authored/committed the most recent change to `path`
+// in a repo. Used by onboarding reconciliation to verify the self-report was
+// actually written by the account it claims to be (the onboarding repo name is
+// a guessable function of the email, so a member could pre-create it with a
+// forged payload; the commit author/committer is GitHub-attested and cannot be
+// spoofed by a non-admin). Returns the numeric ids present on the latest commit
+// touching the path.
+export async function getFileCommitAuthorIds(
+  client: GitHubClient,
+  org: string,
+  repo: string,
+  path: string,
+): Promise<number[]> {
+  const commits = await client.request<
+    {
+      author: { id: number } | null
+      committer: { id: number } | null
+    }[]
+  >(`/repos/${org}/${repo}/commits?path=${encodeURIComponent(path)}&per_page=1`)
+
+  const latest = commits[0]
+  if (!latest) return []
+
+  const ids: number[] = []
+  if (latest.author?.id != null) ids.push(latest.author.id)
+  if (latest.committer?.id != null) ids.push(latest.committer.id)
+  return ids
+}
+
 export function listOrgMembers(client: GitHubClient, org: string, page = 1) {
   return client.request<GitHubUser[]>(
     `/orgs/${org}/members?per_page=100&page=${page}`,
