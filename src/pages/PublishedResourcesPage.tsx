@@ -21,6 +21,7 @@ import RequireTeacher from "@/components/RequireTeacher"
 import useGetClasses from "@/hooks/useGetClasses"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import usePagesAssignments from "@/hooks/usePagesAssignments"
+import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
 import { classroomPagesSegment } from "@/util/secret"
 
 // The Pages base for an org's classroom50 config repo. The `classroom50`
@@ -112,23 +113,14 @@ function useInView<T extends Element>(ref: RefObject<T | null>): boolean {
 }
 
 function CopyButton({ value }: { value: string }) {
-  const [copied, setCopied] = useState(false)
+  const { copied, copy } = useCopyToClipboard(value, 1200)
   return (
     <button
       type="button"
       className="btn btn-ghost btn-xs"
       aria-label="Copy URL"
       title="Copy URL"
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(value)
-          setCopied(true)
-          window.setTimeout(() => setCopied(false), 1200)
-        } catch {
-          // Clipboard can be blocked (insecure context / permissions); the
-          // URL is still visible and openable, so a failed copy is non-fatal.
-        }
-      }}
+      onClick={copy}
     >
       {copied ? (
         <Check className="size-3.5 text-success" />
