@@ -2,11 +2,23 @@ import useGetClasses from "@/hooks/useGetClasses"
 import { useForm } from "@tanstack/react-form"
 import { useParams } from "@tanstack/react-router"
 import { useState } from "react"
+import {
+  DEFAULT_SECRET_LENGTH,
+  SECRET_PATTERN_DESCRIPTION,
+  generateSecret,
+  isValidSecret,
+} from "@/util/secret"
 
 export type CreateClassroomFormValues = {
   name: string
   slug: string
   term: string
+  // Opt-in: when true the classroom's published resources are served under
+  // an unguessable capability-URL secret path segment. Off by default.
+  protectPages: boolean
+  // The capability-URL secret. Empty when protectPages is false; a generated
+  // (editable) value when true. Validated to `[a-z0-9]{4,64}` on submit.
+  secret: string
 }
 
 type CreateClassroomFormProps = {
@@ -36,6 +48,8 @@ const CreateClassroomForm = ({
       name: defaultValues?.name ?? "",
       slug: defaultValues?.slug ?? "",
       term: defaultValues?.slug ?? "",
+      protectPages: defaultValues?.protectPages ?? false,
+      secret: defaultValues?.secret ?? "",
     } satisfies CreateClassroomFormValues,
     validators: {
       onSubmit: ({ value }) => {
@@ -53,6 +67,12 @@ const CreateClassroomForm = ({
           errors.slug = "Classroom slug is already taken."
         }
 
+        // Only validate the secret when protection is enabled; a disabled
+        // toggle leaves it empty (unprotected, the default).
+        if (value.protectPages && !isValidSecret(value.secret.trim())) {
+          errors.secret = `Secret must be ${SECRET_PATTERN_DESCRIPTION}.`
+        }
+
         return Object.keys(errors).length > 0
           ? {
               fields: errors,
@@ -65,6 +85,10 @@ const CreateClassroomForm = ({
         name: value.name.trim(),
         slug: slugify(value.slug),
         term: value.term.trim(),
+        protectPages: value.protectPages,
+        // Pass the secret only when protection is on; otherwise empty so the
+        // classroom stays at the plain Pages path.
+        secret: value.protectPages ? value.secret.trim() : "",
       })
       setSubmitted(true)
     },
@@ -162,6 +186,109 @@ const CreateClassroomForm = ({
                 </p>
               )}
             </>
+          )}
+        </form.Field>
+
+        <form.Field name="protectPages">
+          {(field) => (
+            <div className="mt-2 rounded-box border border-base-200 p-4">
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="checkbox"
+                  className="toggle toggle-primary mt-0.5"
+                  checked={field.state.value}
+                  onChange={(e) => {
+                    const on = e.target.checked
+                    field.handleChange(on)
+                    // Generate a candidate the first time protection is
+                    // enabled (and the field is empty) so the teacher sees a
+                    // ready-to-use key they can accept or replace. Turning it
+                    // off clears the secret so an unprotected classroom never
+                    // carries one.
+                    if (on) {
+                      if (!form.getFieldValue("secret")) {
+                        form.setFieldValue(
+                          "secret",
+                          generateSecret(DEFAULT_SECRET_LENGTH),
+                        )
+                      }
+                    } else {
+                      form.setFieldValue("secret", "")
+                    }
+                  }}
+                />
+                <span>
+                  <span className="font-bold">
+                    Use an unlisted link for this classroom
+                  </span>
+                  <span className="block text-sm text-base-content/60">
+                    Publishes this classroom&apos;s assignment data at an
+                    unguessable URL instead of one anyone can reach by guessing
+                    the org name. This is obscurity, not real access control:
+                    anyone who gets the link can read it, and links can leak
+                    (browser history, referrers, search crawlers). Off by
+                    default.
+                  </span>
+                </span>
+              </label>
+
+              <form.Subscribe selector={(state) => state.values.protectPages}>
+                {(protect) =>
+                  protect ? (
+                    <form.Field name="secret">
+                      {(secretField) => (
+                        <div className="mt-4">
+                          <label
+                            htmlFor={secretField.name}
+                            className="label font-bold"
+                          >
+                            Access key
+                          </label>
+                          <div className="flex gap-2">
+                            <input
+                              id={secretField.name}
+                              name={secretField.name}
+                              type="text"
+                              className="input w-full font-mono"
+                              placeholder="e.g., a1b2c3d4"
+                              value={secretField.state.value}
+                              onBlur={secretField.handleBlur}
+                              onChange={(e) =>
+                                secretField.handleChange(e.target.value)
+                              }
+                            />
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              onClick={() =>
+                                secretField.handleChange(
+                                  generateSecret(DEFAULT_SECRET_LENGTH),
+                                )
+                              }
+                            >
+                              Regenerate
+                            </button>
+                          </div>
+                          <p className="mt-1 text-xs text-base-content/50">
+                            {SECRET_PATTERN_DESCRIPTION}. Accept the generated
+                            key or type your own. It becomes part of every
+                            published URL for this classroom, so treat it like a
+                            shared password — anyone who has the link can read
+                            the data. It can&apos;t be changed later without
+                            re-accepting assignments.
+                          </p>
+                          {secretField.state.meta.errors.length > 0 && (
+                            <p className="text-error text-sm mt-1">
+                              {secretField.state.meta.errors[0]}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </form.Field>
+                  ) : null
+                }
+              </form.Subscribe>
+            </div>
           )}
         </form.Field>
 

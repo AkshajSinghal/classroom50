@@ -178,11 +178,12 @@ const JoinOrgCard = ({ org }: { org: string }) => {
 
 const RepoCard = ({ org, repo }: { org: string; repo: GitHubRepo }) => {
   const cl50Yaml = useDotClassroom50(org, repo.name)
-  const { classroom, assignment } = cl50Yaml
+  const { classroom, assignment, secret } = cl50Yaml
   const { assignment: assignmentData } = useGetPublicAssignment(
     org,
     classroom,
     assignment,
+    secret,
   )
 
   // Only group assignments have something a student can manage (collaborators);

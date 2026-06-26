@@ -4,6 +4,7 @@ import Papa from "papaparse"
 import {
   ArrowDownWideNarrow,
   Check,
+  ChevronRight,
   Copy,
   ExternalLink,
   HardDriveDownload,
@@ -23,6 +24,7 @@ import Drawer, {
 import SubmissionsTable from "@/pages/submissions/SubmissionsTable"
 import useGetScores from "@/hooks/useGetScores"
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
+import useGetClassroom from "@/hooks/useGetClassroom"
 import useGetStudents from "@/hooks/useGetStudents"
 import useTriggerScoreCollection from "@/hooks/useTriggerScoreCollection"
 import useGetLastCollectScoresRun from "@/hooks/useGetLastCollectScoresRun"
@@ -43,6 +45,29 @@ const usePeriodicRerender = (intervalMs = 30_000) => {
   }, [intervalMs])
 }
 
+// Shared presentational copy button: a primary outline button that swaps to a
+// success check while `copied`. The clipboard state itself is owned by the
+// caller (via useCopyToClipboard) so each button tracks its own copy.
+const CopyIconButton = ({
+  copied,
+  onCopy,
+  label,
+}: {
+  copied: boolean
+  onCopy: () => void
+  label: string
+}) => (
+  <button
+    type="button"
+    className={`btn ${copied ? "btn-success" : "btn-primary"} btn-sm btn-outline mr-2`}
+    onClick={onCopy}
+    aria-label={label}
+    title={label}
+  >
+    {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+  </button>
+)
+
 const SubmissionsPageContent = () => {
   const { org, classroom, assignment } = useParams({ strict: false })
   const {
@@ -55,14 +80,30 @@ const SubmissionsPageContent = () => {
   } = useGetScores(org, classroom)
   const { data: assignmentData } = useGetClassroomAssignments(org, classroom)
   const { students } = useGetStudents(org, classroom)
+  // This is a teacher-only page, so reading the classroom's capability-URL
+  // secret from the (teacher-readable) classroom.json is fine. When the
+  // classroom is protected, the shared accept link must carry the key as
+  // `?k=<secret>` — otherwise students hit "assignment not found".
+  const { data: classroomMeta } = useGetClassroom(org, classroom)
+  const secret = classroomMeta?.secret
   const scoresLastUpdated =
     scoresUpdatedAt > 0
       ? formatDistanceToNow(scoresUpdatedAt, { addSuffix: true })
       : "never"
 
-  const assignmentSubmitUrl = `${window.location.origin}/${org}/${classroom}/assignments/${assignment}/accept`
+  const assignmentSubmitUrl =
+    `${window.location.origin}/${org}/${classroom}/assignments/${assignment}/accept` +
+    (secret ? `?k=${secret}` : "")
+  // The CLI equivalent of the browser accept link, for students who prefer it.
+  const assignmentSubmitCli =
+    `gh student accept ${org} ${classroom} ${assignment}` +
+    (secret ? ` --key ${secret}` : "")
   const { copied: copiedSubmitLink, copy: copySubmitLink } = useCopyToClipboard(
     assignmentSubmitUrl,
+    1500,
+  )
+  const { copied: copiedSubmitCli, copy: copySubmitCli } = useCopyToClipboard(
+    assignmentSubmitCli,
     1500,
   )
 
@@ -340,10 +381,13 @@ const SubmissionsPageContent = () => {
                   </div>
 
                   <div>
-                    <h2 className="font-bold">Assignment accept link</h2>
+                    <h2 className="font-bold">How students accept</h2>
                     <p className="text-sm text-base-content/60">
                       Share this link with students so they can accept this
                       assignment.
+                      {secret
+                        ? " This classroom uses an unlisted URL, so the link includes the access key — treat it like a shared password and send the full link as-is."
+                        : ""}
                     </p>
                   </div>
                 </div>
@@ -353,22 +397,29 @@ const SubmissionsPageContent = () => {
                 <pre className="overflow-x-auto px-4 py-3 text-sm">
                   <code>{assignmentSubmitUrl}</code>
                 </pre>
-                <button
-                  type="button"
-                  className={`btn ${copiedSubmitLink ? "btn-success" : "btn-primary"} btn-sm btn-outline mr-2`}
-                  onClick={copySubmitLink}
-                >
-                  {copiedSubmitLink ? (
-                    <>
-                      <Check className="size-4" />
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="size-4" />
-                    </>
-                  )}
-                </button>
+                <CopyIconButton
+                  copied={copiedSubmitLink}
+                  onCopy={copySubmitLink}
+                  label="Copy accept link"
+                />
               </div>
+
+              <details className="group">
+                <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-sm text-base-content/60 hover:text-base-content">
+                  <ChevronRight className="size-4 transition-transform group-open:rotate-90" />
+                  Prefer the command line?
+                </summary>
+                <div className="mt-2 flex justify-between bg-base-200 text-base-content border border-base-300 items-center">
+                  <pre className="overflow-x-auto px-4 py-3 text-sm">
+                    <code>{assignmentSubmitCli}</code>
+                  </pre>
+                  <CopyIconButton
+                    copied={copiedSubmitCli}
+                    onCopy={copySubmitCli}
+                    label="Copy CLI command"
+                  />
+                </div>
+              </details>
             </div>
           </div>{" "}
           <div className="grid grid-cols-12 gap-4 mb-6">
