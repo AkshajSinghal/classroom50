@@ -422,7 +422,7 @@ export async function reconcileOnboarding(
     deleted: [],
   }
 
-  // Per-classroom cleanup mode (defaults to archive when unset / unreadable).
+  // Per-classroom cleanup mode (defaults to delete when unset / unreadable).
   let cleanupMode: OnboardingCleanupMode = DEFAULT_ONBOARDING_CLEANUP
   try {
     const classroomJson = await getClassroomJson(client, { org, classroom })

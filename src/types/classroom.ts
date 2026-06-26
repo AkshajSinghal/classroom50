@@ -22,15 +22,16 @@ export type Classroom = {
   // How the teacher's onboarding reconciliation disposes of a student's
   // onboarding repo once its identity is folded into the roster. GUI-managed
   // (like `secret`), absent on classrooms created before this feature ->
-  // treated as the default "archive". "delete" removes the repo (needs
-  // delete_repo scope; falls back to archive + a warning when unavailable),
-  // "archive" hides it reversibly, "keep" leaves it untouched.
+  // treated as the default "delete". "delete" removes the repo (needs
+  // delete_repo scope, requested by default; falls back to archive + a warning
+  // for an older session that lacks it), "archive" hides it reversibly, "keep"
+  // leaves it untouched.
   onboarding_cleanup?: OnboardingCleanupMode
 }
 
 export type OnboardingCleanupMode = "delete" | "archive" | "keep"
 
-export const DEFAULT_ONBOARDING_CLEANUP: OnboardingCleanupMode = "archive"
+export const DEFAULT_ONBOARDING_CLEANUP: OnboardingCleanupMode = "delete"
 
 // Inclusive bounds for a group assignment's max_group_size (owner included).
 // The CLI schema enforces the same range; an out-of-range value makes
