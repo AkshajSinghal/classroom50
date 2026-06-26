@@ -1,4 +1,4 @@
-import { Check, Copy, Send, Trash } from "lucide-react"
+import { Check, Copy, RefreshCw, Send, Trash } from "lucide-react"
 
 import { getName, getInitials, isSameGitHubUser } from "@/util/students"
 import { formatInvitedAt } from "@/util/formatDate"
@@ -6,7 +6,7 @@ import Avatar from "@/components/avatar"
 import type { Student } from "@/types/classroom"
 import { ConfirmModal } from "@/components/modals"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { unenrollStudent } from "@/api/mutations/students"
+import { reconcileOnboarding, unenrollStudent } from "@/api/mutations/students"
 import type { UnenrollStudentInput } from "@/api/mutations/students"
 import { resendOrgInvitation, getErrorMessage } from "@/hooks/github/mutations"
 import { GitHubAPIError } from "@/hooks/github/errors"
@@ -371,6 +371,44 @@ const EnrolledStudents = ({
     mutationFn: (student: Student) => resendForStudent(student),
   })
 
+  // Rows still awaiting onboarding reconciliation (email invited, GitHub
+  // identity not yet bound). Drives whether to show the Reconcile button.
+  const pendingOnboardingCount = useMemo(
+    () =>
+      students.filter(
+        (student) =>
+          student.enrollment_status !== "reconciled" && student.email_hash,
+      ).length,
+    [students],
+  )
+
+  const [reconcileSummary, setReconcileSummary] = useState("")
+
+  const reconcileMutation = useMutation({
+    mutationFn: () => reconcileOnboarding(client, { org, classroom }),
+    onSuccess: (result) => {
+      const parts = [`${result.reconciled.length} reconciled`]
+      if (result.pending.length > 0) {
+        parts.push(`${result.pending.length} still pending`)
+      }
+      if (result.unmatched.length > 0) {
+        parts.push(`${result.unmatched.length} unmatched`)
+      }
+      setReconcileSummary(parts.join(", "))
+      queryClient.invalidateQueries({
+        queryKey: githubKeys.csvFile(
+          org,
+          "classroom50",
+          `${classroom}/students.csv`,
+        ),
+      })
+      invalidateInviteQueries()
+    },
+    onError: (err) => {
+      setReconcileSummary(`Reconcile failed (${getErrorMessage(err)}).`)
+    },
+  })
+
   const handleResend = async (student: Student) => {
     setResendingUsernames((prev) => new Set(prev).add(student.username))
     dismissWarning(student.username)
@@ -453,6 +491,20 @@ const EnrolledStudents = ({
         <h2 className="text-lg font-semibold">Enrolled Students</h2>
 
         <div className="flex items-center gap-2">
+          {pendingOnboardingCount > 0 ? (
+            <button
+              type="button"
+              className="btn btn-sm btn-outline"
+              onClick={() => reconcileMutation.mutate()}
+              disabled={reconcileMutation.isPending}
+            >
+              <RefreshCw
+                className={`size-4 ${reconcileMutation.isPending ? "animate-spin" : ""}`}
+              />
+              Reconcile onboarding ({pendingOnboardingCount})
+            </button>
+          ) : null}
+
           {statusAvailable ? (
             <button
               type="button"
@@ -471,6 +523,21 @@ const EnrolledStudents = ({
       </div>
 
       <InviteLink org={org} />
+
+      {reconcileSummary ? (
+        <div role="alert" className="alert alert-info alert-soft mx-6 mt-4">
+          <span className="text-sm">
+            Onboarding reconcile: {reconcileSummary}
+          </span>
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs"
+            onClick={() => setReconcileSummary("")}
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
 
       {!statusAvailable ? (
         <div role="alert" className="alert alert-info alert-soft mx-6 mt-4">

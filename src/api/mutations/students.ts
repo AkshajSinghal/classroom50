@@ -13,12 +13,17 @@ import {
   updateRef,
 } from "@/hooks/github/mutations"
 import { withGitConflictRetry, type CreateClassroomResult } from "./classrooms"
-import { getRawFile, getUser } from "@/hooks/github/queries"
+import { getRawFile, getRepoFile, getUser } from "@/hooks/github/queries"
 import { getAuthenticatedUser } from "@/api/queries/users"
 import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import { isSameGitHubUser } from "@/util/students"
-import { emailHash } from "@/util/onboarding"
+import {
+  emailHash,
+  onboardingRepoNameFromHash,
+  ONBOARDING_YAML_PATH,
+} from "@/util/onboarding"
+import { parseOnboardingYaml } from "@/util/yaml"
 import type { Student } from "@/types/classroom"
 
 // The classroom team slug is authoritative in classroom.json: on a name
@@ -366,6 +371,144 @@ export async function inviteStudentByEmail(
         `organization invite failed (${detail}); re-send it from the roster.`,
     }
   }
+
+  return result
+}
+
+export type ReconcileOnboardingResult = {
+  // Rows newly bound to a GitHub identity this run.
+  reconciled: { email: string; username: string }[]
+  // email_hash rows still without an onboarding repo (student hasn't onboarded).
+  pending: string[]
+  // Onboarding repos found but whose payload couldn't be matched/parsed.
+  unmatched: { repo: string; reason: string }[]
+}
+
+// Teacher-side reconciliation: for each not-yet-reconciled email row, fetch its
+// deterministic onboarding repo directly (no org scan), read the self-report
+// YAML, and fold the GitHub-attested username/id into the roster. All updates
+// land in ONE students.csv commit (wrapped in withGitConflictRetry) so a batch
+// reconcile is a single race window, not N.
+export async function reconcileOnboarding(
+  client: GitHubClient,
+  input: { org: string; classroom: string },
+): Promise<ReconcileOnboardingResult> {
+  const { org, classroom } = input
+  const studentsFilePath = `${classroom}/students.csv`
+
+  const result: ReconcileOnboardingResult = {
+    reconciled: [],
+    pending: [],
+    unmatched: [],
+  }
+
+  // Read the roster once (outside the retry) to decide which repos to fetch.
+  const headRef = await getBranchRef(client, org)
+  const roster = parseStudentsCsv(
+    await getRawFile(client, {
+      org,
+      path: studentsFilePath,
+      ref: headRef.object.sha,
+    }),
+  )
+
+  const targets = roster.filter(
+    (row) => row.enrollment_status !== "reconciled" && row.email_hash,
+  )
+
+  if (targets.length === 0) {
+    return result
+  }
+
+  // email_hash -> resolved identity, for the single batched write below.
+  const resolved = new Map<string, { username: string; github_id: string }>()
+
+  for (const row of targets) {
+    const repo = onboardingRepoNameFromHash(row.email_hash)
+    let payload
+    try {
+      payload = parseOnboardingYaml(
+        await getRepoFile(client, org, repo, ONBOARDING_YAML_PATH),
+      )
+    } catch (err) {
+      // 404 = student hasn't onboarded yet (not an error). Anything else is an
+      // onboarding repo we found but couldn't read/parse — surface it.
+      if (err instanceof GitHubAPIError && err.isNotFound) {
+        result.pending.push(row.email)
+      } else {
+        result.unmatched.push({ repo, reason: getErrorMessage(err) })
+      }
+      continue
+    }
+
+    resolved.set(row.email_hash, {
+      username: payload.github_username,
+      github_id: String(payload.github_id),
+    })
+    result.reconciled.push({
+      email: row.email,
+      username: payload.github_username,
+    })
+  }
+
+  if (resolved.size === 0) {
+    return result
+  }
+
+  // Single batched commit. Re-reads the roster inside the retry so it applies
+  // onto the latest students.csv even if another write landed meanwhile.
+  await withGitConflictRetry(async () => {
+    const ref = await getBranchRef(client, org)
+    const commit = await getCommit(client, org, ref.object.sha)
+    const current = parseStudentsCsv(
+      await getRawFile(client, {
+        org,
+        path: studentsFilePath,
+        ref: ref.object.sha,
+      }),
+    )
+
+    const now = new Date().toISOString()
+    const next = current.map((row) => {
+      const match = row.email_hash ? resolved.get(row.email_hash) : undefined
+      if (!match || row.enrollment_status === "reconciled") {
+        return row
+      }
+      return normalizeStudentRow({
+        ...row,
+        username: match.username,
+        github_id: match.github_id,
+        enrollment_status: "reconciled",
+        reconciled_at: now,
+      })
+    })
+
+    const nextCsv = stringifyStudentsCsv(next)
+
+    const tree = await createGitTree(client, {
+      org,
+      base_tree: commit.tree.sha,
+      tree: [
+        {
+          path: studentsFilePath,
+          mode: "100644",
+          type: "blob",
+          content: nextCsv,
+        },
+      ],
+    })
+
+    const newCommit = await createGitCommit(client, {
+      org,
+      message: `Reconcile onboarding: ${classroom} (${resolved.size} student${
+        resolved.size === 1 ? "" : "s"
+      })`,
+      tree_sha: tree.sha,
+      parents: [ref.object.sha],
+    })
+
+    await updateRef(client, org, newCommit.sha)
+  })
 
   return result
 }
