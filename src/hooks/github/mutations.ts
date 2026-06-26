@@ -43,8 +43,12 @@ const createClassroomMetadata = (
   ...(secret ? { secret } : {}),
 })
 
+// Seed header for a new classroom's empty students.csv. Kept in sync with
+// STUDENT_CSV_FIELDS in src/api/mutations/students.ts (the parser is
+// header-based, so an older 6-column roster still parses and the extra columns
+// default to "").
 const STUDENTS_CSV_HEADER =
-  "username,first_name,last_name,email,section,github_id\n"
+  "username,first_name,last_name,email,section,github_id,enrollment_status,email_hash,invited_at,reconciled_at\n"
 const createClassroomBody = (
   base_tree: string,
   org: string,
