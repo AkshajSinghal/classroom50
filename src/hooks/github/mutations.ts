@@ -14,6 +14,7 @@ import sodium from "libsodium-wrappers"
 import { getBranchRef, getClassroomJson, getCommit } from "@/api/github/queries"
 import type { CreateClassroomInput } from "@/api/mutations/classrooms"
 import type { OnboardingCleanupMode } from "@/types/classroom"
+import { STUDENT_CSV_FIELDS } from "@/api/mutations/students"
 import { getRepo } from "./queries"
 
 const ASSIGNMENTS_TEMPLATE = {
@@ -44,12 +45,12 @@ const createClassroomMetadata = (
   ...(secret ? { secret } : {}),
 })
 
-// Seed header for a new classroom's empty students.csv. Kept in sync with
-// STUDENT_CSV_FIELDS in src/api/mutations/students.ts (the parser is
-// header-based, so an older 6-column roster still parses and the extra columns
-// default to "").
-const STUDENTS_CSV_HEADER =
-  "username,first_name,last_name,email,section,github_id,enrollment_status,enrollment_method,email_hash,invited_at,reconciled_at\n"
+// Seed header for a new classroom's empty students.csv. Derived from the
+// single source of truth (STUDENT_CSV_FIELDS in src/api/mutations/students.ts)
+// so it can't drift; computed lazily (not at module-eval time) to avoid the
+// students.ts <-> mutations.ts circular-import TDZ. The parser is header-based,
+// so an older 6-column roster still parses and the extra columns default to "".
+const studentsCsvHeader = () => STUDENT_CSV_FIELDS.join(",") + "\n"
 const createClassroomBody = (
   base_tree: string,
   org: string,
@@ -75,7 +76,7 @@ const createClassroomBody = (
         path: `${classroom}/students.csv`,
         mode,
         type,
-        content: STUDENTS_CSV_HEADER,
+        content: studentsCsvHeader(),
       },
       {
         path: `${classroom}/scores.json`,

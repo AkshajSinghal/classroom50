@@ -19,6 +19,8 @@ import {
   ONBOARDING_YAML_PATH,
   onboardingRepoName,
   onboardingRepoNameByGithubId,
+  onboardingRepoNameByToken,
+  isValidInviteToken,
   type OnboardingPayload,
 } from "@/util/onboarding"
 import { stringifyOnboardingYaml } from "@/util/yaml"
@@ -42,9 +44,16 @@ export async function submitOnboarding(
     email: string
     first_name: string
     last_name: string
+    // Present only on the secure-link flow: the teacher-issued token that
+    // names the onboarding repo unguessably. Absent on the classroom-wide link.
+    invite_token?: string
   },
 ): Promise<OnboardingResult> {
   const { org, classroom, email, first_name, last_name } = input
+  const inviteToken =
+    input.invite_token && isValidInviteToken(input.invite_token)
+      ? input.invite_token.trim()
+      : undefined
 
   const user = await getAuthenticatedUser(client)
 
@@ -67,18 +76,21 @@ export async function submitOnboarding(
     created_at: new Date().toISOString(),
   }
 
-  // Repo naming branches on classroom-team access. If the student is already on
-  // the classroom team they came via the username invite flow (their roster row
-  // already has github_id), so the teacher reconciles by github_id -> name the
-  // repo by id. Otherwise it's the email-first flow (roster row keyed on email
-  // hash). The derived team slug is good enough for a membership probe; on a
-  // false negative we just fall back to email-hash naming, which is the safe
-  // default (email is known in both flows). Reconcile mirrors this branch.
+  // Repo naming, in trust order. A secure-link token (when present and valid)
+  // names the repo unguessably, so only the link holder can create it — the
+  // strongest binding. Otherwise branch on classroom-team access: a student on
+  // the classroom team came via the username invite flow (roster row already
+  // has github_id), so the teacher reconciles by github_id -> name by id.
+  // Otherwise it's the email-first flow (roster row keyed on email hash). The
+  // derived team slug is good enough for a membership probe; on a false
+  // negative we fall back to email-hash naming, the safe default (email is
+  // known in both flows). Reconcile mirrors this branch.
   const teamSlug = `classroom50-${classroom}`
-  const onTeam = await isTeamMember(client, org, teamSlug, user.login)
-  const repoName = onTeam
-    ? onboardingRepoNameByGithubId(user.id)
-    : await onboardingRepoName(email)
+  const repoName = inviteToken
+    ? onboardingRepoNameByToken(inviteToken)
+    : (await isTeamMember(client, org, teamSlug, user.login))
+      ? onboardingRepoNameByGithubId(user.id)
+      : await onboardingRepoName(email)
 
   let repo: GitHubRepo
   let status: OnboardingResult["status"] = "created"

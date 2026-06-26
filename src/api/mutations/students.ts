@@ -23,8 +23,12 @@ import { GitHubAPIError } from "@/hooks/github/errors"
 import { isSameGitHubUser } from "@/util/students"
 import {
   emailHash,
+  generateInviteToken,
+  isReconcilableRow,
   onboardingRepoCandidates,
   ONBOARDING_YAML_PATH,
+  payloadEmailMatchesRow,
+  reconcileRowKey,
 } from "@/util/onboarding"
 import { parseOnboardingYaml } from "@/util/yaml"
 import {
@@ -68,7 +72,7 @@ export type AddStudentToClassroomResult = CreateClassroomResult & {
   teamWarning?: string
 }
 
-const STUDENT_CSV_FIELDS = [
+export const STUDENT_CSV_FIELDS = [
   "username",
   "first_name",
   "last_name",
@@ -81,6 +85,7 @@ const STUDENT_CSV_FIELDS = [
   "enrollment_status",
   "enrollment_method",
   "email_hash",
+  "invite_token",
   "invited_at",
   "reconciled_at",
 ] as const
@@ -101,6 +106,7 @@ function normalizeStudentRow(
     enrollment_status: String(row.enrollment_status ?? "").trim(),
     enrollment_method: String(row.enrollment_method ?? "").trim(),
     email_hash: String(row.email_hash ?? "").trim(),
+    invite_token: String(row.invite_token ?? "").trim(),
     invited_at: String(row.invited_at ?? "").trim(),
     reconciled_at: String(row.reconciled_at ?? "").trim(),
   }
@@ -260,6 +266,11 @@ type AddEmailInviteToClassroomInput = {
   first_name?: string
   last_name?: string
   section?: string
+  // When true, mint a per-student invite token stored on the row so the
+  // onboarding repo is named unguessably (the secure-link flow). When false
+  // (default), the row carries no token and onboarding uses the email-hash
+  // name reachable from the classroom-wide link.
+  secure?: boolean
 }
 
 // Email-first enrolment writer. Unlike addStudentToClassroom, there is no
@@ -309,6 +320,9 @@ export async function addEmailInviteToClassroom(
     enrollment_status: "invited",
     enrollment_method: "email",
     email_hash: await emailHash(normalizedEmail),
+    // Secure-link flow: mint a per-student token so the onboarding repo is
+    // named unguessably. Omitted for the classroom-wide-link flow.
+    invite_token: input.secure ? generateInviteToken() : "",
     invited_at: new Date().toISOString(),
     reconciled_at: "",
   })
@@ -446,11 +460,7 @@ export async function reconcileOnboarding(
     }),
   )
 
-  const targets = roster.filter(
-    (row) =>
-      row.enrollment_status !== "reconciled" &&
-      (row.email_hash || row.github_id),
-  )
+  const targets = roster.filter(isReconcilableRow)
 
   if (targets.length === 0) {
     return result
@@ -472,14 +482,14 @@ export async function reconcileOnboarding(
   >()
 
   for (const row of targets) {
-    // The student may have created the repo under either naming scheme
-    // depending on their team access at onboarding time, so try every
-    // candidate. The first one with a readable payload wins. rowKey keys the
-    // resolved map for the batched write below.
-    const byGithubId = Boolean(row.github_id)
-    const rowKey = byGithubId
-      ? `id:${row.github_id}`
-      : `email:${row.email_hash}`
+    // The student may have created the repo under any naming scheme (token,
+    // github-id, or email-hash) depending on how they were invited and their
+    // team access at onboarding time, so try every candidate. The first one
+    // with a readable payload wins. rowKey keys the resolved map for the
+    // batched write below — computed via the shared helper so it can never
+    // drift from the commit-phase key.
+    const rowKey = reconcileRowKey(row)
+    if (!rowKey) continue
     const candidates = onboardingRepoCandidates(row)
 
     let repo: string | undefined
@@ -516,12 +526,33 @@ export async function reconcileOnboarding(
       continue
     }
 
+    // Bind the self-report to the invited row's email BEFORE trusting it. The
+    // email-hash repo name is a guessable function of the invited email, so a
+    // member can pre-create it and self-report their OWN genuine identity
+    // (which passes the commit-author check below) under a victim's row. Unless
+    // the payload's claimed email matches the row we found the repo for, this
+    // is a different person's self-report landing in the wrong row — reject it.
+    // A token-named row is already addressed by an unguessable token, and a
+    // github_id row with no email on file falls through (handled by the author
+    // check); see payloadEmailMatchesRow.
+    const emailMatches = row.invite_token
+      ? true
+      : await payloadEmailMatchesRow(payload.email, row)
+    if (!emailMatches) {
+      result.unmatched.push({
+        repo,
+        reason: `self-report email (${payload.email}) does not match the invited address for this row`,
+      })
+      continue
+    }
+
     // Trust the payload identity only if the account that wrote the self-report
     // IS the account it claims. The repo name is a guessable function of the
     // email, so a member could pre-create it with a forged username/id; the
-    // commit author/committer id is GitHub-attested and can't be spoofed. If
-    // they don't match, surface it as unmatched rather than binding a forged
-    // identity into the roster.
+    // commit author/committer id is GitHub-attested. Combined with the email
+    // check above, this binds (a) the right person's email to (b) the account
+    // that actually wrote the file. If they don't match, surface it as
+    // unmatched rather than binding a forged identity into the roster.
     let authorIds: number[]
     try {
       authorIds = await getFileCommitAuthorIds(
@@ -576,13 +607,8 @@ export async function reconcileOnboarding(
 
     const now = new Date().toISOString()
     const next = current.map((row) => {
-      // Recompute the same key used when resolving, so the match is stable
-      // whether the row was keyed by github_id or email_hash.
-      const rowKey = row.github_id
-        ? `id:${row.github_id}`
-        : row.email_hash
-          ? `email:${row.email_hash}`
-          : undefined
+      // Same key as the resolve phase (reconcileRowKey) so the match is stable.
+      const rowKey = reconcileRowKey(row)
       const match = rowKey ? resolved.get(rowKey) : undefined
       if (!match || row.enrollment_status === "reconciled") {
         return row
@@ -664,7 +690,7 @@ export async function reconcileOnboarding(
 
   // Cleanup runs ONLY after the CSV commit above succeeded, so a failed write
   // never touches an unreconciled repo. The mode is per-classroom (default
-  // "archive"); failures are non-fatal (the row is already reconciled). Never
+  // "delete"); failures are non-fatal (the row is already reconciled). Never
   // touch unmatched/pending repos.
   if (cleanupMode !== "keep") {
     let deleteScopeMissing = false

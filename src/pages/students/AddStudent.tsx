@@ -20,6 +20,7 @@ type AddStudentFormValues = {
   name: string
   username: string
   email: string
+  secure: boolean
 }
 
 const splitName = (name: string) => {
@@ -68,13 +69,16 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
         return result?.teamWarning ?? ""
       }
 
-      // Email-only -> email invite.
+      // Email-only -> email invite. `secure` mints a per-student token so the
+      // onboarding repo is named unguessably (a unique link the teacher sends
+      // to just that student); otherwise the shared classroom-wide link is used.
       const result = await inviteStudentByEmail(githubClient, {
         org,
         classroom,
         email,
         first_name,
         last_name,
+        secure: value.secure,
       })
       return result?.inviteWarning ?? ""
     },
@@ -89,6 +93,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
       name: "",
       username: "",
       email: "",
+      secure: false as boolean,
     } satisfies AddStudentFormValues,
     validators: {
       onSubmit: ({ value }) => {
@@ -198,6 +203,33 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
               </div>
             )}
           </form.Field>
+
+          <form.Subscribe
+            selector={(state) => [state.values.username, state.values.email]}
+          >
+            {([username, email]) =>
+              !username?.trim() && email?.trim() ? (
+                <form.Field name="secure">
+                  {(field) => (
+                    <label className="flex items-start gap-2 mb-4 text-xs text-base-content/70 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="checkbox checkbox-sm mt-0.5"
+                        checked={field.state.value}
+                        onChange={(e) => field.handleChange(e.target.checked)}
+                      />
+                      <span>
+                        Send a unique secure link (recommended). Generates a
+                        per-student onboarding link you email to just this
+                        student, so only they can complete enrollment. Leave
+                        unchecked to use the shared classroom onboarding link.
+                      </span>
+                    </label>
+                  )}
+                </form.Field>
+              ) : null
+            }
+          </form.Subscribe>
 
           <form.Subscribe
             selector={(state) => [state.canSubmit, state.isSubmitting]}

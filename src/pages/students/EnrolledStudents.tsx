@@ -24,6 +24,7 @@ import {
   type InviteStatus,
   type StudentInviteStatus,
 } from "@/util/inviteStatus"
+import { isReconcilableRow } from "@/util/onboarding"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 const UnenrollStudentButton = ({
@@ -280,6 +281,48 @@ const InviteLink = ({ org }: { org: string }) => {
   )
 }
 
+// Per-student secure onboarding link (the opt-in flow). Carries the student's
+// email prefill plus the unguessable invite token, so the onboarding repo is
+// named by token and only the recipient of this link can create it. The teacher
+// emails it to that one student.
+const SecureLinkButton = ({
+  org,
+  classroom,
+  email,
+  token,
+}: {
+  org: string
+  classroom: string
+  email: string
+  token: string
+}) => {
+  const secureUrl = `${window.location.origin}/${org}/${classroom}/onboard?email=${encodeURIComponent(
+    email,
+  )}&t=${token}`
+  const { copied, copy } = useCopyToClipboard(secureUrl)
+
+  return (
+    <button
+      type="button"
+      className="btn btn-xs"
+      onClick={() => void copy()}
+      aria-label={`Copy secure onboarding link for ${email}`}
+    >
+      {copied ? (
+        <>
+          <Check className="size-4 text-success" />
+          Copied
+        </>
+      ) : (
+        <>
+          <Copy className="size-4" />
+          Secure link
+        </>
+      )}
+    </button>
+  )
+}
+
 // Classroom-wide onboarding link. Students open it after accepting the org
 // invite, enter their email, and self-report their GitHub identity (which the
 // teacher folds in via "Reconcile onboarding"). Same URL for everyone; the
@@ -441,15 +484,10 @@ const EnrolledStudents = ({
   })
 
   // Rows still awaiting onboarding reconciliation (invited/onboarded, not yet
-  // reconciled). Matches reconcileOnboarding's target filter (a row is
-  // reconcilable when it has a github_id or an email_hash to look up by).
+  // reconciled). Uses the shared isReconcilableRow predicate so this badge
+  // count can never drift from reconcileOnboarding's actual target set.
   const pendingOnboardingCount = useMemo(
-    () =>
-      students.filter(
-        (student) =>
-          student.enrollment_status !== "reconciled" &&
-          (student.email_hash || student.github_id),
-      ).length,
+    () => students.filter(isReconcilableRow).length,
     [students],
   )
 
@@ -651,7 +689,14 @@ const EnrolledStudents = ({
           const rowKey = studentKey(student, index)
           const statusEntry = statusByKey.get(rowKey)
           const status = statusEntry?.status
-          const showResend = status === "expired" || status === "none"
+          // Resend targets a GitHub org invite, which needs a github_id; an
+          // email-only row (no github_id yet) can't be org-resent — it just
+          // needs the onboarding link — so don't offer Re-send for it. This
+          // also avoids an empty-username ("") key collision across email rows
+          // in the resend spinner / warning state below.
+          const showResend =
+            (status === "expired" || status === "none") &&
+            Boolean(student.github_id)
           const isResending = resendingUsernames.has(student.username)
           const invitedAtLabel =
             status === "pending" || status === "expired"
@@ -712,6 +757,16 @@ const EnrolledStudents = ({
                       "Re-send"
                     )}
                   </button>
+                ) : null}
+
+                {student.invite_token &&
+                student.enrollment_status !== "reconciled" ? (
+                  <SecureLinkButton
+                    org={org}
+                    classroom={classroom}
+                    email={student.email}
+                    token={student.invite_token}
+                  />
                 ) : null}
 
                 <UnenrollStudentButton
