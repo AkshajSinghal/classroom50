@@ -249,7 +249,7 @@ func TestUpdateRosterRow(t *testing.T) {
 		if got.Username != "alice" || got.FirstName != "Alice" || got.LastName != "A" || got.Section != "s1" || got.GitHubID != 1 {
 			t.Errorf("non-email fields changed: %#v", got)
 		}
-		if out[1] != base[1] {
+		if !reflect.DeepEqual(out[1], base[1]) {
 			t.Errorf("unrelated row (bob) changed: %#v", out[1])
 		}
 	})
@@ -362,6 +362,23 @@ func TestParseImportCSV_StripsUTF8BOM(t *testing.T) {
 	}
 }
 
+func TestParseImportCSV_RejectsWebWidenedExportWithGuidance(t *testing.T) {
+	// Feeding a web-augmented students.csv (canonical six + onboarding tail)
+	// straight into import is rejected with a message that names the cause and
+	// the fix, rather than the generic header error — import is canonical-only
+	// by design (it re-resolves github_id and carries no onboarding state).
+	in := []byte("username,first_name,last_name,email,section,github_id," +
+		"enrollment_status,enrollment_method,email_hash,invite_token,invited_at,reconciled_at\n" +
+		"alice,Alice,A,a@x.edu,s1,123,reconciled,github,abcd,,2026-01-01T00:00:00Z,\n")
+	_, err := ParseImportCSV(in)
+	if err == nil {
+		t.Fatal("expected ParseImportCSV to reject a web-widened export")
+	}
+	if !strings.Contains(err.Error(), "onboarding columns") || !strings.Contains(err.Error(), "import does not") {
+		t.Fatalf("expected guidance about onboarding columns / import, got %v", err)
+	}
+}
+
 func TestParseImportCSV_RejectsOversizedField(t *testing.T) {
 	// A 400-byte first_name exceeds maxFieldBytes (320) and must
 	// be rejected at parse time — otherwise a 1MB+ CSV could land
@@ -460,5 +477,207 @@ func TestDedupeByUsername_LastWins(t *testing.T) {
 	}
 	if out[1].Username != "bob" {
 		t.Errorf("expected bob preserved, got %#v", out[1])
+	}
+}
+
+// --- email-first onboarding columns (classroom50-web schema) ---------------
+
+// The web app appends optional onboarding columns to students.csv. The CLI
+// must parse the wider file (not reject it) and preserve those columns on a
+// read/modify/write cycle so a CLI roster edit never wipes onboarding state.
+
+func TestParseRoster_AcceptsAndPreservesOnboardingColumns(t *testing.T) {
+	in := []byte(
+		"username,first_name,last_name,email,section,github_id," +
+			"enrollment_status,enrollment_method,email_hash,invite_token,invited_at,reconciled_at\n" +
+			"alice,Alice,A,alice@x.edu,s1,123,reconciled,github,abcd1234ef567890,,2026-01-01T00:00:00Z,2026-01-02T00:00:00Z\n" +
+			"bob,Bob,B,bob@x.edu,s1,,invited,email,beef0000beef0000,tok123,2026-01-03T00:00:00Z,\n",
+	)
+	rows, err := ParseRoster(in)
+	if err != nil {
+		t.Fatalf("ParseRoster (12-column): %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("got %d rows, want 2", len(rows))
+	}
+	if rows[0].Username != "alice" || rows[0].GitHubID != 123 || rows[0].Email != "alice@x.edu" {
+		t.Errorf("alice canonical fields wrong: %#v", rows[0])
+	}
+	if rows[0].Extra["enrollment_status"] != "reconciled" {
+		t.Errorf("alice enrollment_status = %q, want reconciled", rows[0].Extra["enrollment_status"])
+	}
+	if rows[0].Extra["email_hash"] != "abcd1234ef567890" {
+		t.Errorf("alice email_hash = %q, want abcd1234ef567890", rows[0].Extra["email_hash"])
+	}
+	if rows[1].Extra["invite_token"] != "tok123" {
+		t.Errorf("bob invite_token = %q, want tok123", rows[1].Extra["invite_token"])
+	}
+	if rows[1].Extra["reconciled_at"] != "" {
+		t.Errorf("bob reconciled_at = %q, want empty", rows[1].Extra["reconciled_at"])
+	}
+}
+
+func TestEncodeRoster_RoundTripsOnboardingColumns(t *testing.T) {
+	in := []byte(
+		"username,first_name,last_name,email,section,github_id," +
+			"enrollment_status,enrollment_method,email_hash,invite_token,invited_at,reconciled_at\n" +
+			"alice,Alice,A,alice@x.edu,s1,123,reconciled,github,abcd1234ef567890,,2026-01-01T00:00:00Z,2026-01-02T00:00:00Z\n",
+	)
+	rows, err := ParseRoster(in)
+	if err != nil {
+		t.Fatalf("ParseRoster: %v", err)
+	}
+	encoded, err := EncodeRoster(rows)
+	if err != nil {
+		t.Fatalf("EncodeRoster: %v", err)
+	}
+	wantHeader := "username,first_name,last_name,email,section,github_id," +
+		"enrollment_status,enrollment_method,email_hash,invite_token,invited_at,reconciled_at\n"
+	if !strings.HasPrefix(string(encoded), wantHeader) {
+		t.Fatalf("encoded header drifted.\ngot:\n%s\nwant prefix:\n%s", encoded, wantHeader)
+	}
+	round, err := ParseRoster(encoded)
+	if err != nil {
+		t.Fatalf("re-parse: %v", err)
+	}
+	if !reflect.DeepEqual(round, rows) {
+		t.Fatalf("onboarding-column round-trip mismatch:\norig:  %#v\nround: %#v", rows, round)
+	}
+}
+
+func TestEncodeRoster_OnboardingColumnOrderIsCanonical(t *testing.T) {
+	// Even when the on-disk extra columns arrive out of canonical order, the
+	// CLI re-emits them in OnboardingColumns order so the written file is
+	// stable across round-trips regardless of source ordering.
+	in := []byte(
+		"username,first_name,last_name,email,section,github_id," +
+			"invite_token,enrollment_status\n" +
+			"alice,Alice,A,alice@x.edu,s1,123,tok,invited\n",
+	)
+	rows, err := ParseRoster(in)
+	if err != nil {
+		t.Fatalf("ParseRoster: %v", err)
+	}
+	encoded, err := EncodeRoster(rows)
+	if err != nil {
+		t.Fatalf("EncodeRoster: %v", err)
+	}
+	wantHeader := "username,first_name,last_name,email,section,github_id," +
+		"enrollment_status,invite_token\n"
+	if !strings.HasPrefix(string(encoded), wantHeader) {
+		t.Fatalf("extra columns not re-ordered to canonical.\ngot:\n%s\nwant prefix:\n%s", encoded, wantHeader)
+	}
+}
+
+func TestUpsertRosterRow_PreservesOnboardingColumns(t *testing.T) {
+	// A web-written row carries onboarding columns; a CLI `roster add` upsert
+	// supplies only the canonical fields (Extra == nil) and must NOT wipe them.
+	rows := []RosterRow{
+		{
+			Username: "alice", FirstName: "Alice", LastName: "A", Email: "alice@x.edu", Section: "s1", GitHubID: 123,
+			Extra:      map[string]string{"enrollment_status": "reconciled", "email_hash": "abcd1234ef567890"},
+			ExtraOrder: []string{"enrollment_status", "email_hash"},
+		},
+	}
+	updated, replaced := UpsertRosterRow(rows, RosterRow{
+		Username: "alice", FirstName: "Alice", LastName: "Andersson", Email: "alice@new.edu", Section: "s2", GitHubID: 123,
+	})
+	if !replaced {
+		t.Fatalf("expected replace")
+	}
+	if updated[0].LastName != "Andersson" || updated[0].Email != "alice@new.edu" || updated[0].Section != "s2" {
+		t.Errorf("canonical fields not updated: %#v", updated[0])
+	}
+	if updated[0].Extra["enrollment_status"] != "reconciled" || updated[0].Extra["email_hash"] != "abcd1234ef567890" {
+		t.Errorf("onboarding columns wiped on upsert: %#v", updated[0].Extra)
+	}
+}
+
+func TestUpsertRosterRow_IncomingExtraWins(t *testing.T) {
+	// When the incoming row DOES supply Extra, it replaces the existing Extra
+	// (an explicit caller intent), rather than being silently merged.
+	rows := []RosterRow{
+		{Username: "alice", GitHubID: 1, Extra: map[string]string{"enrollment_status": "invited"}, ExtraOrder: []string{"enrollment_status"}},
+	}
+	updated, _ := UpsertRosterRow(rows, RosterRow{
+		Username: "alice", GitHubID: 1,
+		Extra: map[string]string{"enrollment_status": "reconciled"}, ExtraOrder: []string{"enrollment_status"},
+	})
+	if updated[0].Extra["enrollment_status"] != "reconciled" {
+		t.Errorf("incoming Extra should win, got %#v", updated[0].Extra)
+	}
+}
+
+func TestParseRoster_RejectsWrongCanonicalPrefixEvenWithExtras(t *testing.T) {
+	// A renamed canonical column must still be rejected — tolerance applies
+	// only to columns AFTER the canonical six.
+	in := []byte("user,first_name,last_name,email,section,github_id,enrollment_status\nalice,A,A,,s,1,invited\n")
+	_, err := ParseRoster(in)
+	if err == nil || !strings.Contains(err.Error(), "unexpected header") {
+		t.Fatalf("expected unexpected-header error for renamed canonical column, got %v", err)
+	}
+}
+
+func TestParseRoster_RejectsDuplicateExtraColumn(t *testing.T) {
+	// A duplicated extra column would clobber on read and silently collapse on
+	// write — reject it instead of losing a column on round-trip.
+	in := []byte("username,first_name,last_name,email,section,github_id,note,note\nalice,A,A,,s,1,x,y\n")
+	_, err := ParseRoster(in)
+	if err == nil || !strings.Contains(err.Error(), "duplicate column") {
+		t.Fatalf("expected duplicate-column error, got %v", err)
+	}
+}
+
+func TestParseRoster_RejectsExtraColumnReusingCanonicalName(t *testing.T) {
+	// An extra column reusing a canonical name would emit a duplicate-header
+	// file other tools (the web app) mis-read — reject it.
+	in := []byte("username,first_name,last_name,email,section,github_id,email\nalice,A,A,a@x,s,1,dup\n")
+	_, err := ParseRoster(in)
+	if err == nil || !strings.Contains(err.Error(), "reserved column name") {
+		t.Fatalf("expected reserved-column-name error, got %v", err)
+	}
+}
+
+func TestParseRoster_RejectsFormulaTriggerExtraColumnName(t *testing.T) {
+	// EncodeRoster writes column names verbatim, so a formula-trigger extra
+	// header name would round-trip raw into a CLI-written file and re-introduce
+	// CSV-injection in Excel. Reject it at parse time alongside the other
+	// malformed-header guards.
+	for _, name := range []string{"=HYPERLINK(1)", "+x", "-x", "@x", "\tx", "\rx"} {
+		in := []byte("username,first_name,last_name,email,section,github_id," + name + "\nalice,A,A,a@x,s,1,v\n")
+		_, err := ParseRoster(in)
+		if err == nil || !strings.Contains(err.Error(), "formula trigger") {
+			t.Fatalf("extra column name %q: expected formula-trigger rejection, got %v", name, err)
+		}
+	}
+}
+
+// TestFullRosterHeader pins the exact on-disk header the CLI writes when all
+// onboarding columns are present. The Python collector asserts the identical
+// string (test_collect_scores.py::test_full_roster_header_matches_go_constant)
+// and classroom50-web's STUDENT_CSV_FIELDS must match it, so a column-order
+// drift across the three codebases fails here loudly rather than churning the
+// shared file. If you change RosterColumns or OnboardingColumns, update the web
+// app and the Python fixture in lockstep.
+func TestFullRosterHeader(t *testing.T) {
+	const want = "username,first_name,last_name,email,section,github_id," +
+		"enrollment_status,enrollment_method,email_hash,invite_token,invited_at,reconciled_at"
+	if FullRosterHeader != want {
+		t.Fatalf("FullRosterHeader = %q, want %q", FullRosterHeader, want)
+	}
+	// EncodeRoster of a row carrying every onboarding column must emit exactly
+	// this header line, proving the constant matches real encoder output.
+	row := RosterRow{Username: "alice", GitHubID: 1, Extra: map[string]string{}, ExtraOrder: nil}
+	for _, c := range OnboardingColumns {
+		row.Extra[c] = ""
+		row.ExtraOrder = append(row.ExtraOrder, c)
+	}
+	encoded, err := EncodeRoster([]RosterRow{row})
+	if err != nil {
+		t.Fatalf("EncodeRoster: %v", err)
+	}
+	gotHeader, _, _ := strings.Cut(string(encoded), "\n")
+	if gotHeader != want {
+		t.Fatalf("EncodeRoster header = %q, want %q", gotHeader, want)
 	}
 }

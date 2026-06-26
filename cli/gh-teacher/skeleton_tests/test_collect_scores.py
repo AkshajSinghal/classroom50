@@ -83,10 +83,10 @@ def write_roster(path, rows: list[dict[str, str]]) -> None:
     """Write a 6-column students.csv at `path`. Each row dict only needs
     the fields the test cares about; missing fields default to ''."""
     with path.open("w", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=list(cs.ROSTER_HEADER), extrasaction="ignore")
+        writer = csv.DictWriter(fh, fieldnames=list(cs.ROSTER_REQUIRED_COLUMNS), extrasaction="ignore")
         writer.writeheader()
         for row in rows:
-            writer.writerow({col: row.get(col, "") for col in cs.ROSTER_HEADER})
+            writer.writerow({col: row.get(col, "") for col in cs.ROSTER_REQUIRED_COLUMNS})
 
 
 def write_minimal_classroom(root: pathlib.Path) -> pathlib.Path:
@@ -1157,6 +1157,84 @@ class TestReadStudentsCSV:
         path = tmp_path / "students.csv"
         write_roster(path, [])
         assert cs.read_students_csv(path) == []
+
+    def test_onboarding_columns_are_accepted_and_ignored(self, tmp_path):
+        # The web app (classroom50-web) appends optional onboarding columns.
+        # The collector must accept the wider header (not skip the classroom)
+        # and still extract only username + github_id by name.
+        path = tmp_path / "students.csv"
+        path.write_text(
+            "username,first_name,last_name,email,section,github_id,"
+            "enrollment_status,enrollment_method,email_hash,invite_token,invited_at,reconciled_at\n"
+            "alice,Alice,A,alice@x,1,111,reconciled,github,abcd1234ef567890,,2026-01-01T00:00:00Z,2026-01-02T00:00:00Z\n"
+            "bob,Bob,B,bob@x,1,222,invited,email,beef0000beef0000,tok123,2026-01-03T00:00:00Z,\n"
+        )
+        roster = cs.read_students_csv(path)
+        assert roster == [
+            {"username": "alice", "github_id": "111"},
+            {"username": "bob", "github_id": "222"},
+        ]
+
+    def test_onboarding_header_with_utf8_bom_is_accepted(self, tmp_path):
+        # The 12-column header must also survive Excel's BOM.
+        path = tmp_path / "students.csv"
+        path.write_text(
+            "\ufeffusername,first_name,last_name,email,section,github_id,"
+            "enrollment_status,enrollment_method,email_hash,invite_token,invited_at,reconciled_at\n"
+            "alice,Alice,A,alice@x,1,111,invited,email,abcd,,2026-01-01T00:00:00Z,\n",
+            encoding="utf-8",
+        )
+        assert cs.read_students_csv(path) == [{"username": "alice", "github_id": "111"}]
+
+    def test_shuffled_required_prefix_is_rejected(self, tmp_path):
+        # Tolerance applies only to columns AFTER the required six; a reordered
+        # required prefix is still a hand-edit that could shift data.
+        path = tmp_path / "students.csv"
+        path.write_text(
+            "username,last_name,first_name,email,section,github_id,enrollment_status\n"
+            "alice,A,Alice,a@x,1,111,invited\n"
+        )
+        with pytest.raises(cs.RosterFileError, match="header"):
+            cs.read_students_csv(path)
+
+    def test_full_roster_header_matches_go_constant(self):
+        # The exact 12-column header must stay in lockstep with FullRosterHeader
+        # in cli/gh-teacher/internal/configrepo/students_csv.go (asserted there by
+        # TestFullRosterHeader) and classroom50-web's STUDENT_CSV_FIELDS. If
+        # this fails, a column or its order drifted between the codebases.
+        assert cs.FULL_ROSTER_HEADER == (
+            "username,first_name,last_name,email,section,github_id,"
+            "enrollment_status,enrollment_method,email_hash,invite_token,invited_at,reconciled_at"
+        )
+
+    def test_duplicate_extra_column_is_rejected(self, tmp_path):
+        # csv.DictReader would silently last-wins a duplicate header; reject it
+        # so the collector and the Go reader agree the file is malformed.
+        path = tmp_path / "students.csv"
+        path.write_text(
+            "username,first_name,last_name,email,section,github_id,note,note\n"
+            "alice,A,A,a@x,1,111,x,y\n"
+        )
+        with pytest.raises(cs.RosterFileError, match="duplicate column"):
+            cs.read_students_csv(path)
+
+    def test_extra_column_reusing_required_name_is_rejected(self, tmp_path):
+        path = tmp_path / "students.csv"
+        path.write_text(
+            "username,first_name,last_name,email,section,github_id,email\n"
+            "alice,A,A,a@x,1,111,dup\n"
+        )
+        with pytest.raises(cs.RosterFileError, match="reserved column name"):
+            cs.read_students_csv(path)
+
+    def test_formula_trigger_extra_column_name_is_rejected(self, tmp_path):
+        path = tmp_path / "students.csv"
+        path.write_text(
+            "username,first_name,last_name,email,section,github_id,=HYPERLINK(1)\n"
+            "alice,A,A,a@x,1,111,v\n"
+        )
+        with pytest.raises(cs.RosterFileError, match="formula trigger"):
+            cs.read_students_csv(path)
 
 
 # load_scores / save_scores ---------------------------------------------------

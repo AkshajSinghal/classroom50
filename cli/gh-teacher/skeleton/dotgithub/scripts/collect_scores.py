@@ -83,14 +83,42 @@ RESULT_ASSET_NAME = "result.json"
 # submission.
 MAX_RESULT_BYTES = 10 * 1024 * 1024
 
-# Roster header written by `gh teacher classroom add`. Mirrors
-# rosterColumns in cli/gh-teacher/students_csv.go.
-ROSTER_HEADER = ("username", "first_name", "last_name", "email", "section", "github_id")
+# Required roster columns written by `gh teacher classroom add`. Mirrors
+# RosterColumns in cli/gh-teacher/internal/configrepo/students_csv.go. The
+# header must START with these (in order); the web app (classroom50-web)
+# appends optional onboarding columns after them, which the collector reads by
+# name (it only consumes `username` + `github_id`) and otherwise ignores.
+ROSTER_REQUIRED_COLUMNS = ("username", "first_name", "last_name", "email", "section", "github_id")
+
+# Optional onboarding columns the web app appends after the required six.
+# Mirrors OnboardingColumns in the Go students_csv.go and the web app's
+# STUDENT_CSV_FIELDS tail. The collector ignores them (it reads only username +
+# github_id by name); they exist here so FULL_ROSTER_HEADER can pin the lockstep
+# across all three codebases. Keep them in sync.
+ROSTER_ONBOARDING_COLUMNS = (
+    "enrollment_status",
+    "enrollment_method",
+    "email_hash",
+    "invite_token",
+    "invited_at",
+    "reconciled_at",
+)
+
+# FULL_ROSTER_HEADER is the exact on-disk students.csv header written when all
+# onboarding columns are present. Must equal FullRosterHeader in the Go
+# students_csv.go (asserted by TestFullRosterHeader) and the web app's header.
+FULL_ROSTER_HEADER = ",".join(ROSTER_REQUIRED_COLUMNS + ROSTER_ONBOARDING_COLUMNS)
 
 # Coarse filter for obviously-bogus usernames (empty, slashes, etc.)
 # so they don't get formatted into a URL. Not a strict GitHub
 # username validator.
 _USERNAME_BAD_CHARS = re.compile(r"[^A-Za-z0-9-]")
+
+# Leading bytes that a spreadsheet (Excel/LibreOffice) treats as a formula
+# trigger. Mirrors isFormulaTrigger in students_csv.go; used to reject a
+# hand-edited extra column whose NAME would re-introduce CSV-injection when the
+# CLI rewrites the header verbatim.
+_CSV_FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r")
 
 
 # Top-level dispatch ----------------------------------------------------------
@@ -293,11 +321,41 @@ def read_students_csv(path: pathlib.Path) -> list[dict[str, str]]:
             if reader.fieldnames is None:
                 raise RosterFileError("students.csv is empty")
             header = tuple(reader.fieldnames)
-            if header != ROSTER_HEADER:
+            # Tolerate trailing extras (the web app's onboarding columns): the
+            # collector reads username + github_id by name. A renamed/short/
+            # shuffled required prefix is still rejected so a hand-edit can't
+            # silently drop or shift roster data.
+            if header[: len(ROSTER_REQUIRED_COLUMNS)] != ROSTER_REQUIRED_COLUMNS:
                 raise RosterFileError(
-                    f"students.csv header = {header}, want {ROSTER_HEADER} "
-                    f"(hand-edited?). Use `gh teacher roster add/import` to manage the file."
+                    f"students.csv header = {header}, want it to start with "
+                    f"{ROSTER_REQUIRED_COLUMNS} (hand-edited?). Use "
+                    f"`gh teacher roster add/import` to manage the file."
                 )
+            # Reject the same malformed extra headers the Go reader rejects so
+            # both binaries agree the shared file is well-formed: a reused
+            # required name, a duplicate (csv.DictReader would silently last-wins
+            # it), or a formula-trigger name (CSV-injection on a CLI rewrite).
+            # Otherwise a hand-edit could be "broken" to the CLI yet silently
+            # graded here.
+            extra_columns = header[len(ROSTER_REQUIRED_COLUMNS) :]
+            seen_extra: set[str] = set()
+            for name in extra_columns:
+                if name in ROSTER_REQUIRED_COLUMNS:
+                    raise RosterFileError(
+                        f"students.csv extra column {name!r} reuses a reserved "
+                        f"column name (hand-edited?)."
+                    )
+                if name in seen_extra:
+                    raise RosterFileError(
+                        f"students.csv has a duplicate column {name!r} "
+                        f"(hand-edited?)."
+                    )
+                if name[:1] in _CSV_FORMULA_TRIGGERS:
+                    raise RosterFileError(
+                        f"students.csv extra column {name!r} begins with a "
+                        f"spreadsheet formula trigger (hand-edited?)."
+                    )
+                seen_extra.add(name)
             roster: list[dict[str, str]] = []
             for row in reader:
                 username = (row.get("username") or "").strip()
