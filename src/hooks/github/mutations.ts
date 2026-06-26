@@ -634,6 +634,29 @@ export async function removeOrgMembership(
 
 export type OrgMembershipState = "active" | "pending"
 
+// PATCH /repos/{owner}/{repo} { archived: true }. Reversible and covered by the
+// existing `repo` scope (unlike deletion, which needs delete_repo and a re-auth).
+// Used to retire an onboarding repo once its identity is reconciled into the
+// roster. 404 treated as success (already gone).
+export async function archiveRepo(
+  client: GitHubClient,
+  input: { owner: string; repo: string },
+): Promise<void> {
+  const { owner, repo } = input
+
+  try {
+    await client.request(`/repos/${owner}/${repo}`, {
+      method: "PATCH",
+      body: { archived: true },
+    })
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.isNotFound) {
+      return
+    }
+    throw err
+  }
+}
+
 // GET /orgs/{org}/memberships/{username} -> state, or null on 404/error.
 export async function getOrgMembershipState(
   client: GitHubClient,

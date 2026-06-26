@@ -2,6 +2,7 @@ import Papa from "papaparse"
 import type { GitHubClient } from "@/hooks/github/client"
 import {
   addUserToTeam,
+  archiveRepo,
   createGitCommit,
   createGitTree,
   createOrgInvitation,
@@ -382,6 +383,8 @@ export type ReconcileOnboardingResult = {
   pending: string[]
   // Onboarding repos found but whose payload couldn't be matched/parsed.
   unmatched: { repo: string; reason: string }[]
+  // Onboarding repos archived after a successful reconcile.
+  archived: string[]
 }
 
 // Teacher-side reconciliation: for each not-yet-reconciled email row, fetch its
@@ -400,6 +403,7 @@ export async function reconcileOnboarding(
     reconciled: [],
     pending: [],
     unmatched: [],
+    archived: [],
   }
 
   // Read the roster once (outside the retry) to decide which repos to fetch.
@@ -420,8 +424,12 @@ export async function reconcileOnboarding(
     return result
   }
 
-  // email_hash -> resolved identity, for the single batched write below.
-  const resolved = new Map<string, { username: string; github_id: string }>()
+  // email_hash -> resolved identity + onboarding repo, for the batched write
+  // and the post-commit cleanup.
+  const resolved = new Map<
+    string,
+    { username: string; github_id: string; repo: string }
+  >()
 
   for (const row of targets) {
     const repo = onboardingRepoNameFromHash(row.email_hash)
@@ -444,6 +452,7 @@ export async function reconcileOnboarding(
     resolved.set(row.email_hash, {
       username: payload.github_username,
       github_id: String(payload.github_id),
+      repo,
     })
     result.reconciled.push({
       email: row.email,
@@ -509,6 +518,22 @@ export async function reconcileOnboarding(
 
     await updateRef(client, org, newCommit.sha)
   })
+
+  // Cleanup runs ONLY after the CSV commit above succeeded, so a failed write
+  // never archives an unreconciled repo. Archiving (not deleting) is reversible
+  // and needs no extra OAuth scope; failures are non-fatal (the row is already
+  // reconciled). Never touch unmatched/pending repos.
+  for (const { repo } of resolved.values()) {
+    try {
+      await archiveRepo(client, { owner: org, repo })
+      result.archived.push(repo)
+    } catch (err) {
+      result.unmatched.push({
+        repo,
+        reason: `reconciled but archive failed: ${getErrorMessage(err)}`,
+      })
+    }
+  }
 
   return result
 }
