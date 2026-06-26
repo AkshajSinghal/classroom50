@@ -18,6 +18,8 @@ import { useGithubAuth } from "@/auth/useGithubAuth"
 import useGetSubmissionReleases from "@/hooks/useGetSubmissionReleases"
 import useGetPublicAssignment from "@/hooks/useGetPublicAssignment"
 import useGetAssignmentRepo from "@/hooks/useGetAssignmentRepo"
+import useDotClassroom50 from "@/hooks/useDotClassroom50"
+import { studentRepoName } from "@/util/studentRepo"
 import { formatDueDateTime, isPastDue } from "@/util/formatDate"
 import { safeHttpUrl } from "@/util/url"
 import type { GitHubRelease } from "@/hooks/github/types"
@@ -208,10 +210,20 @@ const SubmissionBody = ({
 
 const StudentSubmissionPage = () => {
   const { org, classroom, assignment } = useParams({ strict: false })
+  const { user } = useGithubAuth()
+  // The capability-URL secret (if the classroom is protected) lives in the
+  // student's own repo's .classroom50.yaml — the source they can read. Empty
+  // for an unprotected classroom -> plain Pages path.
+  const repoName =
+    classroom && assignment && user?.login
+      ? studentRepoName(classroom, assignment, user.login)
+      : ""
+  const { secret } = useDotClassroom50(org ?? "", repoName)
   const { assignment: assignmentData } = useGetPublicAssignment(
     org,
     classroom,
     assignment,
+    secret,
   )
 
   return (

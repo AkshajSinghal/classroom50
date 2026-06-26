@@ -12,7 +12,7 @@ import {
 import GitHub from "@/assets/github.svg?react"
 import GitHubWhite from "@/assets/github_white.svg?react"
 import type { GitHubUser } from "@/hooks/github/types"
-import { Link, useParams } from "@tanstack/react-router"
+import { Link, useParams, useSearch } from "@tanstack/react-router"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useGithubAuth } from "@/auth/useGithubAuth"
 import { useMutation } from "@tanstack/react-query"
@@ -420,13 +420,19 @@ const RepairToggle = ({
 
 const AcceptAssignmentPage = () => {
   const { org, classroom, assignment } = useParams({ strict: false })
+  // The capability key from the accept link (?k=...). For a protected
+  // classroom this selects the <classroom>/<secret>/ Pages path; absent for
+  // an unprotected classroom. Read loosely so the page also works if
+  // mounted without the typed route in tests.
+  const search = useSearch({ strict: false }) as { k?: string }
+  const secret = typeof search.k === "string" ? search.k : undefined
   const client = useGitHubClient()
 
   const { user } = useGithubAuth()
   const username = user?.login
 
   const { data: assignmentsData, isLoading: loadingAssignments } =
-    usePagesAssignments(org, classroom)
+    usePagesAssignments(org, classroom, secret)
   const { data: orgInvite, isLoading: loadingOrgMembership } =
     useGetOwnOrgMembership(org)
 
@@ -459,6 +465,7 @@ const AcceptAssignmentPage = () => {
         org: org ?? "",
         classroom: classroom ?? "",
         assignmentSlug: assignment ?? "",
+        secret,
         onStepUpdate: (update) =>
           setSteps((prev) => ({
             ...prev,

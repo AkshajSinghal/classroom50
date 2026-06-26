@@ -10,6 +10,7 @@ import Drawer, {
 import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
 import useGetAssignmentRepo from "@/hooks/useGetAssignmentRepo"
 import useGetPublicAssignment from "@/hooks/useGetPublicAssignment"
+import useDotClassroom50 from "@/hooks/useDotClassroom50"
 
 import GitHub from "@/assets/github.svg?react"
 import { useGithubAuth } from "@/auth/useGithubAuth"
@@ -27,10 +28,15 @@ const EditAssignmentFormStudent = ({
   assignment: string
 }) => {
   const { user } = useGithubAuth()
-  const { isLoading: loadingPublic, assignment: assignmentData } =
-    useGetPublicAssignment(org, classroom, assignment)
   const { isLoading: loadingRepo, assignment: assignmentRepo } =
     useGetAssignmentRepo(org, classroom, assignment, user?.login)
+  // The group student is on this page post-accept, so the capability-URL
+  // secret (if the classroom is protected) lives in their repo's
+  // .classroom50.yaml — the source they can actually read (not the private
+  // classroom.json). Empty for an unprotected classroom -> plain path.
+  const { secret } = useDotClassroom50(org, assignmentRepo?.name ?? "")
+  const { isLoading: loadingPublic, assignment: assignmentData } =
+    useGetPublicAssignment(org, classroom, assignment, secret)
 
   const [collaboratorsOpen, setCollaboratorsOpen] = useState(false)
 

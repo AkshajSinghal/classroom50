@@ -1359,9 +1359,16 @@ export async function acceptAssignment(params: {
   org: string
   classroom: string
   assignmentSlug: string
+  // Capability-URL access key from the accept link (?k=). Selects the
+  // <classroom>/<secret>/ Pages path for a protected classroom and is
+  // written into .classroom50.yaml so submit + the runner can rebuild the
+  // URLs. Undefined for an unprotected classroom (plain path). Not read
+  // from classroom.json — students can't access the private config repo.
+  secret?: string
   onStepUpdate?: OnAcceptStepUpdate
 }): Promise<AcceptAssignmentResult> {
-  const { client, org, classroom, assignmentSlug, onStepUpdate } = params
+  const { client, org, classroom, assignmentSlug, secret, onStepUpdate } =
+    params
 
   const user = await withAcceptStep(
     {
@@ -1379,19 +1386,6 @@ export async function acceptAssignment(params: {
   // Best-effort: auto-accept a pending org invite. Failures are ignored (the
   // student may already be a member), so this isn't a tracked step.
   await acceptPendingOrgInvite(client, org)
-
-  // Resolve the classroom's optional capability-URL secret from the
-  // team-gated classroom.json (the student is on the classroom team). A
-  // protected classroom serves resources under <classroom>/<secret>/ and
-  // the secret is recorded in .classroom50.yaml so submit + the autograde
-  // runner can rebuild the URLs. An unprotected classroom (no secret, or an
-  // unreadable classroom.json) falls back to the plain path.
-  let secret: string | undefined
-  try {
-    secret = (await getClassroomJson(client, { org, classroom })).secret
-  } catch {
-    secret = undefined
-  }
 
   const assignment = await withAcceptStep(
     {
