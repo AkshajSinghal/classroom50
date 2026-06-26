@@ -53,6 +53,9 @@ const UnenrollStudentButton = ({
   // account can't remove itself here.
   const isMember = status === "member"
   const canRemoveFromOrg = isMember && !isSelf
+  // Email-invited rows have no username yet; show the email so the button and
+  // dialog are identifiable before reconciliation.
+  const label = student.username || student.email
   const dialogRef = useRef<HTMLDialogElement | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -82,9 +85,10 @@ const UnenrollStudentButton = ({
         student,
         removeFromOrg: canRemoveFromOrg ? removeFromOrg : false,
       })
-      // Key the warning by username: this button unmounts on roster refetch,
-      // and keying stops a concurrent clean unenroll from clobbering it.
-      onRemoveStudent(student.username, result.teamWarning)
+      // Key the warning by a stable identity (username, else email): this button
+      // unmounts on roster refetch, and keying stops a concurrent clean unenroll
+      // from clobbering it.
+      onRemoveStudent(student.username || student.email, result.teamWarning)
       setOpen(false)
       setRemoveFromOrg(false)
     } catch (err) {
@@ -100,7 +104,7 @@ const UnenrollStudentButton = ({
         onClick={() => setOpen(true)}
         disabled={unenrollStudentMutation.isPending}
         className="btn btn-ghost btn-square text-error"
-        aria-label={`Unenroll ${student.username}`}
+        aria-label={`Unenroll ${label}`}
       >
         <Trash />
       </button>
@@ -122,9 +126,7 @@ const UnenrollStudentButton = ({
 
           <div className="mt-2 text-sm leading-6 text-base-content/70">
             This will remove student{" "}
-            <span className="font-semibold text-base-content">
-              {student.username}
-            </span>{" "}
+            <span className="font-semibold text-base-content">{label}</span>{" "}
             from the{" "}
             <span className="font-semibold text-base-content">{org}</span>{" "}
             {classroom} classroom. Student assignment repositories will not be
@@ -132,6 +134,12 @@ const UnenrollStudentButton = ({
             {status === "pending" ? (
               <span className="mt-2 block">
                 Their pending organization invite will be cancelled.
+              </span>
+            ) : null}
+            {status === "onboarding" ? (
+              <span className="mt-2 block">
+                Their onboarding will be reset (their onboarding repository is
+                removed), so a fresh invite starts over.
               </span>
             ) : null}
           </div>
