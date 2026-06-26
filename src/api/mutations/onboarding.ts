@@ -1,6 +1,7 @@
 import type { GitHubClient } from "@/hooks/github/client"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import {
+  addRepoCollaborator,
   createCommitRepo,
   createTreeRepo,
   updateRefForRepo,
@@ -158,6 +159,25 @@ export async function submitOnboarding(
       commitSha: commit.sha,
     })
   })
+
+  // Now that the self-report is committed, drop our own access to read-only.
+  // The student created the repo (so they're its admin); demoting to "pull"
+  // keeps the repo essentially hidden/uneditable for them while leaving the org
+  // owner full admin (org repos are owned by the org) and not affecting teacher
+  // reconciliation (which reads via the org). Best-effort and ordered strictly
+  // AFTER the commit so a failure here can never strand a half-written repo;
+  // it's non-fatal because the onboarding payload has already landed.
+  try {
+    await addRepoCollaborator({
+      client,
+      org,
+      repo: repoName,
+      username: user.login,
+      permission: "pull",
+    })
+  } catch {
+    // Non-fatal: the payload is committed and reconcilable regardless.
+  }
 
   return { status, repo, payload }
 }

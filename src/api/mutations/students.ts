@@ -6,6 +6,7 @@ import {
   createGitCommit,
   createGitTree,
   createOrgInvitation,
+  deleteRepo,
   ensureOrgMembership,
   getErrorMessage,
   getOrgMembershipState,
@@ -26,7 +27,11 @@ import {
   ONBOARDING_YAML_PATH,
 } from "@/util/onboarding"
 import { parseOnboardingYaml } from "@/util/yaml"
-import type { Student } from "@/types/classroom"
+import {
+  DEFAULT_ONBOARDING_CLEANUP,
+  type OnboardingCleanupMode,
+  type Student,
+} from "@/types/classroom"
 
 // The classroom team slug is authoritative in classroom.json: on a name
 // collision GitHub may assign a slug other than `classroom50-<slug>`, so
@@ -386,6 +391,11 @@ export type ReconcileOnboardingResult = {
   unmatched: { repo: string; reason: string }[]
   // Onboarding repos archived after a successful reconcile.
   archived: string[]
+  // Onboarding repos deleted after a successful reconcile.
+  deleted: string[]
+  // Set when cleanup couldn't honor the configured mode (e.g. delete fell back
+  // to archive for lack of the delete_repo scope), so the teacher can act.
+  cleanupWarning?: string
 }
 
 // Teacher-side reconciliation: for each not-yet-reconciled email row, fetch its
@@ -405,6 +415,18 @@ export async function reconcileOnboarding(
     pending: [],
     unmatched: [],
     archived: [],
+    deleted: [],
+  }
+
+  // Per-classroom cleanup mode (defaults to archive when unset / unreadable).
+  let cleanupMode: OnboardingCleanupMode = DEFAULT_ONBOARDING_CLEANUP
+  try {
+    const classroomJson = await getClassroomJson(client, { org, classroom })
+    if (classroomJson.onboarding_cleanup) {
+      cleanupMode = classroomJson.onboarding_cleanup
+    }
+  } catch {
+    // Keep the default; a read failure shouldn't block reconciliation.
   }
 
   // Read the roster once (outside the retry) to decide which repos to fetch.
@@ -582,18 +604,52 @@ export async function reconcileOnboarding(
   }
 
   // Cleanup runs ONLY after the CSV commit above succeeded, so a failed write
-  // never archives an unreconciled repo. Archiving (not deleting) is reversible
-  // and needs no extra OAuth scope; failures are non-fatal (the row is already
-  // reconciled). Never touch unmatched/pending repos.
-  for (const { repo } of resolved.values()) {
-    try {
-      await archiveRepo(client, { owner: org, repo })
-      result.archived.push(repo)
-    } catch (err) {
-      result.unmatched.push({
-        repo,
-        reason: `reconciled but archive failed: ${getErrorMessage(err)}`,
-      })
+  // never touches an unreconciled repo. The mode is per-classroom (default
+  // "archive"); failures are non-fatal (the row is already reconciled). Never
+  // touch unmatched/pending repos.
+  if (cleanupMode !== "keep") {
+    let deleteScopeMissing = false
+
+    for (const { repo } of resolved.values()) {
+      // "delete" needs the delete_repo scope (not in DEFAULT_GITHUB_SCOPE); on a
+      // 403 we fall back to archiving so cleanup still happens, and warn once so
+      // the teacher knows why repos were archived instead of deleted.
+      if (cleanupMode === "delete" && !deleteScopeMissing) {
+        try {
+          await deleteRepo(client, { owner: org, repo })
+          result.deleted.push(repo)
+          continue
+        } catch (err) {
+          if (err instanceof GitHubAPIError && err.isForbidden) {
+            deleteScopeMissing = true
+            // fall through to archive
+          } else {
+            result.unmatched.push({
+              repo,
+              reason: `reconciled but delete failed: ${getErrorMessage(err)}`,
+            })
+            continue
+          }
+        }
+      }
+
+      try {
+        await archiveRepo(client, { owner: org, repo })
+        result.archived.push(repo)
+      } catch (err) {
+        result.unmatched.push({
+          repo,
+          reason: `reconciled but archive failed: ${getErrorMessage(err)}`,
+        })
+      }
+    }
+
+    if (deleteScopeMissing) {
+      result.cleanupWarning =
+        "Cleanup is set to delete, but this app isn't authorized to delete " +
+        "repositories, so the onboarding repos were archived instead. To enable " +
+        "deletion, re-authorize with the delete_repo scope, or change the " +
+        "classroom cleanup setting to archive."
     }
   }
 

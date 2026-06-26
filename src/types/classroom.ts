@@ -19,7 +19,18 @@ export type Classroom = {
   // classroom (off by default), so omitted on unprotected classrooms. Kept
   // in lockstep with the CLI's classroom-v1 schema (`[a-z0-9]{4,64}`).
   secret?: string
+  // How the teacher's onboarding reconciliation disposes of a student's
+  // onboarding repo once its identity is folded into the roster. GUI-managed
+  // (like `secret`), absent on classrooms created before this feature ->
+  // treated as the default "archive". "delete" removes the repo (needs
+  // delete_repo scope; falls back to archive + a warning when unavailable),
+  // "archive" hides it reversibly, "keep" leaves it untouched.
+  onboarding_cleanup?: OnboardingCleanupMode
 }
+
+export type OnboardingCleanupMode = "delete" | "archive" | "keep"
+
+export const DEFAULT_ONBOARDING_CLEANUP: OnboardingCleanupMode = "archive"
 
 // Inclusive bounds for a group assignment's max_group_size (owner included).
 // The CLI schema enforces the same range; an out-of-range value makes

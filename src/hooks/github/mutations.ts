@@ -13,6 +13,7 @@ import { GitHubAPIError } from "./errors"
 import sodium from "libsodium-wrappers"
 import { getBranchRef, getClassroomJson, getCommit } from "@/api/github/queries"
 import type { CreateClassroomInput } from "@/api/mutations/classrooms"
+import type { OnboardingCleanupMode } from "@/types/classroom"
 import { getRepo } from "./queries"
 
 const ASSIGNMENTS_TEMPLATE = {
@@ -648,6 +649,28 @@ export async function archiveRepo(
     await client.request(`/repos/${owner}/${repo}`, {
       method: "PATCH",
       body: { archived: true },
+    })
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.isNotFound) {
+      return
+    }
+    throw err
+  }
+}
+
+// DELETE /repos/{owner}/{repo}. Needs the delete_repo OAuth scope, which is NOT
+// in DEFAULT_GITHUB_SCOPE — so this 403s for tokens without it; callers that
+// want a non-fatal "delete if possible, else archive" should catch the 403.
+// 404 treated as success (already gone).
+export async function deleteRepo(
+  client: GitHubClient,
+  input: { owner: string; repo: string },
+): Promise<void> {
+  const { owner, repo } = input
+
+  try {
+    await client.request(`/repos/${owner}/${repo}`, {
+      method: "DELETE",
     })
   } catch (err) {
     if (err instanceof GitHubAPIError && err.isNotFound) {
@@ -2145,6 +2168,7 @@ export type EditClassroomInput = {
   slug: string
   term: string
   name: string
+  onboarding_cleanup?: OnboardingCleanupMode
 }
 
 export type EditClassroomResult = Awaited<ReturnType<typeof editClassroom>>
@@ -2153,7 +2177,7 @@ export async function editClassroom(
   client: GitHubClient,
   input: EditClassroomInput,
 ) {
-  const { org, slug, term, name } = input
+  const { org, slug, term, name, onboarding_cleanup } = input
 
   const ref = await getBranchRef(client, org)
 
@@ -2175,6 +2199,9 @@ export async function editClassroom(
     ...current,
     name,
     term,
+    // Only write the field when explicitly provided, so an edit that doesn't
+    // touch cleanup leaves any existing value (or its absence) intact.
+    ...(onboarding_cleanup !== undefined ? { onboarding_cleanup } : {}),
   }
 
   const blob = await createBlob(client, {

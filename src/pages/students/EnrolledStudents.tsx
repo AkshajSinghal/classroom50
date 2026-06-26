@@ -439,6 +439,9 @@ const EnrolledStudents = ({
     mutationFn: () => reconcileOnboarding(client, { org, classroom }),
     onSuccess: (result) => {
       const parts = [`${result.reconciled.length} reconciled`]
+      if (result.deleted.length > 0) {
+        parts.push(`${result.deleted.length} deleted`)
+      }
       if (result.archived.length > 0) {
         parts.push(`${result.archived.length} archived`)
       }
@@ -448,7 +451,12 @@ const EnrolledStudents = ({
       if (result.unmatched.length > 0) {
         parts.push(`${result.unmatched.length} unmatched`)
       }
-      setReconcileSummary(parts.join(", "))
+      const summary = parts.join(", ")
+      setReconcileSummary(
+        result.cleanupWarning
+          ? `${summary}. ${result.cleanupWarning}`
+          : summary,
+      )
       queryClient.invalidateQueries({
         queryKey: githubKeys.csvFile(
           org,
