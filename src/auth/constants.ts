@@ -11,6 +11,10 @@ export const GITHUB_AUTH_SESSION = {
   SCOPE: "gh_oauth_scope",
 } as const
 
+// Scopes: admin:org enables org-invite management + team writes; repo covers
+// roster commits and archiving reconciled onboarding repos. delete_repo is
+// intentionally NOT requested — onboarding cleanup archives (reversible) rather
+// than deletes, so teachers never have to re-authorize for a destructive scope.
 export const DEFAULT_GITHUB_SCOPE = "read:user read:org repo workflow admin:org"
 
 // An org's OAuth app policy page, where owners approve apps or relax the

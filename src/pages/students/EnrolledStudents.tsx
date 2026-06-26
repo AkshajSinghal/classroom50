@@ -388,6 +388,9 @@ const EnrolledStudents = ({
     mutationFn: () => reconcileOnboarding(client, { org, classroom }),
     onSuccess: (result) => {
       const parts = [`${result.reconciled.length} reconciled`]
+      if (result.archived.length > 0) {
+        parts.push(`${result.archived.length} archived`)
+      }
       if (result.pending.length > 0) {
         parts.push(`${result.pending.length} still pending`)
       }
