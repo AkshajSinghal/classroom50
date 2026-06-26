@@ -9,10 +9,12 @@ import {
 import GitHub from "@/assets/github.svg?react"
 import { Link, useParams, useSearch } from "@tanstack/react-router"
 import { useMutation } from "@tanstack/react-query"
+import { useState } from "react"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useGithubAuth } from "@/auth/useGithubAuth"
 import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
 import { submitOnboarding } from "@/api/mutations/onboarding"
+import { isValidEmail } from "@/util/onboarding"
 
 const OnboardNavbar = () => (
   <div className="navbar bg-base-100 shadow-sm">
@@ -85,23 +87,29 @@ const NotOrgMember = ({
 
 const OnboardingPage = () => {
   const { org, classroom } = useParams({ strict: false })
-  // The invited email travels in the onboarding link as an untrusted prefill.
-  // It only seeds the deterministic repo name + the claimed-email field; the
-  // authenticated session is what actually authorizes everything.
+  // The invited email may travel in the link as a prefill (an individual link
+  // the teacher sent). On the generic classroom-wide link it's absent and the
+  // student types it. Either way it's an untrusted value: it only seeds the
+  // deterministic repo name + claimed-email field; the authenticated session is
+  // what actually authorizes everything, and reconciliation re-verifies the
+  // commit author against the claimed identity.
   const search = useSearch({ strict: false }) as { email?: string }
-  const email = typeof search.email === "string" ? search.email : ""
+  const prefilledEmail = typeof search.email === "string" ? search.email : ""
+  const [email, setEmail] = useState(prefilledEmail)
   const client = useGitHubClient()
 
   const { user } = useGithubAuth()
   const { data: orgMembership, isLoading: loadingMembership } =
     useGetOwnOrgMembership(org)
 
+  const emailValid = isValidEmail(email)
+
   const onboardMutation = useMutation({
     mutationFn: () =>
       submitOnboarding(client, {
         org: org ?? "",
         classroom: classroom ?? "",
-        email,
+        email: email.trim(),
       }),
   })
 
@@ -149,13 +157,37 @@ const OnboardingPage = () => {
                 <GitHub className="size-4" />
                 <span>{user?.login ?? "Checking GitHub user..."}</span>
               </div>
-              {email && (
-                <div className="mt-1 flex items-center gap-1 text-sm text-base-content/60">
-                  <Mail className="size-4" />
-                  <span>{email}</span>
-                </div>
-              )}
             </div>
+          </div>
+
+          <div>
+            <label
+              htmlFor="onboard-email"
+              className="text-sm font-medium text-base-content"
+            >
+              Your university email
+            </label>
+            <p className="mt-1 text-xs text-base-content/60">
+              Enter the email your instructor used to invite you, so they can
+              match you to the class roster.
+            </p>
+            <div className="mt-2 flex">
+              <Mail className="size-6 mr-2 text-[#bbb]" />
+              <input
+                id="onboard-email"
+                type="email"
+                value={email}
+                placeholder="student@university.edu"
+                className="input w-full"
+                disabled={done || onboardMutation.isPending}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+            {email && !emailValid && (
+              <p className="text-error text-sm mt-1">
+                Enter a valid email address.
+              </p>
+            )}
           </div>
 
           {onboardMutation.isError && (
@@ -185,7 +217,7 @@ const OnboardingPage = () => {
             <button
               type="button"
               className="btn btn-primary w-full bg-[#4e80ee]"
-              disabled={onboardMutation.isPending}
+              disabled={onboardMutation.isPending || !emailValid}
               onClick={() => onboardMutation.mutate()}
             >
               {onboardMutation.isPending ? (
