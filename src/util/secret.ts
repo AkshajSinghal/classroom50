@@ -40,9 +40,7 @@ export function classroomPagesSegment(
   classroom: string,
   secret?: string,
 ): string {
-  return secret
-    ? `${classroom}/${encodeURIComponent(secret)}`
-    : classroom
+  return secret ? `${classroom}/${encodeURIComponent(secret)}` : classroom
 }
 
 // generateSecret returns a cryptographically random secret of `length`
