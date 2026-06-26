@@ -269,6 +269,57 @@ const InviteLink = ({ org }: { org: string }) => {
   )
 }
 
+// Classroom-wide onboarding link. Students open it after accepting the org
+// invite, enter their email, and self-report their GitHub identity (which the
+// teacher folds in via "Reconcile onboarding"). Same URL for everyone; the
+// student supplies the email, so no per-student token is needed.
+const OnboardingLink = ({
+  org,
+  classroom,
+}: {
+  org: string
+  classroom: string
+}) => {
+  const onboardUrl = `${window.location.origin}/${org}/${classroom}/onboard`
+  const { copied, copy } = useCopyToClipboard(onboardUrl)
+
+  return (
+    <div className="flex flex-col gap-1 px-6 py-3 border-b border-base-300 bg-base-200/40">
+      <span className="text-xs font-medium text-base-content/60">
+        Email this onboarding link to students you invited by email:
+      </span>
+      <div className="join w-full">
+        <input
+          type="text"
+          readOnly
+          value={onboardUrl}
+          aria-label="Student onboarding link"
+          onFocus={(event) => event.currentTarget.select()}
+          className="input input-sm input-bordered join-item w-full font-mono text-xs"
+        />
+        <button
+          type="button"
+          className="btn btn-sm join-item"
+          onClick={() => void copy()}
+          aria-label="Copy onboarding link"
+        >
+          {copied ? (
+            <>
+              <Check className="size-4 text-success" />
+              Copied
+            </>
+          ) : (
+            <>
+              <Copy className="size-4" />
+              Copy
+            </>
+          )}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 const EnrolledStudents = ({
   students = [],
   org,
@@ -526,6 +577,7 @@ const EnrolledStudents = ({
       </div>
 
       <InviteLink org={org} />
+      <OnboardingLink org={org} classroom={classroom} />
 
       {reconcileSummary ? (
         <div role="alert" className="alert alert-info alert-soft mx-6 mt-4">
