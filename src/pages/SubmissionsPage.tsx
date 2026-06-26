@@ -26,6 +26,7 @@ import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetStudents from "@/hooks/useGetStudents"
 import useTriggerScoreCollection from "@/hooks/useTriggerScoreCollection"
 import useGetLastCollectScoresRun from "@/hooks/useGetLastCollectScoresRun"
+import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
 import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
 import RoleResolvingFallback from "@/components/RoleResolvingFallback"
 import { COLLECT_SCORES_WORKFLOW } from "@/hooks/github/mutations"
@@ -48,29 +49,25 @@ const SubmissionsPageContent = () => {
     data: scoresData,
     refetch: refetchScores,
     isFetching: scoresFetching,
+    isError: scoresError,
+    error: scoresErrorObj,
     dataUpdatedAt: scoresUpdatedAt,
   } = useGetScores(org, classroom)
   const { data: assignmentData } = useGetClassroomAssignments(org, classroom)
   const { students } = useGetStudents(org, classroom)
-  const [copiedSubmitLink, setCopiedSubmitLink] = useState(false)
   const scoresLastUpdated =
     scoresUpdatedAt > 0
       ? formatDistanceToNow(scoresUpdatedAt, { addSuffix: true })
       : "never"
 
   const assignmentSubmitUrl = `${window.location.origin}/${org}/${classroom}/assignments/${assignment}/accept`
+  const { copied: copiedSubmitLink, copy: copySubmitLink } = useCopyToClipboard(
+    assignmentSubmitUrl,
+    1500,
+  )
 
   // Re-render every 30s so the relative "last collected"/"last updated" labels stay fresh.
   usePeriodicRerender()
-
-  const copySubmitLink = async () => {
-    await navigator.clipboard.writeText(assignmentSubmitUrl)
-    setCopiedSubmitLink(true)
-
-    window.setTimeout(() => {
-      setCopiedSubmitLink(false)
-    }, 1500)
-  }
   const assignmentInfo = assignmentData?.assignments.find(
     (a) => a.slug === assignment,
   )
@@ -81,6 +78,18 @@ const SubmissionsPageContent = () => {
   // computed upstream (collect_scores.py) from the push time, not the grade
   // time, so an on-time push graded after the deadline still counts as on time.
   const lateCount = scoresInfo.filter((row) => row.late).length
+
+  // Class average over numeric scores only. Guards the old `sum/length || 1`
+  // form (`/` bound before `||`, so a NaN/empty result showed "1"); null -> "N/A".
+  const classAverage = (() => {
+    const numericScores = scoresInfo
+      .map((row) => Number(row["score"]))
+      .filter((n) => Number.isFinite(n))
+    if (numericScores.length === 0) return null
+    const avg =
+      numericScores.reduce((sum, n) => sum + n, 0) / numericScores.length
+    return Math.round(avg * 100) / 100
+  })()
 
   // Roster students with no submission. A student is "credited" if their login
   // appears in any row's `usernames` (which is `member_usernames` for groups,
@@ -186,6 +195,25 @@ const SubmissionsPageContent = () => {
         <DrawerToggle />
         <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
           <Breadcrumb endpoint="Submissions" />
+          {scoresError && (
+            <div className="alert alert-error mt-4">
+              <div>
+                Couldn't load the gradebook
+                {scoresErrorObj instanceof Error
+                  ? `: ${scoresErrorObj.message}`
+                  : "."}{" "}
+                The counts below may be incomplete — retry before acting on
+                them.
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost ml-2"
+                  onClick={() => refetchScores()}
+                >
+                  Retry
+                </button>
+              </div>
+            </div>
+          )}
           <div className="flex justify-between">
             <div>
               <h1 className="text-lg pt-8 pb-2 font-bold">
@@ -367,10 +395,7 @@ const SubmissionsPageContent = () => {
                 ) : (
                   <div className="flex items-end gap-1">
                     <h2 className="text-xl font-bold">
-                      {scoresInfo?.reduce(
-                        (a, c) => Number(a) + Number(c["score"]),
-                        0,
-                      ) / scoresInfo?.length || 1}
+                      {classAverage ?? "N/A"}
                     </h2>
                     /<h4>{scoresInfo?.[0]?.["max-score"]}</h4>
                   </div>
