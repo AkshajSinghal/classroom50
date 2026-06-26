@@ -61,6 +61,13 @@ const STUDENT_CSV_FIELDS = [
   "email",
   "section",
   "github_id",
+  // Email-first onboarding columns. Appended after the original 6 so old
+  // header-based CSVs still parse (missing columns default to "" below) and
+  // new columns are additive.
+  "enrollment_status",
+  "email_hash",
+  "invited_at",
+  "reconciled_at",
 ] as const
 type StudentCsvField = (typeof STUDENT_CSV_FIELDS)[number]
 
@@ -76,6 +83,10 @@ function normalizeStudentRow(
     email: String(row.email ?? "").trim(),
     section: String(row.section ?? "").trim(),
     github_id: String(row.github_id ?? "").trim(),
+    enrollment_status: String(row.enrollment_status ?? "").trim(),
+    email_hash: String(row.email_hash ?? "").trim(),
+    invited_at: String(row.invited_at ?? "").trim(),
+    reconciled_at: String(row.reconciled_at ?? "").trim(),
   }
 }
 
@@ -113,13 +124,13 @@ function parseStudentsCsv(csv: string): StudentCsvRow[] {
 
   return parsed.data
     .map((row) => normalizeStudentRow(row))
-    .filter((row) => row.username || row.github_id)
+    .filter((row) => row.username || row.github_id || row.email)
 }
 
 function stringifyStudentsCsv(rows: StudentCsvRow[]) {
   const normalizedRows = rows
     .map((row) => normalizeStudentRow(row))
-    .filter((row) => row.username || row.github_id)
+    .filter((row) => row.username || row.github_id || row.email)
 
   return (
     Papa.unparse(normalizedRows, {
@@ -167,14 +178,18 @@ export async function addStudentToClassroom(
 
   const nameParts = splitGitHubDisplayName(githubUser.name)
 
-  const student: StudentCsvRow = {
+  const student: StudentCsvRow = normalizeStudentRow({
     username: githubUser.login,
     first_name: input.first_name?.trim() ?? nameParts.first_name,
     last_name: input.last_name?.trim() ?? nameParts.last_name,
     email: input.email?.trim() ?? githubUser.email ?? "",
     section: input.section?.trim() ?? "",
     github_id: String(githubUser.id),
-  }
+    // A username-add already has a resolved GitHub identity, so it bypasses the
+    // email-first onboarding lifecycle entirely.
+    enrollment_status: "reconciled",
+    reconciled_at: new Date().toISOString(),
+  })
 
   const nextStudents = [...currentStudents, student]
   const nextCsv = stringifyStudentsCsv(nextStudents)
@@ -420,6 +435,9 @@ export async function addStudentsToClassroom(
         email: githubUser.email ?? "",
         section: "",
         github_id: String(githubUser.id),
+        // Resolved GitHub identity at add time -> bypasses email-first onboarding.
+        enrollment_status: "reconciled",
+        reconciled_at: new Date().toISOString(),
       })
 
       existingUsernameKeys.add(student.username.toLowerCase())

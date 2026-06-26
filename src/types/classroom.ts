@@ -92,6 +92,14 @@ export type AssignmentTest = {
   points: number
 }
 
+// Lifecycle for an email-first enrolment. A row may exist before the GitHub
+// account is known: "invited" (email invite sent, no GitHub identity yet),
+// "onboarded" (student self-reported via the onboarding repo, not yet folded
+// into the roster), "reconciled" (username/github_id bound into this row).
+// Legacy rows (pre-feature) carry "" and are treated as already reconciled when
+// they have a github_id, else as invited.
+export type EnrollmentStatus = "invited" | "onboarded" | "reconciled" | ""
+
 export type Student = {
   username: string
   first_name: string
@@ -99,4 +107,14 @@ export type Student = {
   email: string
   section: string
   github_id: string
+  // Email-first onboarding columns (added after the original 6). Optional in
+  // the type so legacy CSVs and existing callers stay valid; the CSV layer
+  // defaults them to "".
+  enrollment_status?: EnrollmentStatus
+  // Cached emailHash(email) — the deterministic onboarding-repo key, so the
+  // teacher reconcile loop fetches the repo directly without re-hashing.
+  email_hash?: string
+  invited_at?: string
+  reconciled_at?: string
 }
+
