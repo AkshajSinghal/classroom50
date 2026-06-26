@@ -1127,9 +1127,12 @@ export async function unenrollStudent(
 ) {
   const { org, classroom, student: toRemoveStudent, removeFromOrg } = input
   const normalizedUsername = toRemoveStudent?.username.trim()
+  const normalizedEmail = toRemoveStudent?.email?.trim()
 
-  if (!normalizedUsername) {
-    throw new Error("Student's GitHub username is required")
+  // A mid-onboarding email row has no username yet, so accept an email as the
+  // identifier too. One of the two must be present to target a row.
+  if (!normalizedUsername && !normalizedEmail) {
+    throw new Error("Student's GitHub username or email is required")
   }
 
   // Resolve the slug concurrently with the removal commit. It can reject on a
@@ -1139,8 +1142,11 @@ export async function unenrollStudent(
 
   // Read org state and viewer before the commit. State is null on read failure
   // (we then skip the org action). The viewer guards against removing the
-  // signed-in teacher from their own org.
-  const orgStatePromise = getOrgMembershipState(client, org, normalizedUsername)
+  // signed-in teacher from their own org. An email-only row has no username to
+  // resolve org state for, so skip that read.
+  const orgStatePromise = normalizedUsername
+    ? getOrgMembershipState(client, org, normalizedUsername)
+    : Promise.resolve(null)
   orgStatePromise.catch(() => {})
   const viewerPromise = getAuthenticatedUser(client)
   viewerPromise.catch(() => {})
@@ -1158,26 +1164,32 @@ export async function unenrollStudent(
 
   const currentStudents = parseStudentsCsv(currentCsv)
 
-  const exists = currentStudents.some(
-    (student) =>
-      student.username.toLowerCase() ===
-        toRemoveStudent.username.toLowerCase() ||
-      student.github_id === String(toRemoveStudent.github_id),
-  )
-
-  if (!exists) {
-    throw new Error(
-      `Student ${toRemoveStudent.username} does not exist in roster!`,
+  // Match the target row. Prefer username/github_id; fall back to email for a
+  // not-yet-reconciled email row that has neither.
+  const sameRow = (student: StudentCsvRow) => {
+    if (normalizedUsername || toRemoveStudent.github_id) {
+      return (
+        student.username.toLowerCase() ===
+          toRemoveStudent.username.toLowerCase() ||
+        (Boolean(student.github_id) &&
+          student.github_id === String(toRemoveStudent.github_id))
+      )
+    }
+    return (
+      Boolean(normalizedEmail) &&
+      student.email.toLowerCase() === normalizedEmail!.toLowerCase()
     )
   }
 
-  const nextStudents = [
-    ...currentStudents.filter(
-      (student) =>
-        student.username !== toRemoveStudent.username &&
-        student.github_id !== toRemoveStudent.github_id,
-    ),
-  ]
+  const exists = currentStudents.some(sameRow)
+
+  if (!exists) {
+    throw new Error(
+      `Student ${toRemoveStudent.username || normalizedEmail} does not exist in roster!`,
+    )
+  }
+
+  const nextStudents = currentStudents.filter((student) => !sameRow(student))
   const nextCsv = stringifyStudentsCsv(nextStudents)
 
   const tree = await createGitTree(client, {
@@ -1195,7 +1207,7 @@ export async function unenrollStudent(
 
   const newCommit = await createGitCommit(client, {
     org,
-    message: `Remove student: ${classroom}/${toRemoveStudent.username}`,
+    message: `Remove student: ${classroom}/${toRemoveStudent.username || normalizedEmail}`,
     tree_sha: tree.sha,
     parents: [ref.object.sha],
   })
@@ -1205,23 +1217,57 @@ export async function unenrollStudent(
   // Commit landed, so every org-side step below is a non-fatal warning.
   const warnings: string[] = []
 
+  // Reset onboarding for a not-yet-reconciled student: delete their onboarding
+  // repo (named by github_id when known, else email hash — mirroring the create
+  // and reconcile branches) so a re-invite starts clean. Only for unreconciled
+  // rows; a reconciled student's repo was already cleaned up at reconcile time.
+  // Best-effort and idempotent (404 = already gone); a failed delete falls back
+  // to archive so the repo doesn't linger as an active onboarding repo.
+  if (toRemoveStudent.enrollment_status !== "reconciled") {
+    const onboardingRepo = toRemoveStudent.github_id
+      ? onboardingRepoNameByGithubId(toRemoveStudent.github_id)
+      : toRemoveStudent.email_hash
+        ? onboardingRepoNameFromHash(toRemoveStudent.email_hash)
+        : undefined
+
+    if (onboardingRepo) {
+      try {
+        await deleteRepo(client, { owner: org, repo: onboardingRepo })
+      } catch (err) {
+        if (err instanceof GitHubAPIError && err.isForbidden) {
+          // No delete permission (older session): archive instead so the repo
+          // is no longer a live onboarding target.
+          try {
+            await archiveRepo(client, { owner: org, repo: onboardingRepo })
+          } catch {
+            // ignore — best-effort reset
+          }
+        }
+        // Other errors (incl. 404 handled inside deleteRepo) are non-fatal.
+      }
+    }
+  }
+
   // Drop from the classroom team. Idempotent (404 = not a member / team gone);
-  // org membership untouched by this call.
-  try {
-    const teamSlug = await teamSlugPromise
-    await removeUserFromTeam(client, {
-      org,
-      teamSlug,
-      username: normalizedUsername,
-    })
-  } catch (err) {
-    console.error("team removal failed (student unenrolled):", err)
-    const detail = getErrorMessage(err)
-    warnings.push(
-      `${toRemoveStudent.username} was removed from the roster, but removing ` +
-        `them from the classroom team failed (${detail}); they may keep read on ` +
-        `private templates until it's retried.`,
-    )
+  // org membership untouched by this call. Skipped for an email-only row (no
+  // username to target, and they may not be in the org/team yet).
+  if (normalizedUsername) {
+    try {
+      const teamSlug = await teamSlugPromise
+      await removeUserFromTeam(client, {
+        org,
+        teamSlug,
+        username: normalizedUsername,
+      })
+    } catch (err) {
+      console.error("team removal failed (student unenrolled):", err)
+      const detail = getErrorMessage(err)
+      warnings.push(
+        `${toRemoveStudent.username} was removed from the roster, but removing ` +
+          `them from the classroom team failed (${detail}); they may keep read on ` +
+          `private templates until it's retried.`,
+      )
+    }
   }
 
   // pending invite -> always cancel; active member -> remove only if opted in;
