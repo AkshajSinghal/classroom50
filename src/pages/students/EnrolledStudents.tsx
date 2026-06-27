@@ -1,4 +1,13 @@
-import { Check, Copy, RefreshCw, Send, Trash } from "lucide-react"
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Link as LinkIcon,
+  RefreshCw,
+  Send,
+  Trash,
+} from "lucide-react"
 
 import { getName, getInitials, isSameGitHubUser } from "@/util/students"
 import { formatInvitedAt } from "@/util/formatDate"
@@ -12,19 +21,16 @@ import { resendOrgInvitation, getErrorMessage } from "@/hooks/github/mutations"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
-import {
-  githubKeys,
-  invalidateInviteQueries as invalidateInviteQueriesForOrg,
-} from "@/hooks/github/queries"
-import useGetOrgMembers from "@/hooks/useGetOrgMembers"
-import useGetOrgInvitations from "@/hooks/useGetOrgInvitations"
+import { invalidateInviteQueries as invalidateInviteQueriesForOrg } from "@/hooks/github/queries"
+import { useUpdateRosterCache } from "@/hooks/useGetStudents"
+import useRosterStatus from "@/hooks/useRosterStatus"
 import { useGitHubViewer } from "@/hooks/github/hooks"
+import { type InviteStatus } from "@/util/inviteStatus"
 import {
-  buildInviteStatusLookup,
-  type InviteStatus,
-  type StudentInviteStatus,
-} from "@/util/inviteStatus"
-import { isReconcilableRow } from "@/util/onboarding"
+  applyReconciledToRoster,
+  removeFromRoster,
+  studentKey,
+} from "@/util/roster"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 const UnenrollStudentButton = ({
@@ -49,13 +55,12 @@ const UnenrollStudentButton = ({
   const [open, setOpen] = useState(false)
   const [removeFromOrg, setRemoveFromOrg] = useState(false)
 
-  // Only an active member offers the org-removal choice. Pending invites are
-  // always cancelled, non-members have nothing to remove, and the signed-in
-  // account can't remove itself here.
+  // Only an active member offers the org-removal choice; pending invites are
+  // cancelled, non-members have nothing to remove, and self can't remove itself.
   const isMember = status === "member"
   const canRemoveFromOrg = isMember && !isSelf
-  // Email-invited rows have no username yet; show the email so the button and
-  // dialog are identifiable before reconciliation.
+  // Email-invited rows have no username yet; show the email so the row is
+  // identifiable before reconciliation.
   const label = student.username || student.email
   const dialogRef = useRef<HTMLDialogElement | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -87,8 +92,8 @@ const UnenrollStudentButton = ({
         removeFromOrg: canRemoveFromOrg ? removeFromOrg : false,
       })
       // Key the warning by a stable identity (username, else email): this button
-      // unmounts on roster refetch, and keying stops a concurrent clean unenroll
-      // from clobbering it.
+      // unmounts on refetch, and keying stops a concurrent clean unenroll from
+      // clobbering it.
       onRemoveStudent(student.username || student.email, result.teamWarning)
       setOpen(false)
       setRemoveFromOrg(false)
@@ -220,71 +225,78 @@ const UnenrollStudentButton = ({
   )
 }
 
-const InviteStatusBadge = ({ status }: { status: InviteStatus }) => {
-  if (status === "pending") {
-    return (
-      <span className="badge badge-warning badge-soft">Pending invite</span>
-    )
-  }
-  if (status === "expired") {
-    return <span className="badge badge-error badge-soft">Expired invite</span>
-  }
-  if (status === "onboarding") {
-    return <span className="badge badge-info badge-soft">Enrolled</span>
-  }
-  if (status === "none") {
-    return <span className="badge badge-ghost badge-soft">Not in org</span>
-  }
-  return null
-}
-
-// A copy-paste link teachers share so students accept on GitHub. Same org-wide
-// URL for everyone (no per-student token).
-const InviteLink = ({ org }: { org: string }) => {
+// Native GitHub org-invite link, behind an expandable toggle (the in-app
+// onboarding link is the primary path). Same org-wide URL for everyone.
+const InviteLink = ({
+  org,
+  expanded,
+  onToggle,
+}: {
+  org: string
+  expanded: boolean
+  onToggle: () => void
+}) => {
   const inviteUrl = `https://github.com/orgs/${org}/invitation`
   const { copied, copy } = useCopyToClipboard(inviteUrl)
 
   return (
-    <div className="flex flex-col gap-1 px-6 py-3 border-b border-base-300 bg-base-200/40">
-      <span className="text-xs font-medium text-base-content/60">
-        Share this link so students can accept their organization invite:
-      </span>
-      <div className="join w-full">
-        <input
-          type="text"
-          readOnly
-          value={inviteUrl}
-          aria-label="Student invite link"
-          onFocus={(event) => event.currentTarget.select()}
-          className="input input-sm input-bordered join-item w-full font-mono text-xs"
-        />
-        <button
-          type="button"
-          className="btn btn-sm join-item"
-          onClick={() => void copy()}
-          aria-label="Copy invite link"
-        >
-          {copied ? (
-            <>
-              <Check className="size-4 text-success" />
-              Copied
-            </>
-          ) : (
-            <>
-              <Copy className="size-4" />
-              Copy
-            </>
-          )}
-        </button>
-      </div>
+    <div className="border-b border-base-300 bg-base-200/40 px-6 py-2">
+      <button
+        type="button"
+        className="flex w-full items-center gap-1 text-xs font-medium text-base-content/60 hover:text-base-content"
+        onClick={onToggle}
+        aria-expanded={expanded}
+      >
+        {expanded ? (
+          <ChevronDown className="size-3.5" />
+        ) : (
+          <ChevronRight className="size-3.5" />
+        )}
+        Native GitHub organization invite link
+      </button>
+      {expanded ? (
+        <div className="mt-2 flex flex-col gap-1">
+          <span className="text-xs text-base-content/50">
+            Advanced: share this so students can accept the org invite directly
+            on GitHub. Most students use the onboarding link above instead.
+          </span>
+          <div className="join w-full">
+            <input
+              type="text"
+              readOnly
+              value={inviteUrl}
+              aria-label="Student invite link"
+              onFocus={(event) => event.currentTarget.select()}
+              className="input input-sm input-bordered join-item w-full font-mono text-xs"
+            />
+            <button
+              type="button"
+              className="btn btn-sm join-item"
+              onClick={() => void copy()}
+              aria-label="Copy invite link"
+            >
+              {copied ? (
+                <>
+                  <Check className="size-4 text-success" />
+                  Copied
+                </>
+              ) : (
+                <>
+                  <Copy className="size-4" />
+                  Copy
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
 
-// Per-student secure onboarding link (the opt-in flow). Carries the student's
-// email prefill plus the unguessable invite token, so the onboarding repo is
-// named by token and only the recipient of this link can create it. The teacher
-// emails it to that one student.
+// Per-student secure onboarding link (icon-only): carries the email prefill and
+// unguessable invite token so reconcile binds the self-report to this row. Shown
+// only for a pending-invite student.
 const SecureLinkButton = ({
   org,
   classroom,
@@ -304,28 +316,22 @@ const SecureLinkButton = ({
   return (
     <button
       type="button"
-      className="btn btn-xs"
+      className="btn btn-xs btn-square btn-ghost"
       onClick={() => void copy()}
       aria-label={`Copy secure onboarding link for ${email}`}
+      title="Copy secure onboarding link"
     >
       {copied ? (
-        <>
-          <Check className="size-4 text-success" />
-          Copied
-        </>
+        <Check className="size-4 text-success" />
       ) : (
-        <>
-          <Copy className="size-4" />
-          Secure link
-        </>
+        <LinkIcon className="size-4" />
       )}
     </button>
   )
 }
 
 // Classroom-wide onboarding link. Students open it after accepting the org
-// invite, enter their email, and self-report their GitHub identity (which the
-// teacher folds in via "Reconcile onboarding"). Same URL for everyone; the
+// invite and self-report their GitHub identity. Same URL for everyone; the
 // student supplies the email, so no per-student token is needed.
 const OnboardingLink = ({
   org,
@@ -385,56 +391,38 @@ const EnrolledStudents = ({
 }) => {
   const client = useGitHubClient()
   const queryClient = useQueryClient()
-  // Keyed by username so a clean unenroll can't clobber another student's
-  // unread warning.
+  const updateRosterCache = useUpdateRosterCache(org, classroom)
+  // Keyed by username so a clean unenroll can't clobber another student's warning.
   const [teamWarnings, setTeamWarnings] = useState<Record<string, string>>({})
   const [confirmResendAllOpen, setConfirmResendAllOpen] = useState(false)
+  // Native GitHub org-invite link is secondary; keep it behind a toggle.
+  const [showGithubInvite, setShowGithubInvite] = useState(false)
   const [resendingUsernames, setResendingUsernames] = useState<Set<string>>(
     new Set(),
   )
 
-  const { members } = useGetOrgMembers(org)
   const { data: viewer } = useGitHubViewer()
   const {
-    invitations,
-    failedInvitations,
-    isLoading: invitesLoading,
-    isForbidden: invitesForbidden,
-  } = useGetOrgInvitations(org)
+    statusByKey,
+    getStatus,
+    statusAvailable,
+    reportsErrored,
+    rosterReady,
+    partition: { readyToConfirm, awaitingEnrollment, enrolled },
+  } = useRosterStatus(org, classroom, students)
 
-  const statusLoading = members === undefined || invitesLoading
-  // Owner-only endpoints 403 for non-owners; hide status and explain instead.
-  const statusAvailable = !invitesForbidden
-
-  const getStatus = useMemo(
-    () =>
-      buildInviteStatusLookup(members ?? [], invitations, failedInvitations),
-    [members, invitations, failedInvitations],
-  )
-
-  // Stable per-row identity: email rows have no username yet, so fall back to
-  // email (and an index guard) to avoid empty-string key collisions across
-  // multiple email-only rows.
-  const studentKey = (student: Student, index: number) =>
-    student.username || student.email || `row-${index}`
-
-  const statusByKey = useMemo(() => {
-    const map = new Map<string, StudentInviteStatus>()
-    if (statusLoading || !statusAvailable) return map
-    students.forEach((student, index) => {
-      map.set(studentKey(student, index), getStatus(student))
-    })
-    return map
-  }, [students, getStatus, statusLoading, statusAvailable])
-
-  // Every non-member (pending, expired, onboarding, or never invited): the
-  // "Resend invites" target. Onboarding rows are excluded — they've accepted and
-  // just need reconciliation, not another invite.
+  // Non-members still needing an invite re-sent: pending, expired, or never
+  // invited. Excludes onboarded/awaiting rows — they've accepted.
   const nonMemberStudents = useMemo(
     () =>
-      students.filter((student, index) => {
-        const status = statusByKey.get(studentKey(student, index))?.status
-        return status != null && status !== "member" && status !== "onboarding"
+      students.filter((student) => {
+        const status = statusByKey.get(studentKey(student))?.status
+        return (
+          status != null &&
+          status !== "member" &&
+          status !== "onboarding" &&
+          status !== "ready"
+        )
       }),
     [students, statusByKey],
   )
@@ -452,11 +440,9 @@ const EnrolledStudents = ({
   const invalidateInviteQueries = () =>
     invalidateInviteQueriesForOrg(queryClient, org)
 
-  // Resend (or first-time invite for "none"). Returns true on success. "expired"
-  // carries an invitation id we cancel first; "none" is a plain create.
-  // What the resend actually did, so callers don't over-report: "invited" = a
-  // fresh invite sent; "pending"/"active" = no-op (still valid / already member);
-  // "skipped" = couldn't attempt (missing id).
+  // Resend (or first-time invite for "none"). "expired" carries an invitation id
+  // we cancel first; "none" is a plain create. Outcome distinguishes what
+  // happened: "invited" = sent; "pending"/"active" = no-op; "skipped" = missing id.
   type ResendOutcome = "invited" | "pending" | "active" | "skipped"
 
   const resendForStudent = async (student: Student): Promise<ResendOutcome> => {
@@ -483,20 +469,12 @@ const EnrolledStudents = ({
     mutationFn: (student: Student) => resendForStudent(student),
   })
 
-  // Rows still awaiting onboarding reconciliation (invited/onboarded, not yet
-  // reconciled). Uses the shared isReconcilableRow predicate so this badge
-  // count can never drift from reconcileOnboarding's actual target set.
-  const pendingOnboardingCount = useMemo(
-    () => students.filter(isReconcilableRow).length,
-    [students],
-  )
-
   const [reconcileSummary, setReconcileSummary] = useState("")
 
   const reconcileMutation = useMutation({
     mutationFn: () => reconcileOnboarding(client, { org, classroom }),
     onSuccess: (result) => {
-      const parts = [`${result.reconciled.length} reconciled`]
+      const parts = [`${result.reconciled.length} enrolled`]
       if (result.deleted.length > 0) {
         parts.push(`${result.deleted.length} deleted`)
       }
@@ -505,6 +483,9 @@ const EnrolledStudents = ({
       }
       if (result.pending.length > 0) {
         parts.push(`${result.pending.length} still pending`)
+      }
+      if (result.needsAttention.length > 0) {
+        parts.push(`${result.needsAttention.length} need attention`)
       }
       if (result.unmatched.length > 0) {
         parts.push(`${result.unmatched.length} unmatched`)
@@ -515,12 +496,16 @@ const EnrolledStudents = ({
           ? `${summary}. ${result.cleanupWarning}`
           : summary,
       )
+      // Optimistically flip just-confirmed rows to "enrolled" so they move to
+      // Enrolled immediately. Don't invalidate the roster CSV query (see
+      // useUpdateRosterCache); a natural refetch reconciles later.
+      updateRosterCache((current) =>
+        applyReconciledToRoster(current, result.reconciled),
+      )
+      // Reconcile deletes/archives onboarding repos, so the ready-to-confirm
+      // self-report set is now stale.
       queryClient.invalidateQueries({
-        queryKey: githubKeys.csvFile(
-          org,
-          "classroom50",
-          `${classroom}/students.csv`,
-        ),
+        queryKey: ["github", "onboarding-reports", org, classroom],
       })
       invalidateInviteQueries()
     },
@@ -550,7 +535,7 @@ const EnrolledStudents = ({
   }
 
   // Sequential to respect GitHub's 50/24h invite cap and secondary rate limits.
-  // Stops early on a rate-limit error to avoid burning the cap further.
+  // Stops early on a rate-limit error.
   const handleResendAll = async () => {
     let resent = 0
     let alreadyValid = 0
@@ -563,8 +548,7 @@ const EnrolledStudents = ({
       try {
         const outcome = await resendForStudent(student)
         if (outcome === "invited") resent++
-        // "pending"/"active" = already has a valid invite / is a member; no
-        // invite was re-sent, but it isn't a failure either.
+        // "pending"/"active" = already valid / a member; not a failure.
         else if (outcome === "pending" || outcome === "active") alreadyValid++
         else failures.push(student.username)
       } catch (err) {
@@ -605,197 +589,277 @@ const EnrolledStudents = ({
     }
   }
 
-  return (
-    <div className="card card-border w-full bg-base-100 overflow-hidden shadow-sm">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-base-300">
-        <h2 className="text-lg font-semibold">Enrolled Students</h2>
+  const renderStudentRow = (student: Student) => {
+    const rowKey = studentKey(student)
+    const statusEntry = statusByKey.get(rowKey)
+    const status = statusEntry?.status
+    // Per-row invite (re)send: offered for an outstanding invite (pending/expired)
+    // or a never-invited row (none). An email-only row (no github_id) can't be
+    // org-resent — skip it (also avoids an empty-username key collision below).
+    const showResend =
+      (status === "pending" || status === "expired" || status === "none") &&
+      Boolean(student.github_id)
+    const isResending = resendingUsernames.has(student.username)
+    const invitedAtLabel =
+      status === "pending" || status === "expired"
+        ? formatInvitedAt(statusEntry?.invitedAt)
+        : null
+    const isSelf = isSameGitHubUser(viewer, student)
+    // Email-only rows have no username yet; show the email so the row is
+    // identifiable before reconciliation.
+    const displayName = student.username
+      ? getName(student.username, students)
+      : student.email
+    const displayHandle = student.username || student.email
 
-        <div className="flex items-center gap-2">
-          {pendingOnboardingCount > 0 ? (
+    return (
+      <li
+        key={rowKey}
+        className="flex items-center justify-between gap-4 px-6 py-4"
+      >
+        <div className="min-w-0 flex-1">
+          <Avatar
+            name={displayName}
+            github={displayHandle}
+            initials={
+              student.username
+                ? getInitials(student.username, students)
+                : (student.email[0]?.toUpperCase() ?? "?")
+            }
+          />
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          {statusAvailable && invitedAtLabel ? (
+            <span className="whitespace-nowrap text-xs text-base-content/50">
+              Invited {invitedAtLabel}
+            </span>
+          ) : null}
+
+          {statusAvailable && showResend ? (
             <button
               type="button"
-              className="btn btn-sm btn-outline"
+              className="btn btn-xs"
+              disabled={isResending}
+              aria-label={
+                status === "none"
+                  ? `Send invite to ${student.username}`
+                  : `Re-send invite to ${student.username}`
+              }
+              onClick={() => void handleResend(student)}
+            >
+              {isResending ? (
+                <span className="loading loading-spinner loading-xs" />
+              ) : status === "none" ? (
+                "Send invite"
+              ) : (
+                "Re-send"
+              )}
+            </button>
+          ) : null}
+
+          {statusAvailable && status === "pending" && student.invite_token ? (
+            <SecureLinkButton
+              org={org}
+              classroom={classroom}
+              email={student.email}
+              token={student.invite_token}
+            />
+          ) : null}
+
+          <UnenrollStudentButton
+            org={org}
+            classroom={classroom}
+            student={student}
+            status={statusAvailable ? status : undefined}
+            isSelf={isSelf}
+            onRemoveStudent={(username: string, warning?: string) => {
+              // Record only a real warning; a clean unenroll must not wipe one.
+              if (warning) {
+                setWarning(username, warning)
+              }
+              // Drop the row from the cached roster immediately (see
+              // useUpdateRosterCache). Keyed by the same stable studentKey.
+              updateRosterCache((current) => removeFromRoster(current, rowKey))
+              // Unenroll may cancel a pending invite or remove a member.
+              invalidateInviteQueries()
+            }}
+          />
+        </div>
+      </li>
+    )
+  }
+
+  return (
+    <div className="flex w-full flex-col gap-6">
+      {/* Action results surface here at the top: the triggering section often
+          unmounts afterward (e.g. confirming empties the Ready section). */}
+      {reconcileSummary || Object.keys(teamWarnings).length > 0 ? (
+        <div className="flex w-full flex-col gap-2">
+          {reconcileSummary ? (
+            <div role="alert" className="alert alert-info alert-soft">
+              <span className="text-sm">Enrollment: {reconcileSummary}</span>
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs"
+                onClick={() => setReconcileSummary("")}
+              >
+                Dismiss
+              </button>
+            </div>
+          ) : null}
+
+          {Object.entries(teamWarnings).map(([username, warning]) => (
+            <div
+              key={username}
+              role="alert"
+              className="alert alert-warning alert-soft"
+            >
+              <span className="text-sm">{warning}</span>
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs"
+                onClick={() => dismissWarning(username)}
+              >
+                Dismiss
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {/* Wait on all partition queries to avoid an onboarded student flashing in
+          "Awaiting enrollment" before jumping to "Ready". The Invite card still
+          renders below so links are available while status loads. */}
+      {!rosterReady ? (
+        <div className="card card-border w-full bg-base-100 shadow-sm">
+          <div className="flex items-center justify-center gap-3 px-6 py-12 text-base-content/50">
+            <span className="loading loading-spinner loading-md" />
+            <span className="text-sm">Loading roster...</span>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Ready for enrollment confirmation (state 2). */}
+      {rosterReady && readyToConfirm.length > 0 ? (
+        <div className="card card-border w-full overflow-hidden border-info/30 bg-info/5 shadow-sm">
+          <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-info/20">
+            <div className="flex flex-col">
+              <h2 className="text-lg font-semibold text-info">
+                Ready for enrollment confirmation
+              </h2>
+              <span className="mt-0.5 text-sm text-base-content/60">
+                {readyToConfirm.length} student
+                {readyToConfirm.length === 1 ? " has" : "s have"} onboarded.
+                Confirm to add them to your roster.
+              </span>
+            </div>
+            <button
+              type="button"
+              className="btn btn-sm btn-primary shrink-0"
               onClick={() => reconcileMutation.mutate()}
               disabled={reconcileMutation.isPending}
             >
               <RefreshCw
                 className={`size-4 ${reconcileMutation.isPending ? "animate-spin" : ""}`}
               />
-              Confirm enrollment ({pendingOnboardingCount})
+              Confirm enrollment ({readyToConfirm.length})
             </button>
-          ) : null}
-
-          {statusAvailable ? (
-            <button
-              type="button"
-              className="btn btn-sm btn-primary"
-              onClick={() => setConfirmResendAllOpen(true)}
-            >
-              <Send className="size-4" />
-              Resend invites
-            </button>
-          ) : null}
-
-          <div className="badge badge-primary badge-soft text-base">
-            {students.length}
           </div>
+          <ul className="divide-y divide-base-300 bg-base-100">
+            {readyToConfirm.map((student) => renderStudentRow(student))}
+          </ul>
         </div>
+      ) : null}
+
+      {/* Invite students: share links. */}
+      <div className="card card-border w-full overflow-hidden bg-base-100 shadow-sm">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-base-300">
+          <h2 className="text-lg font-semibold">Invite students</h2>
+        </div>
+        <OnboardingLink org={org} classroom={classroom} />
+        <InviteLink
+          org={org}
+          expanded={showGithubInvite}
+          onToggle={() => setShowGithubInvite((prev) => !prev)}
+        />
+
+        {!statusAvailable ? (
+          <div role="alert" className="alert alert-info alert-soft mx-6 my-4">
+            <span className="text-sm">
+              Invite status requires organization owner access, so it isn't
+              shown here.
+            </span>
+          </div>
+        ) : null}
+
+        {statusAvailable && reportsErrored ? (
+          <div
+            role="alert"
+            className="alert alert-warning alert-soft mx-6 my-4"
+          >
+            <span className="text-sm">
+              Couldn&apos;t check who has onboarded (the organization
+              repositories couldn&apos;t be read). The &quot;Ready for
+              enrollment confirmation&quot; list may be incomplete — refresh to
+              retry.
+            </span>
+          </div>
+        ) : null}
       </div>
 
-      <InviteLink org={org} />
-      <OnboardingLink org={org} classroom={classroom} />
-
-      {reconcileSummary ? (
-        <div role="alert" className="alert alert-info alert-soft mx-6 mt-4">
-          <span className="text-sm">Enrollment: {reconcileSummary}</span>
-          <button
-            type="button"
-            className="btn btn-ghost btn-xs"
-            onClick={() => setReconcileSummary("")}
-          >
-            Dismiss
-          </button>
-        </div>
-      ) : null}
-
-      {!statusAvailable ? (
-        <div role="alert" className="alert alert-info alert-soft mx-6 mt-4">
-          <span className="text-sm">
-            Invite status requires organization owner access, so it isn't shown
-            here.
-          </span>
-        </div>
-      ) : null}
-
-      {Object.entries(teamWarnings).map(([username, warning]) => (
-        <div
-          key={username}
-          role="alert"
-          className="alert alert-warning alert-soft mx-6 mt-4"
-        >
-          <span className="text-sm">{warning}</span>
-          <button
-            type="button"
-            className="btn btn-ghost btn-xs"
-            onClick={() => dismissWarning(username)}
-          >
-            Dismiss
-          </button>
-        </div>
-      ))}
-
-      <ul className="divide-y divide-base-300">
-        {students?.map((student, index) => {
-          const rowKey = studentKey(student, index)
-          const statusEntry = statusByKey.get(rowKey)
-          const status = statusEntry?.status
-          // Resend targets a GitHub org invite, which needs a github_id; an
-          // email-only row (no github_id yet) can't be org-resent — it just
-          // needs the onboarding link — so don't offer Re-send for it. This
-          // also avoids an empty-username ("") key collision across email rows
-          // in the resend spinner / warning state below.
-          const showResend =
-            (status === "expired" || status === "none") &&
-            Boolean(student.github_id)
-          const isResending = resendingUsernames.has(student.username)
-          const invitedAtLabel =
-            status === "pending" || status === "expired"
-              ? formatInvitedAt(statusEntry?.invitedAt)
-              : null
-          const isSelf = isSameGitHubUser(viewer, student)
-          // Email-only rows have no username yet; show the email so the row is
-          // identifiable before reconciliation fills in the GitHub handle.
-          const displayName = student.username
-            ? getName(student.username, students)
-            : student.email
-          const displayHandle = student.username || student.email
-
-          return (
-            <li
-              key={rowKey}
-              className="flex items-center gap-4 px-6 py-4 justify-between"
-            >
-              <Avatar
-                name={displayName}
-                github={displayHandle}
-                initials={
-                  student.username
-                    ? getInitials(student.username, students)
-                    : (student.email[0]?.toUpperCase() ?? "?")
-                }
-              />
-
-              <div className="flex items-center gap-2">
-                {statusAvailable && status ? (
-                  <div className="flex flex-col items-end gap-0.5">
-                    <InviteStatusBadge status={status} />
-                    {invitedAtLabel ? (
-                      <span className="text-xs text-base-content/50">
-                        Invited {invitedAtLabel}
-                      </span>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {statusAvailable && showResend ? (
-                  <button
-                    type="button"
-                    className="btn btn-xs"
-                    disabled={isResending}
-                    aria-label={
-                      status === "none"
-                        ? `Send invite to ${student.username}`
-                        : `Re-send invite to ${student.username}`
-                    }
-                    onClick={() => void handleResend(student)}
-                  >
-                    {isResending ? (
-                      <span className="loading loading-spinner loading-xs" />
-                    ) : status === "none" ? (
-                      "Send invite"
-                    ) : (
-                      "Re-send"
-                    )}
-                  </button>
-                ) : null}
-
-                {student.invite_token &&
-                student.enrollment_status !== "reconciled" ? (
-                  <SecureLinkButton
-                    org={org}
-                    classroom={classroom}
-                    email={student.email}
-                    token={student.invite_token}
-                  />
-                ) : null}
-
-                <UnenrollStudentButton
-                  org={org}
-                  classroom={classroom}
-                  student={student}
-                  status={statusAvailable ? status : undefined}
-                  isSelf={isSelf}
-                  onRemoveStudent={(username: string, warning?: string) => {
-                    // Record only a real warning; a clean unenroll must not wipe one.
-                    if (warning) {
-                      setWarning(username, warning)
-                    }
-                    queryClient.invalidateQueries({
-                      queryKey: githubKeys.csvFile(
-                        org,
-                        "classroom50",
-                        `${classroom}/students.csv`,
-                      ),
-                    })
-                    // Unenroll may cancel a pending invite or remove a member.
-                    invalidateInviteQueries()
-                  }}
-                />
+      {/* Awaiting enrollment (state 1): invited, not yet onboarded. */}
+      {rosterReady && awaitingEnrollment.length > 0 ? (
+        <div className="card card-border w-full overflow-hidden bg-base-100 shadow-sm">
+          <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-base-300">
+            <div className="flex flex-col">
+              <h2 className="text-lg font-semibold">Awaiting enrollment</h2>
+              <span className="mt-0.5 text-sm text-base-content/60">
+                Invited, but haven&apos;t completed onboarding yet.
+              </span>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {statusAvailable ? (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost"
+                  onClick={() => setConfirmResendAllOpen(true)}
+                >
+                  <Send className="size-4" />
+                  Resend invites
+                </button>
+              ) : null}
+              <div className="badge badge-ghost badge-soft text-base">
+                {awaitingEnrollment.length}
               </div>
-            </li>
-          )
-        })}
-      </ul>
+            </div>
+          </div>
+          <ul className="divide-y divide-base-300">
+            {awaitingEnrollment.map((student) => renderStudentRow(student))}
+          </ul>
+        </div>
+      ) : null}
+
+      {/* Enrolled students (state 3) — reviewed last. */}
+      {rosterReady ? (
+        <div className="card card-border w-full overflow-hidden bg-base-100 shadow-sm">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-base-300">
+            <h2 className="text-lg font-semibold">Enrolled students</h2>
+            <div className="badge badge-primary badge-soft text-base">
+              {enrolled.length}
+            </div>
+          </div>
+          {enrolled.length > 0 ? (
+            <ul className="divide-y divide-base-300">
+              {enrolled.map((student) => renderStudentRow(student))}
+            </ul>
+          ) : (
+            <div className="px-6 py-10 text-center text-sm text-base-content/50">
+              No students enrolled yet.
+            </div>
+          )}
+        </div>
+      ) : null}
 
       <ConfirmModal
         open={confirmResendAllOpen}

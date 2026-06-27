@@ -8,10 +8,14 @@ import Drawer, {
 import EnrolledStudents from "@/pages/students/EnrolledStudents"
 import UploadRoster from "@/pages/students/UploadRoster"
 import { useParams } from "@tanstack/react-router"
-import useGetStudents from "@/hooks/useGetStudents"
+import { useQueryClient } from "@tanstack/react-query"
+import useGetStudents, { useUpdateRosterCache } from "@/hooks/useGetStudents"
 import useGetClassroom from "@/hooks/useGetClassroom"
+import useRosterStatus from "@/hooks/useRosterStatus"
+import { invalidateInviteQueries } from "@/hooks/github/queries"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import RequireTeacher from "@/components/RequireTeacher"
+import { toStudent } from "@/util/roster"
 
 const StudentListContent = ({
   org,
@@ -23,18 +27,47 @@ const StudentListContent = ({
   const { students } = useGetStudents(org, classroom)
   const { data: classData } = useGetClassroom(org, classroom)
   const client = useGitHubClient()
+  const queryClient = useQueryClient()
+  const updateRosterCache = useUpdateRosterCache(org, classroom)
+  // Count from the same live partition the Enrolled section uses, so header and
+  // badge agree. While status is loading/unavailable (non-owner), fall back to
+  // the CSV "enrolled" signal rather than flashing 0.
+  const { statusAvailable, statusLoading, partition } = useRosterStatus(
+    org,
+    classroom,
+    students,
+  )
+  const enrolledCount =
+    statusAvailable && !statusLoading
+      ? partition.enrolled.length
+      : students.filter((s) => s.enrollment_status === "enrolled").length
+  const className = classData?.name || classData?.short_name || "Untitled class"
 
   return (
     <>
       <h1 className="text-lg pt-8 pb-2 font-bold">Students</h1>
       <h3 className="pb-10">
-        {students.length} students enrolled in{" "}
-        {classData?.name || classData?.short_name || "Untitled class"}
+        {enrolledCount} {enrolledCount === 1 ? "student" : "students"} enrolled
+        in {className}
       </h3>
       <div className="grid grid-cols-12 gap-2">
         <div className="col-span-5 px-4">
           <AddStudent org={org} classroom={classroom} className="mb-8" />
-          <UploadRoster org={org} classroom={classroom} client={client} />
+          <UploadRoster
+            org={org}
+            classroom={classroom}
+            client={client}
+            onSuccess={(result) => {
+              // Show imported rows immediately (see useUpdateRosterCache).
+              if (result.addedStudents.length > 0) {
+                updateRosterCache((current) => [
+                  ...current,
+                  ...result.addedStudents.map(toStudent),
+                ])
+              }
+              invalidateInviteQueries(queryClient, org)
+            }}
+          />
         </div>
         <div className="col-span-7 px-4">
           <EnrolledStudents

@@ -1,14 +1,16 @@
 import { Mail, UserRound } from "lucide-react"
 import GitHub from "@/assets/github.svg?react"
-import { useForm } from "@tanstack/react-form"
+import { revalidateLogic, useForm } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import useEnsureTeam from "@/hooks/useEnsureTeam"
-import { githubKeys, invalidateInviteQueries } from "@/hooks/github/queries"
+import { invalidateInviteQueries } from "@/hooks/github/queries"
+import { useUpdateRosterCache } from "@/hooks/useGetStudents"
 import { enrollStudentInClassroom } from "@/hooks/github/mutations"
 import { inviteStudentByEmail } from "@/api/mutations/students"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { isValidEmail } from "@/util/onboarding"
+import { splitName, toStudent } from "@/util/roster"
 
 type AddStudentProps = {
   className?: string
@@ -20,35 +22,18 @@ type AddStudentFormValues = {
   name: string
   username: string
   email: string
-  secure: boolean
 }
 
-const splitName = (name: string) => {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  return { first_name: parts.at(0), last_name: parts.slice(1).join(" ") }
-}
-
-// Single add/invite form. The teacher provides any of name, GitHub username,
-// and email. When a username is given we enroll via GitHub (resolve the user,
-// add to team, send the org invite) and still store the email on the row; with
-// only an email we send an email invite. Either way the student completes their
-// roster row (name/email) through onboarding.
+// Single add/invite form. A username enrolls via GitHub (resolve, add to team,
+// send org invite) and still stores the email; email-only sends an email invite.
+// Either way the student completes their roster row through onboarding.
 const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
   const { team } = useEnsureTeam(org, classroom)
   const queryClient = useQueryClient()
   const githubClient = useGitHubClient()
+  const updateRosterCache = useUpdateRosterCache(org, classroom)
   const [warning, setWarning] = useState("")
-
-  const invalidateRoster = () => {
-    queryClient.invalidateQueries({
-      queryKey: githubKeys.csvFile(
-        org,
-        "classroom50",
-        `${classroom}/students.csv`,
-      ),
-    })
-    invalidateInviteQueries(queryClient, org)
-  }
+  const [success, setSuccess] = useState("")
 
   const addMutation = useMutation({
     mutationFn: async (value: AddStudentFormValues) => {
@@ -66,25 +51,37 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
           last_name,
           email: email || undefined,
         })
-        return result?.teamWarning ?? ""
+        return {
+          label: username,
+          warning: result?.teamWarning ?? "",
+          student: toStudent(result.student),
+        }
       }
 
-      // Email-only -> email invite. `secure` mints a per-student token so the
-      // onboarding repo is named unguessably (a unique link the teacher sends
-      // to just that student); otherwise the shared classroom-wide link is used.
+      // Email-only -> email invite. A per-student invite token is always minted,
+      // so the secure per-student onboarding link is available too.
       const result = await inviteStudentByEmail(githubClient, {
         org,
         classroom,
         email,
         first_name,
         last_name,
-        secure: value.secure,
       })
-      return result?.inviteWarning ?? ""
+      return {
+        label: email,
+        warning: result?.inviteWarning ?? "",
+        student: toStudent(result.student),
+      }
     },
-    onSuccess: (warningMessage) => {
+    onSuccess: ({ label, warning: warningMessage, student }) => {
       setWarning(warningMessage)
-      invalidateRoster()
+      // Clear the form so the next student starts clean and a stray re-click
+      // can't resubmit into a duplicate error. A warning still shows alongside.
+      setSuccess(`Added ${label}.`)
+      form.reset()
+      // Show the new row immediately (see useUpdateRosterCache).
+      updateRosterCache((current) => [...current, student])
+      invalidateInviteQueries(queryClient, org)
     },
   })
 
@@ -93,10 +90,13 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
       name: "",
       username: "",
       email: "",
-      secure: false as boolean,
     } satisfies AddStudentFormValues,
+    // Validate on submit, then re-validate on every change after the first
+    // attempt. Without this, a failed form-level validation leaves canSubmit
+    // false and the validator never re-runs, so the button never recovers.
+    validationLogic: revalidateLogic(),
     validators: {
-      onSubmit: ({ value }) => {
+      onDynamic: ({ value }) => {
         const errors: Partial<Record<keyof AddStudentFormValues, string>> = {}
         const username = value.username.trim()
         const email = value.email.trim()
@@ -113,6 +113,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
     },
     onSubmit: async ({ value }) => {
       setWarning("")
+      setSuccess("")
       await addMutation.mutateAsync(value)
     },
   })
@@ -136,6 +137,12 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
           {warning && (
             <div className="alert alert-warning alert-soft mb-2 text-sm">
               {warning}
+            </div>
+          )}
+
+          {success && (
+            <div className="alert alert-success alert-soft mb-2 text-sm">
+              {success}
             </div>
           )}
 
@@ -173,7 +180,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
                 </div>
                 {field.state.meta.errors.length > 0 && (
                   <p className="text-error text-sm mt-1">
-                    {field.state.meta.errors[0]}
+                    {String(field.state.meta.errors[0] ?? "")}
                   </p>
                 )}
               </div>
@@ -197,39 +204,12 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
                 </div>
                 {field.state.meta.errors.length > 0 && (
                   <p className="text-error text-sm mt-1">
-                    {field.state.meta.errors[0]}
+                    {String(field.state.meta.errors[0] ?? "")}
                   </p>
                 )}
               </div>
             )}
           </form.Field>
-
-          <form.Subscribe
-            selector={(state) => [state.values.username, state.values.email]}
-          >
-            {([username, email]) =>
-              !username?.trim() && email?.trim() ? (
-                <form.Field name="secure">
-                  {(field) => (
-                    <label className="flex items-start gap-2 mb-4 text-xs text-base-content/70 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        className="checkbox checkbox-sm mt-0.5"
-                        checked={field.state.value}
-                        onChange={(e) => field.handleChange(e.target.checked)}
-                      />
-                      <span>
-                        Send a unique secure link (recommended). Generates a
-                        per-student onboarding link you email to just this
-                        student, so only they can complete enrollment. Leave
-                        unchecked to use the shared classroom onboarding link.
-                      </span>
-                    </label>
-                  )}
-                </form.Field>
-              ) : null
-            }
-          </form.Subscribe>
 
           <form.Subscribe
             selector={(state) => [state.canSubmit, state.isSubmitting]}
