@@ -4,7 +4,7 @@ date: 2026-06-27
 category: ui-bugs
 module: students-roster
 problem_type: ui_bug
-component: rails_view
+component: react-query-derived-ui
 symptoms:
   - 'An onboarded student briefly appears under "Awaiting enrollment" then jumps to "Ready for enrollment confirmation" as the page finishes loading'
   - "Roster sections render with rows in the wrong bucket before settling"
@@ -37,14 +37,31 @@ On the teacher students page, a student who had already started onboarding (so a
 
 ## Solution
 
-Expose a single `rosterReady` flag from the shared `useRosterStatus` hook that is true only once **every** query the section partition depends on has settled, and hold the status-driven sections (and show a spinner) until then.
+Expose a single `rosterReady` flag from the shared `useRosterStatus` hook that is true only once **every** query the section partition depends on has settled, and hold the status-driven sections (and show a spinner) until then. The readiness predicate is a pure function (`isRosterReady` in `util/roster.ts`) so it can be unit-tested independently of the hook.
 
 ```ts
-// useRosterStatus.ts — settle ALL partition inputs before declaring ready.
+// util/roster.ts — pure, unit-tested readiness predicate.
 // "ready vs awaiting" needs the onboarding-reports query specifically; for a
 // non-owner (status unavailable) reports aren't fetched, so don't wait on them.
-const rosterReady =
-  !statusLoading && (!statusAvailable || reportsLoaded || reportsErrored)
+export function isRosterReady(input: {
+  statusLoading: boolean
+  statusAvailable: boolean
+  reportsLoaded: boolean
+  reportsErrored: boolean
+}): boolean {
+  return (
+    !input.statusLoading &&
+    (!input.statusAvailable || input.reportsLoaded || input.reportsErrored)
+  )
+}
+
+// useRosterStatus.ts — the hook wires the live query state into the predicate.
+const rosterReady = isRosterReady({
+  statusLoading,
+  statusAvailable,
+  reportsLoaded,
+  reportsErrored,
+})
 ```
 
 ```tsx
@@ -72,7 +89,7 @@ The bug is a flash-of-wrong-state from **derived state computed over multiple as
 ## Prevention
 
 - When rendering UI derived from several React Query calls, gate on a flag that reflects **all** queries feeding the derivation — not a subset. Audit: "which queries does this classification read?" must equal "which queries does the loading guard wait on?"
-- Centralize the derivation and its readiness flag in one hook (here `useRosterStatus`) so every consumer (the list and the header count) shares the same definition of "ready" and can't drift.
+- Centralize the derivation and its readiness flag so every consumer shares one definition of "ready" and can't drift. Here the partition and status live in one hook (`useRosterStatus`) consumed by both the list and the header count, and the readiness predicate is a pure function (`isRosterReady`) the hook calls — pulling the predicate out of the hook makes the dependency set explicit and unit-testable.
 - Always give the readiness flag an escape hatch for error and not-applicable states (`reportsErrored`, `!statusAvailable`) so a failed/skipped query doesn't hang the UI on a spinner.
 
 ## Related Issues
