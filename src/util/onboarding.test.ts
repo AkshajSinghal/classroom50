@@ -3,17 +3,14 @@ import {
   ONBOARDING_REPO_PREFIX,
   emailHash,
   generateInviteToken,
+  generateOnboardingSuffix,
   isReconcilableRow,
   isValidEmail,
   isValidInviteToken,
   normalizeEmail,
-  onboardingRepoCandidates,
   onboardingRepoName,
-  onboardingRepoNameByGithubId,
-  onboardingRepoNameByToken,
-  onboardingRepoNameFromHash,
+  onboardingRepoPrefixForGithubId,
   payloadEmailMatchesRow,
-  reconcileRowKey,
 } from "./onboarding"
 
 describe("normalizeEmail", () => {
@@ -46,21 +43,56 @@ describe("emailHash", () => {
   })
 })
 
+describe("generateOnboardingSuffix", () => {
+  it("returns 32 lowercase hex chars (128 bits)", () => {
+    expect(generateOnboardingSuffix()).toMatch(/^[0-9a-f]{32}$/)
+  })
+
+  it("generates distinct suffixes", () => {
+    expect(generateOnboardingSuffix()).not.toBe(generateOnboardingSuffix())
+  })
+})
+
 describe("onboardingRepoName", () => {
-  it("composes the prefix with the hash", async () => {
-    const email = "student@uni.edu"
-    const hash = await emailHash(email)
-    expect(await onboardingRepoName(email)).toBe(
-      `${ONBOARDING_REPO_PREFIX}${hash}`,
+  it("composes prefix + github-id + random suffix", () => {
+    const suffix = generateOnboardingSuffix()
+    expect(onboardingRepoName("583231", suffix)).toBe(
+      `${ONBOARDING_REPO_PREFIX}583231-${suffix}`,
     )
   })
 
-  it("matches onboardingRepoNameFromHash for the same email", async () => {
-    const email = "student@uni.edu"
-    const hash = await emailHash(email)
-    expect(await onboardingRepoName(email)).toBe(
-      onboardingRepoNameFromHash(hash),
+  it("accepts a numeric github id", () => {
+    const suffix = "a".repeat(32)
+    expect(onboardingRepoName(42, suffix)).toBe(
+      `${ONBOARDING_REPO_PREFIX}42-${suffix}`,
     )
+  })
+
+  it("is unguessable + unique: two calls for one id differ by suffix", () => {
+    const a = onboardingRepoName("42", generateOnboardingSuffix())
+    const b = onboardingRepoName("42", generateOnboardingSuffix())
+    expect(a).not.toBe(b)
+    expect(a.startsWith(onboardingRepoPrefixForGithubId("42"))).toBe(true)
+    expect(b.startsWith(onboardingRepoPrefixForGithubId("42"))).toBe(true)
+  })
+})
+
+describe("onboardingRepoPrefixForGithubId", () => {
+  it("is the prefix every repo for that github-id starts with", () => {
+    const prefix = onboardingRepoPrefixForGithubId("583231")
+    expect(prefix).toBe(`${ONBOARDING_REPO_PREFIX}583231-`)
+    expect(
+      onboardingRepoName("583231", generateOnboardingSuffix()).startsWith(
+        prefix,
+      ),
+    ).toBe(true)
+  })
+
+  it("does not match a different github-id's repo", () => {
+    const prefix = onboardingRepoPrefixForGithubId("583231")
+    expect(
+      onboardingRepoName("999", generateOnboardingSuffix()).startsWith(prefix),
+    ).toBe(false)
   })
 })
 
@@ -75,45 +107,6 @@ describe("isValidEmail", () => {
     expect(isValidEmail("nope")).toBe(false)
     expect(isValidEmail("a@b")).toBe(false)
     expect(isValidEmail("a @b.com")).toBe(false)
-  })
-})
-
-describe("onboardingRepoCandidates", () => {
-  it("includes the github-id name when github_id is present", () => {
-    expect(onboardingRepoCandidates({ github_id: "583231" })).toEqual([
-      onboardingRepoNameByGithubId("583231"),
-    ])
-  })
-
-  it("includes the email-hash name when only email_hash is present", () => {
-    expect(onboardingRepoCandidates({ email_hash: "abc123" })).toEqual([
-      onboardingRepoNameFromHash("abc123"),
-    ])
-  })
-
-  it("returns both candidates (deduped) when the row has both", () => {
-    const candidates = onboardingRepoCandidates({
-      github_id: "583231",
-      email_hash: "abc123",
-    })
-    expect(candidates).toContain(onboardingRepoNameByGithubId("583231"))
-    expect(candidates).toContain(onboardingRepoNameFromHash("abc123"))
-    expect(candidates).toHaveLength(2)
-  })
-
-  it("puts the token candidate first when present", () => {
-    const token = "a".repeat(32)
-    const candidates = onboardingRepoCandidates({
-      invite_token: token,
-      github_id: "583231",
-      email_hash: "abc123",
-    })
-    expect(candidates[0]).toBe(onboardingRepoNameByToken(token))
-    expect(candidates).toHaveLength(3)
-  })
-
-  it("returns nothing for a row with neither key", () => {
-    expect(onboardingRepoCandidates({})).toEqual([])
   })
 })
 
@@ -136,40 +129,15 @@ describe("generateInviteToken / isValidInviteToken", () => {
   })
 })
 
-describe("onboardingRepoNameByToken", () => {
-  it("composes the prefix with a tok- segment", () => {
-    const token = "b".repeat(32)
-    expect(onboardingRepoNameByToken(token)).toBe(
-      `${ONBOARDING_REPO_PREFIX}tok-${token}`,
-    )
-  })
-})
-
-describe("reconcileRowKey", () => {
-  it("prefers github_id", () => {
-    expect(reconcileRowKey({ github_id: "123", email_hash: "abc" })).toBe(
-      "id:123",
-    )
-  })
-
-  it("falls back to email_hash", () => {
-    expect(reconcileRowKey({ email_hash: "abc" })).toBe("email:abc")
-  })
-
-  it("is undefined when the row has no key", () => {
-    expect(reconcileRowKey({})).toBeUndefined()
-  })
-})
-
 describe("isReconcilableRow", () => {
   it("is true for an unreconciled row with a key", () => {
     expect(isReconcilableRow({ email_hash: "abc" })).toBe(true)
     expect(isReconcilableRow({ github_id: "123" })).toBe(true)
   })
 
-  it("is false once reconciled", () => {
+  it("is false once enrolled", () => {
     expect(
-      isReconcilableRow({ enrollment_status: "reconciled", github_id: "123" }),
+      isReconcilableRow({ enrollment_status: "enrolled", github_id: "123" }),
     ).toBe(false)
   })
 
@@ -178,7 +146,7 @@ describe("isReconcilableRow", () => {
   })
 })
 
-describe("payloadEmailMatchesRow (P0 hijack guard)", () => {
+describe("payloadEmailMatchesRow (hijack guard / email fallback)", () => {
   it("accepts a payload email that hashes to the row's email_hash", async () => {
     const email = "victim@uni.edu"
     const hash = await emailHash(email)

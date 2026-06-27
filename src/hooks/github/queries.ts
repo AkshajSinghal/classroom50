@@ -23,6 +23,13 @@ import {
 } from "./mutations"
 import { decodeBase64Utf8 } from "@/util/github"
 import { classroomPagesSegment } from "@/util/secret"
+import {
+  ONBOARDING_REPO_PREFIX,
+  ONBOARDING_YAML_PATH,
+  onboardingRepoPrefixForGithubId,
+} from "@/util/onboarding"
+import { parseOnboardingYaml, type OnboardingYaml } from "@/util/yaml"
+import { mapWithConcurrency } from "@/util/concurrency"
 import type { GetAssignmentsFileInput } from "@/api/queries/assignments"
 import type { OrgRunner, OrgRunnersResult } from "@/util/runners"
 
@@ -590,6 +597,21 @@ export async function paginateAll<T>(
   return all
 }
 
+// All onboarding repos in the org (names starting with the shared onboarding
+// prefix). Reconcile uses this because the repo name carries a browser-random
+// suffix the teacher can't recompute, so the repo can't be fetched by a derived
+// name — it must be discovered by prefix. Paginated to exhaustion.
+export async function listOnboardingRepos(
+  client: GitHubClient,
+  org: string,
+): Promise<GitHubRepo[]> {
+  const repos = await paginateAll<GitHubRepo>(
+    client,
+    (page) => `/orgs/${org}/repos?per_page=100&page=${page}&type=all`,
+  )
+  return repos.filter((repo) => repo.name.startsWith(ONBOARDING_REPO_PREFIX))
+}
+
 export async function getOrgMembers(
   client: GitHubClient,
   org: string,
@@ -879,6 +901,144 @@ export async function getClassroom50OrgSummary(
       pagesUrl: `https://${org.login}.github.io/classroom50/`,
     },
   }
+}
+
+// Max simultaneous per-repo onboarding reads. Bounded so a large class doesn't
+// fan out into hundreds of concurrent GitHub requests (secondary-rate-limit
+// territory) while still avoiding a slow strictly-sequential loop.
+const ONBOARDING_READ_CONCURRENCY = 8
+
+// One onboarding repo owned by a github-id, with its parsed self-report when
+// the YAML is readable. `payload` is null when the repo exists but its YAML
+// hasn't committed yet (a half-finished onboarding) or couldn't be parsed.
+type OwnOnboardingRepo = { repo: string; payload: OnboardingYaml | null }
+
+// List the signed-in student's own onboarding repos (by the github-id prefix),
+// reading each one's self-report YAML when present. Throws on a transient list
+// failure so callers can distinguish "no repos" from "couldn't determine" — a
+// silent degrade-to-empty would let submitOnboarding mint a duplicate repo for
+// a student who already has one (the "transient is NOT none" rule).
+async function listOwnOnboardingRepos(
+  client: GitHubClient,
+  org: string,
+  githubId: number | string,
+): Promise<OwnOnboardingRepo[]> {
+  const prefix = onboardingRepoPrefixForGithubId(githubId)
+  const repos = (await listOnboardingRepos(client, org)).filter(
+    (repo) => repo.name.startsWith(prefix) && !repo.archived,
+  )
+  const out: OwnOnboardingRepo[] = await mapWithConcurrency(
+    repos,
+    ONBOARDING_READ_CONCURRENCY,
+    async (repo) => {
+      try {
+        const payload = parseOnboardingYaml(
+          await getRepoFile(client, org, repo.name, ONBOARDING_YAML_PATH),
+        )
+        return { repo: repo.name, payload }
+      } catch {
+        // Unreadable/missing payload -> repo exists but YAML not committed yet.
+        return { repo: repo.name, payload: null }
+      }
+    },
+  )
+  return out
+}
+
+// Resolution of the student's onboarding repo for THIS classroom:
+//  - "matched":    a repo whose committed YAML names this classroom -> reuse it.
+//  - "incomplete": exactly one same-prefix repo has no committed YAML yet and no
+//                  matched repo exists -> a half-finished attempt; reuse it so a
+//                  re-submit doesn't strand the first as an orphan. (Ambiguous
+//                  when several lack a YAML -> treat as "none" and mint fresh.)
+//  - "none":       no reusable repo.
+// Throws on a transient list/read failure (propagated from listOwnOnboardingRepos).
+export type OwnOnboardingResolution =
+  | { status: "matched"; repo: string }
+  | { status: "incomplete"; repo: string }
+  | { status: "none" }
+
+export async function resolveOwnOnboardingRepo(
+  client: GitHubClient,
+  org: string,
+  githubId: number | string,
+  classroom: string,
+): Promise<OwnOnboardingResolution> {
+  const repos = await listOwnOnboardingRepos(client, org, githubId)
+
+  const matched = repos.find((r) => r.payload?.classroom === classroom)
+  if (matched) return { status: "matched", repo: matched.repo }
+
+  // Repos that exist but have no committed YAML yet. Reuse one only when it's
+  // unambiguous (exactly one), so a student mid-onboarding in another classroom
+  // can't have that classroom's lagging repo repurposed here.
+  const incomplete = repos.filter((r) => r.payload === null)
+  if (incomplete.length === 1) {
+    return { status: "incomplete", repo: incomplete[0].repo }
+  }
+  return { status: "none" }
+}
+
+// Whether the signed-in student has an onboarding repo for THIS classroom
+// (matched committed YAML, or a single in-progress repo whose YAML is still
+// landing). Used by the OnboardingPage status probe to show "pending
+// confirmation" instead of re-presenting the form on a reload.
+export async function hasActiveOnboardingForClassroom(
+  client: GitHubClient,
+  org: string,
+  githubId: number | string,
+  classroom: string,
+): Promise<boolean> {
+  const resolution = await resolveOwnOnboardingRepo(
+    client,
+    org,
+    githubId,
+    classroom,
+  )
+  return resolution.status !== "none"
+}
+
+// All onboarding self-reports in the org for a classroom: the GitHub-attested
+// identity (github_id) and claimed email parsed from each onboarding repo's
+// YAML, filtered to this classroom. The teacher roster uses this to tell a
+// student who has onboarded (repo exists -> "ready to confirm") apart from one
+// who hasn't yet ("awaiting onboarding" / a pending or expired invite).
+// Best-effort per repo: an unreadable/missing payload is skipped.
+export async function listOnboardingSelfReports(
+  client: GitHubClient,
+  org: string,
+  classroom: string,
+): Promise<{ github_id: string; email: string }[]> {
+  const repos = (await listOnboardingRepos(client, org)).filter(
+    (repo) => !repo.archived,
+  )
+  // Bounded-parallel per-repo YAML reads: a busy classroom can have dozens of
+  // outstanding onboarding repos, and a strictly sequential loop made the owner
+  // roster render wait on N serial round trips.
+  const payloads = await mapWithConcurrency(
+    repos,
+    ONBOARDING_READ_CONCURRENCY,
+    async (repo) => {
+      try {
+        return parseOnboardingYaml(
+          await getRepoFile(client, org, repo.name, ONBOARDING_YAML_PATH),
+        )
+      } catch {
+        // Unreadable/missing payload -> not a confirmed self-report; skip.
+        return null
+      }
+    },
+  )
+  const reports: { github_id: string; email: string }[] = []
+  for (const payload of payloads) {
+    if (payload && payload.classroom === classroom) {
+      reports.push({
+        github_id: String(payload.github_id),
+        email: payload.email,
+      })
+    }
+  }
+  return reports
 }
 
 export async function getRepo(

@@ -104,20 +104,26 @@ export type AssignmentTest = {
   points: number
 }
 
-// Lifecycle for an email-first enrolment. A row may exist before the GitHub
-// account is known: "invited" (email invite sent, no GitHub identity yet),
-// "onboarded" (student self-reported via the onboarding repo, not yet folded
-// into the roster), "reconciled" (username/github_id bound into this row).
-// Legacy rows (pre-feature) carry "" and are treated as already reconciled when
-// they have a github_id, else as invited.
-export type EnrollmentStatus = "invited" | "onboarded" | "reconciled" | ""
+// Lifecycle for an enrolment. A row may exist before the GitHub account is
+// known: "invited" (invite sent, no GitHub identity yet), "onboarded" (student
+// self-reported via the onboarding repo, not yet folded into the roster),
+// "enrolled" (username/github_id bound into this row and confirmed by the
+// teacher). Legacy rows (pre-feature) carry "" and are treated as already
+// enrolled when they have a github_id, else as invited.
+//
+// CLI coupling: students.csv is a data contract shared with the gh-teacher CLI
+// (a separate repo). This value was renamed "reconciled" -> "enrolled" and the
+// column "reconciled_at" -> "enrolled_at"; there is intentionally NO back-compat
+// for the old names, so the CLI must be updated to the new schema in lockstep
+// (tracked in foundation50/classroom50-cli#195).
+export type EnrollmentStatus = "invited" | "onboarded" | "enrolled" | ""
 
 // How the student was added to the roster: "github" (added by GitHub username,
 // already has github_id + team access) or "email" (invited by email, identity
-// resolved later via onboarding). "" on legacy rows. A hint for UI/analytics
-// and preferred onboarding-repo lookup order; the repo name is still resolved
-// by trying all candidates, since the student's create-time team access can
-// diverge from the invite method.
+// resolved later via onboarding). "" on legacy rows. A hint for UI/analytics;
+// reconcile no longer looks the onboarding repo up by this method — it lists
+// the onboarding repos and matches each self-report's YAML payload back to a
+// row (by invite_token, then github_id, then email).
 export type EnrollmentMethod = "github" | "email" | ""
 
 export type Student = {
@@ -132,14 +138,17 @@ export type Student = {
   // defaults them to "".
   enrollment_status?: EnrollmentStatus
   enrollment_method?: EnrollmentMethod
-  // Cached emailHash(email) — the deterministic onboarding-repo key, so the
-  // teacher reconcile loop fetches the repo directly without re-hashing.
+  // Cached emailHash(email): a stable key the teacher reconcile uses to match a
+  // student's onboarding self-report back to this row by email (the fallback
+  // after invite_token and github_id).
   email_hash?: string
-  // Per-student secure-link token (optional). Present only when the teacher
-  // sent a unique onboarding link; it names the onboarding repo unguessably
-  // (`classroom50-onboarding-tok-<token>`) so only the link holder can create
-  // it. Absent on the classroom-wide-link / username flows.
+  // Per-student secure-link invite token. Minted by default for every row so a
+  // unique secure onboarding link always exists. If the student onboards via
+  // that link, the token is written into the self-report YAML and is
+  // reconcile's strongest match key; it never names the onboarding repo.
   invite_token?: string
   invited_at?: string
-  reconciled_at?: string
+  // UTC instant the teacher's reconcile bound a GitHub identity into this row
+  // (enrollment_status -> "enrolled"). Empty until then.
+  enrolled_at?: string
 }

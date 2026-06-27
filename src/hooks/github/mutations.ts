@@ -567,11 +567,12 @@ export async function removeUserFromTeam(
   }
 }
 
-// POST /orgs/{org}/invitations. Mirrors the CLI for the id path: body is
-// invitee_id + role (no team_ids). invitee_id must be a number (a string 422s).
-// Also supports inviting by email (GitHub matches it to a verified account at
-// accept time) for the email-first enrolment flow. Exactly one of invitee_id /
-// email must be provided. Owner-only.
+// POST /orgs/{org}/invitations. Supports inviting by invitee_id or by email
+// (GitHub matches the email to a verified account at accept time). An optional
+// team_ids array auto-adds the invitee to those teams on acceptance — so an
+// email invite can land a student directly in the classroom team without a
+// separate team-add (per GitHub's org-invitation docs). Exactly one of
+// invitee_id / email must be provided. Owner-only.
 export function createOrgInvitation(
   client: GitHubClient,
   input: {
@@ -579,15 +580,24 @@ export function createOrgInvitation(
     invitee_id?: number
     email?: string
     role?: "direct_member" | "admin"
+    team_ids?: number[]
   },
 ) {
-  const { org, invitee_id, email, role = "direct_member" } = input
+  const { org, invitee_id, email, role = "direct_member", team_ids } = input
 
   if (invitee_id === undefined && !email) {
     throw new Error("createOrgInvitation requires invitee_id or email")
   }
 
-  const body = email !== undefined ? { email, role } : { invitee_id, role }
+  const body: {
+    role: string
+    invitee_id?: number
+    email?: string
+    team_ids?: number[]
+  } = email !== undefined ? { email, role } : { invitee_id, role }
+  if (team_ids && team_ids.length > 0) {
+    body.team_ids = team_ids
+  }
 
   return client.request(`/orgs/${org}/invitations`, {
     method: "POST",
@@ -704,12 +714,20 @@ type EnsureOrgMembershipResult = {
 
 // Precheck membership, only invite when neither active nor pending, and treat a
 // 422 (already member/invited) as success via a follow-up read. Mirrors the
-// CLI's inviteIfNotMember. Any other 422/error propagates.
+// CLI's inviteIfNotMember. Any other 422/error propagates. Optional teamIds are
+// attached to a freshly-created invite so accepting the single org invitation
+// activates team membership atomically (no separate, separately-accepted team
+// invite that could leave the student org-active but team-pending).
 export async function ensureOrgMembership(
   client: GitHubClient,
-  input: { org: string; username: string; inviteeId: number },
+  input: {
+    org: string
+    username: string
+    inviteeId: number
+    teamIds?: number[]
+  },
 ): Promise<EnsureOrgMembershipResult> {
-  const { org, username, inviteeId } = input
+  const { org, username, inviteeId, teamIds } = input
 
   const existing = await getOrgMembershipState(client, org, username)
   if (existing === "active" || existing === "pending") {
@@ -717,7 +735,11 @@ export async function ensureOrgMembership(
   }
 
   try {
-    await createOrgInvitation(client, { org, invitee_id: inviteeId })
+    await createOrgInvitation(client, {
+      org,
+      invitee_id: inviteeId,
+      team_ids: teamIds,
+    })
     return { state: "invited" }
   } catch (err) {
     if (err instanceof GitHubAPIError && err.status === 422) {

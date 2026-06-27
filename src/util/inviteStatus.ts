@@ -1,11 +1,14 @@
 import type { Student } from "@/types/classroom"
 import type { GitHubOrgInvitation, GitHubUser } from "@/hooks/github/types"
+import { normalizeEmail } from "@/util/onboarding"
 
 export type InviteStatus =
   | "member"
   | "pending"
   | "expired"
   | "onboarding"
+  | "ready"
+  | "removed"
   | "none"
 
 export type StudentInviteStatus = {
@@ -20,13 +23,32 @@ const lower = (value: string | null | undefined) => (value ?? "").toLowerCase()
 
 // Builds lookups once, then classifies each student. Members match on numeric
 // id (login fallback); invitations match on login / email (no invitee id).
+// onboardedReports are the parsed onboarding self-reports that currently exist
+// (one per onboarding repo): a not-yet-enrolled student who matches one has
+// onboarded and is "ready" to confirm; one who doesn't is "pending"/"expired"
+// (a live GitHub invite is still outstanding) or "onboarding" (invited, no
+// self-report yet). Pass undefined while the reports are still loading/errored
+// so a not-yet-known empty set isn't mistaken for "nobody onboarded".
 export function buildInviteStatusLookup(
   members: GitHubUser[],
   pendingInvitations: GitHubOrgInvitation[],
   failedInvitations: GitHubOrgInvitation[],
+  onboardedReports: { github_id: string; email: string }[] = [],
 ) {
   const memberIds = new Set(members.map((member) => String(member.id)))
   const memberLogins = new Set(members.map((member) => lower(member.login)))
+
+  // Onboarding self-reports indexed by both keys a roster row can match on: the
+  // GitHub id (username-invited rows already carry it) and the normalized email
+  // (email-invited rows, which have no github_id until reconcile).
+  const onboardedIds = new Set(
+    onboardedReports.map((report) => report.github_id.trim()).filter(Boolean),
+  )
+  const onboardedEmails = new Set(
+    onboardedReports
+      .map((report) => normalizeEmail(report.email))
+      .filter(Boolean),
+  )
 
   const pendingByLogin = new Map<string, GitHubOrgInvitation>()
   const pendingByEmail = new Map<string, GitHubOrgInvitation>()
@@ -52,19 +74,34 @@ export function buildInviteStatusLookup(
     const githubId = student.github_id?.trim()
     const enrollment = student.enrollment_status
 
-    // CSV is the source of truth for completeness: a reconciled row is "member"
-    // (complete) regardless of the live org lists.
-    if (enrollment === "reconciled") {
+    // CSV records completeness, but an enrolled student can later leave (or be
+    // removed from) the org. Cross-check the immutable github_id against the
+    // LIVE org members: present -> "member"; absent -> "removed" ("Not in
+    // organization"). This intentionally narrows the prior contract ("an
+    // enrolled row is member regardless of the live lists") for the
+    // membership-presence check only — completeness (enrolled) is still CSV-
+    // owned, but presence is verified against current GitHub state.
+    if (enrollment === "enrolled") {
+      if (githubId && !memberIds.has(githubId)) {
+        return { status: "removed" }
+      }
       return { status: "member" }
     }
 
-    // Not yet reconciled but invited/onboarded -> "onboarding" (awaiting the
-    // teacher's reconcile), even if the student is already an org member (the
-    // username invite flow). This is the hybrid: org lists no longer decide the
-    // onboarded/complete state; enrollment_status does.
+    // Not yet enrolled. If an onboarding self-report exists for this student
+    // (matched by github_id, or by email for an email-invited row with no id
+    // yet), they've onboarded and are READY for the teacher to confirm
+    // (state 2). Otherwise they haven't created their onboarding repo yet —
+    // surface a still-pending/expired GitHub invite so the teacher can resend,
+    // else "onboarding" (invited, nothing to confirm yet = state 1).
     if (enrollment === "invited" || enrollment === "onboarded") {
-      // Surface a still-pending/expired GitHub invite (org-list derived) so the
-      // teacher can resend; otherwise it's simply awaiting onboarding.
+      const hasOnboarded =
+        (Boolean(githubId) && onboardedIds.has(githubId)) ||
+        (Boolean(email) && onboardedEmails.has(email))
+      if (hasOnboarded) {
+        return { status: "ready" }
+      }
+
       const pendingInvite =
         (login ? pendingByLogin.get(login) : undefined) ??
         (email ? pendingByEmail.get(email) : undefined)
