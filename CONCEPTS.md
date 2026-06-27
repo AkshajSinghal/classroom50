@@ -12,7 +12,7 @@ Shared domain vocabulary for this project — entities, named processes, and sta
 
 - **Reconcile / Confirm enrollment** — the teacher action that reads the onboarding self-reports, verifies each writer's GitHub-attested identity, binds it to the matching `students.csv` row, and marks the row enrolled. "Reconcile" is the internal/process name; "Confirm enrollment" is the teacher-facing label.
 
-- **Enrollment status** — a `students.csv` lifecycle value: `invited` (invite sent, no GitHub identity bound), `onboarded` (self-reported, not yet confirmed), `enrolled` (identity bound and confirmed by the teacher). Renamed from the former `reconciled`; the CSV is a contract shared with the gh-teacher CLI.
+- **Enrollment status** — a `students.csv` lifecycle value: `invited` (invite sent / self-reported via onboarding, no GitHub identity bound and confirmed yet) and `enrolled` (identity bound and confirmed by the teacher). Renamed from the former `reconciled`; the CSV is a contract shared with the gh-teacher CLI.
 
 - **Invite token** — an unguessable per-student secret minted on every roster row. When the student onboards via their unique secure link, it is written into the self-report YAML and is reconcile's strongest match key, binding the report to the exact roster row.
 
