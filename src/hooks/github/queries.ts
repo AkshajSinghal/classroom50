@@ -23,6 +23,13 @@ import {
 } from "./mutations"
 import { decodeBase64Utf8 } from "@/util/github"
 import { classroomPagesSegment } from "@/util/secret"
+import {
+  ONBOARDING_REPO_PREFIX,
+  ONBOARDING_YAML_PATH,
+  onboardingRepoPrefixForGithubId,
+} from "@/util/onboarding"
+import { parseOnboardingYaml, type OnboardingYaml } from "@/util/yaml"
+import { mapWithConcurrency } from "@/util/concurrency"
 import type { GetAssignmentsFileInput } from "@/api/queries/assignments"
 import type { OrgRunner, OrgRunnersResult } from "@/util/runners"
 
@@ -92,9 +99,8 @@ export const githubKeys = {
     [...githubKeys.all, "releases", owner, repo] as const,
 }
 
-// Refresh the lists that drive roster invite status after enroll/resend/
-// unenroll: a resend moves an invite between pending and failed, and accepting
-// moves a user into members.
+// Refresh roster invite-status lists after enroll/resend/unenroll: invites
+// move between pending/failed/members.
 export function invalidateInviteQueries(queryClient: QueryClient, org: string) {
   queryClient.invalidateQueries({ queryKey: githubKeys.orgInvitations(org) })
   queryClient.invalidateQueries({
@@ -221,11 +227,10 @@ function isNotFoundError(error: unknown) {
   )
 }
 
-// A freshly-generated/templated repo's git-data APIs lag behind the 200 from
-// POST .../generate: reads 404 and the first write 409s "Git Repository is
-// empty" while GitHub seeds. Both are transient. A bare 409 (no empty-repo
-// message) is a real conflict — e.g. a non-fast-forward updateRef — so the 409
-// branch is gated on the message. Mirrors the CLI's isFreshRepoRetryable.
+// A freshly-generated repo's git-data APIs lag the 200 from POST .../generate:
+// reads 404 and first write 409s "Git Repository is empty" while GitHub seeds.
+// A bare 409 (no empty-repo message) is a real conflict (e.g. non-fast-forward
+// updateRef), so the 409 branch is gated on the message.
 export function isFreshRepoLagError(error: unknown) {
   if (error instanceof GitHubAPIError) {
     if (error.status === 404) {
@@ -247,12 +252,9 @@ export type FreshRepoRetryOptions = {
   shouldRetry?: (error: unknown) => boolean
 }
 
-// Retry `fn` while it hits fresh-repo lag (the window where a just-generated
-// repo's git-data APIs lag behind the 200 from POST .../generate). Single source
-// of truth for the retry/backoff policy — the branch-ref poll and the accept
-// commit sequence both use it. `fn` must re-read its own state each attempt; it
-// may throw a synthetic error to signal lag that isn't an HTTP error (e.g. a 200
-// with a blank SHA). Mirrors the CLI's CommitWithFreshRepoRetry.
+// Retry `fn` while it hits fresh-repo lag. `fn` must re-read its own state each
+// attempt and may throw a synthetic error to signal non-HTTP lag (e.g. a 200
+// with a blank SHA).
 export async function withFreshRepoRetry<T>(
   fn: () => Promise<T>,
   options: FreshRepoRetryOptions = {},
@@ -515,8 +517,8 @@ export async function getClassroom50Yaml(
   return decodeBase64Utf8(file.content)
 }
 
-// Read a file from an arbitrary repo's default branch. Used by onboarding
-// reconciliation to read the self-report YAML out of each onboarding repo.
+// Read a file from an arbitrary repo's default branch (onboarding reconcile
+// reads the self-report YAML out of each onboarding repo).
 export async function getRepoFile(
   client: GitHubClient,
   org: string,
@@ -536,13 +538,10 @@ export async function getRepoFile(
   return decodeBase64Utf8(file.content)
 }
 
-// The GitHub user ids that authored/committed the most recent change to `path`
-// in a repo. Used by onboarding reconciliation to verify the self-report was
-// actually written by the account it claims to be (the onboarding repo name is
-// a guessable function of the email, so a member could pre-create it with a
-// forged payload; the commit author/committer is GitHub-attested and cannot be
-// spoofed by a non-admin). Returns the numeric ids present on the latest commit
-// touching the path.
+// GitHub user ids on the latest commit touching `path`. Onboarding reconcile
+// uses this to verify the self-report's author: the repo name is a guessable
+// function of the email (a member could pre-create it with a forged payload),
+// but the commit author/committer is GitHub-attested and can't be spoofed.
 export async function getFileCommitAuthorIds(
   client: GitHubClient,
   org: string,
@@ -588,6 +587,20 @@ export async function paginateAll<T>(
   }
 
   return all
+}
+
+// All onboarding repos in the org (names starting with the shared prefix).
+// Discovered by prefix because the name carries a browser-random suffix the
+// teacher can't recompute, so the repo can't be fetched by a derived name.
+export async function listOnboardingRepos(
+  client: GitHubClient,
+  org: string,
+): Promise<GitHubRepo[]> {
+  const repos = await paginateAll<GitHubRepo>(
+    client,
+    (page) => `/orgs/${org}/repos?per_page=100&page=${page}&type=all`,
+  )
+  return repos.filter((repo) => repo.name.startsWith(ONBOARDING_REPO_PREFIX))
 }
 
 export async function getOrgMembers(
@@ -879,6 +892,140 @@ export async function getClassroom50OrgSummary(
       pagesUrl: `https://${org.login}.github.io/classroom50/`,
     },
   }
+}
+
+// Max simultaneous per-repo onboarding reads. Bounded so a large class doesn't
+// fan out into hundreds of concurrent requests (GitHub secondary-rate-limit
+// territory) while still beating a strictly-sequential loop.
+export const ONBOARDING_READ_CONCURRENCY = 8
+
+// One onboarding repo owned by a github-id. `payload` is null when the repo
+// exists but its YAML hasn't committed yet (half-finished) or couldn't parse.
+type OwnOnboardingRepo = { repo: string; payload: OnboardingYaml | null }
+
+// The signed-in student's own onboarding repos (by github-id prefix), each
+// with its self-report YAML when present. Throws on a transient list failure so
+// callers distinguish "no repos" from "couldn't determine" — a silent
+// degrade-to-empty would let submitOnboarding mint a duplicate repo.
+async function listOwnOnboardingRepos(
+  client: GitHubClient,
+  org: string,
+  githubId: number | string,
+): Promise<OwnOnboardingRepo[]> {
+  const prefix = onboardingRepoPrefixForGithubId(githubId)
+  const repos = (await listOnboardingRepos(client, org)).filter(
+    (repo) => repo.name.startsWith(prefix) && !repo.archived,
+  )
+  const out: OwnOnboardingRepo[] = await mapWithConcurrency(
+    repos,
+    ONBOARDING_READ_CONCURRENCY,
+    async (repo) => {
+      try {
+        const payload = parseOnboardingYaml(
+          await getRepoFile(client, org, repo.name, ONBOARDING_YAML_PATH),
+        )
+        return { repo: repo.name, payload }
+      } catch {
+        // Repo exists but YAML not committed yet.
+        return { repo: repo.name, payload: null }
+      }
+    },
+  )
+  return out
+}
+
+// The student's onboarding repo for THIS classroom:
+//  - "matched":    committed YAML names this classroom -> reuse it.
+//  - "incomplete": exactly one same-prefix repo has no committed YAML yet and
+//                  no matched repo exists -> reuse the half-finished attempt so
+//                  a re-submit doesn't strand it. (Ambiguous when several lack
+//                  a YAML -> treat as "none" and mint fresh.)
+//  - "none":       no reusable repo.
+// Throws on a transient list/read failure (propagated from listOwnOnboardingRepos).
+export type OwnOnboardingResolution =
+  | { status: "matched"; repo: string }
+  | { status: "incomplete"; repo: string }
+  | { status: "none" }
+
+export async function resolveOwnOnboardingRepo(
+  client: GitHubClient,
+  org: string,
+  githubId: number | string,
+  classroom: string,
+): Promise<OwnOnboardingResolution> {
+  const repos = await listOwnOnboardingRepos(client, org, githubId)
+
+  const matched = repos.find((r) => r.payload?.classroom === classroom)
+  if (matched) return { status: "matched", repo: matched.repo }
+
+  // Repos that exist but have no committed YAML yet. Reuse only when unambiguous
+  // (exactly one), so a student mid-onboarding in another classroom can't have
+  // that classroom's lagging repo repurposed here.
+  const incomplete = repos.filter((r) => r.payload === null)
+  if (incomplete.length === 1) {
+    return { status: "incomplete", repo: incomplete[0].repo }
+  }
+  return { status: "none" }
+}
+
+// Whether the student has an onboarding repo for THIS classroom (matched YAML,
+// or a single in-progress repo whose YAML is still landing). The OnboardingPage
+// status probe uses this to show "pending confirmation" instead of re-showing
+// the form on reload.
+export async function hasActiveOnboardingForClassroom(
+  client: GitHubClient,
+  org: string,
+  githubId: number | string,
+  classroom: string,
+): Promise<boolean> {
+  const resolution = await resolveOwnOnboardingRepo(
+    client,
+    org,
+    githubId,
+    classroom,
+  )
+  return resolution.status !== "none"
+}
+
+// All onboarding self-reports in the org for a classroom: the GitHub-attested
+// github_id and claimed email from each onboarding repo's YAML. The teacher
+// roster uses this to tell a student who has onboarded (repo exists) apart from
+// one who hasn't. Best-effort per repo: an unreadable/missing payload is skipped.
+export async function listOnboardingSelfReports(
+  client: GitHubClient,
+  org: string,
+  classroom: string,
+): Promise<{ github_id: string; email: string }[]> {
+  const repos = (await listOnboardingRepos(client, org)).filter(
+    (repo) => !repo.archived,
+  )
+  // Bounded-parallel per-repo YAML reads: a busy classroom can have dozens of
+  // outstanding onboarding repos, and a sequential loop made the owner roster
+  // wait on N serial round trips.
+  const payloads = await mapWithConcurrency(
+    repos,
+    ONBOARDING_READ_CONCURRENCY,
+    async (repo) => {
+      try {
+        return parseOnboardingYaml(
+          await getRepoFile(client, org, repo.name, ONBOARDING_YAML_PATH),
+        )
+      } catch {
+        // Unreadable/missing payload -> not a confirmed self-report; skip.
+        return null
+      }
+    },
+  )
+  const reports: { github_id: string; email: string }[] = []
+  for (const payload of payloads) {
+    if (payload && payload.classroom === classroom) {
+      reports.push({
+        github_id: String(payload.github_id),
+        email: payload.email,
+      })
+    }
+  }
+  return reports
 }
 
 export async function getRepo(

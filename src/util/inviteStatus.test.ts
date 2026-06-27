@@ -91,15 +91,67 @@ describe("buildInviteStatusLookup", () => {
     expect(lookup(student()).status).toBe("member")
   })
 
-  it("treats a reconciled row as member regardless of org lists", () => {
-    const lookup = buildInviteStatusLookup([], [], [])
-    expect(lookup(student({ enrollment_status: "reconciled" })).status).toBe(
+  it("keeps an enrolled row a member when its github_id is in the org", () => {
+    const lookup = buildInviteStatusLookup([member()], [], [])
+    expect(lookup(student({ enrollment_status: "enrolled" })).status).toBe(
       "member",
+    )
+  })
+
+  it("marks an enrolled row 'removed' when its github_id left the org", () => {
+    // Completeness stays CSV-owned, but membership presence is verified against
+    // the live org members: an enrolled student no longer in the org surfaces
+    // as "removed" ("Not in organization") rather than silently "member".
+    const lookup = buildInviteStatusLookup([], [], [])
+    expect(lookup(student({ enrollment_status: "enrolled" })).status).toBe(
+      "removed",
     )
   })
 
   it("classifies an invited-but-unreconciled row as onboarding", () => {
     const lookup = buildInviteStatusLookup([], [], [])
+    const emailRow = student({
+      username: "",
+      github_id: "",
+      enrollment_status: "invited",
+    })
+    expect(lookup(emailRow).status).toBe("onboarding")
+  })
+
+  it("classifies an invited row as 'ready' when an onboarding report matches by github_id", () => {
+    const lookup = buildInviteStatusLookup(
+      [],
+      [],
+      [],
+      [{ github_id: "583231", email: "octocat@example.com" }],
+    )
+    expect(lookup(student({ enrollment_status: "invited" })).status).toBe(
+      "ready",
+    )
+  })
+
+  it("classifies an email-invited row (no github_id) as 'ready' when a report matches by email", () => {
+    const lookup = buildInviteStatusLookup(
+      [],
+      [],
+      [],
+      [{ github_id: "999", email: "Octocat@Example.com" }],
+    )
+    const emailRow = student({
+      username: "",
+      github_id: "",
+      enrollment_status: "invited",
+    })
+    expect(lookup(emailRow).status).toBe("ready")
+  })
+
+  it("stays 'onboarding' when no onboarding report matches the row", () => {
+    const lookup = buildInviteStatusLookup(
+      [],
+      [],
+      [],
+      [{ github_id: "111", email: "someone-else@example.com" }],
+    )
     const emailRow = student({
       username: "",
       github_id: "",
