@@ -6,7 +6,7 @@ module: students-roster
 problem_type: ui_bug
 component: rails_view
 symptoms:
-  - "An onboarded student briefly appears under \"Awaiting enrollment\" then jumps to \"Ready for enrollment confirmation\" as the page finishes loading"
+  - 'An onboarded student briefly appears under "Awaiting enrollment" then jumps to "Ready for enrollment confirmation" as the page finishes loading'
   - "Roster sections render with rows in the wrong bucket before settling"
 root_cause: async_timing
 resolution_type: code_fix
@@ -32,7 +32,7 @@ On the teacher students page, a student who had already started onboarding (so a
 
 ## What Didn't Work
 
-- The existing guard gated rendering on `statusLoading`, which only tracked the **members** and **invitations** queries. It did not include the **onboarding self-reports** query. The "ready vs awaiting" distinction is computed *from* the self-reports, so once members/invitations resolved (but reports hadn't), an onboarded student was classified `onboarding` -> "Awaiting", then re-classified `ready` -> "Ready" when the reports query landed.
+- The existing guard gated rendering on `statusLoading`, which only tracked the **members** and **invitations** queries. It did not include the **onboarding self-reports** query. The "ready vs awaiting" distinction is computed _from_ the self-reports, so once members/invitations resolved (but reports hadn't), an onboarded student was classified `onboarding` -> "Awaiting", then re-classified `ready` -> "Ready" when the reports query landed.
 - Partitioning already correctly treated "reports not yet loaded" as `undefined` (so a row is never mislabeled "ready" prematurely) — but that safety meant the row fell through to "awaiting" in the meantime, which is exactly the wrong-section flash. Defaulting the other direction would instead flash rows as falsely "ready".
 
 ## Solution
@@ -67,7 +67,7 @@ The action-result banners and the "Invite students" card still render during loa
 
 ## Why This Works
 
-The bug is a flash-of-wrong-state from **derived state computed over multiple async sources that resolve independently**. A loading guard for derived UI must cover *every* input the derivation reads, not just the first one(s) to load. `statusLoading` covered two of the three inputs; the third (self-reports) is the one the "ready vs awaiting" split actually depends on, so omitting it guaranteed a transient misclassification. `rosterReady` makes the guard match the true dependency set, and the error/non-owner branches keep it from spinning forever (`reportsErrored` surfaces its own warning; a non-owner never fetches reports).
+The bug is a flash-of-wrong-state from **derived state computed over multiple async sources that resolve independently**. A loading guard for derived UI must cover _every_ input the derivation reads, not just the first one(s) to load. `statusLoading` covered two of the three inputs; the third (self-reports) is the one the "ready vs awaiting" split actually depends on, so omitting it guaranteed a transient misclassification. `rosterReady` makes the guard match the true dependency set, and the error/non-owner branches keep it from spinning forever (`reportsErrored` surfaces its own warning; a non-owner never fetches reports).
 
 ## Prevention
 
