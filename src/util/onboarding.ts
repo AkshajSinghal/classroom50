@@ -26,6 +26,15 @@ function bytesToHex(bytes: Uint8Array): string {
     .join("")
 }
 
+// 16 bytes (128 bits) of cryptographic randomness as 32-char lowercase hex.
+// Backs both the per-student invite token and the onboarding repo suffix:
+// both need an unguessable, collision-proof identifier from the same source.
+function random128BitHex(): string {
+  const bytes = new Uint8Array(16)
+  crypto.getRandomValues(bytes)
+  return bytesToHex(bytes)
+}
+
 // Optional per-student invite token. When a teacher sends a student a unique
 // secure onboarding link, we generate this random token and store it on the
 // roster row + the link. Unlike the classroom-wide link, the token is NOT
@@ -36,9 +45,7 @@ function bytesToHex(bytes: Uint8Array): string {
 // the secure link; the classroom-wide link omits it and falls back to
 // github_id / email matching.
 export function generateInviteToken(): string {
-  const bytes = new Uint8Array(16)
-  crypto.getRandomValues(bytes)
-  return bytesToHex(bytes)
+  return random128BitHex()
 }
 
 // Token names are validated before they ever flow into a YAML field or a URL,
@@ -54,9 +61,7 @@ export function isValidInviteToken(token: string): boolean {
 // repo name can't be pre-squatted by another org member. Generated fresh per
 // onboarding attempt; written nowhere else (the name itself is the only record).
 export function generateOnboardingSuffix(): string {
-  const bytes = new Uint8Array(16)
-  crypto.getRandomValues(bytes)
-  return bytesToHex(bytes)
+  return random128BitHex()
 }
 
 // The onboarding repo name: prefix + github-id + random suffix. The github-id
