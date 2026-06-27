@@ -102,23 +102,38 @@ export function isReconcilableRow(row: {
 }
 
 // Whether a self-report's claimed email matches the invited row's email_hash
-// (or email). The repo name is unguessable, but a student could self-report a
-// DIFFERENT person's email in the YAML; this binding stops a wrong-person
-// self-report being folded into someone else's row. Last-resort key (after
-// invite_token and github_id); falls through to true for a github_id-keyed row
-// with no email, where the caller relies on the commit-author identity check.
+// (or email), given the payload email's precomputed hash. The repo name is
+// unguessable, but a student could self-report a DIFFERENT person's email in
+// the YAML; this binding stops a wrong-person self-report being folded into
+// someone else's row. Last-resort key (after invite_token and github_id);
+// falls through to true for a github_id-keyed row with no email, where the
+// caller relies on the commit-author identity check. Synchronous so a caller
+// matching one payload against many rows hashes the payload email only once.
+export function rowMatchesEmailHash(
+  row: { email?: string; email_hash?: string },
+  payloadEmail: string,
+  payloadEmailHash: string,
+): boolean {
+  if (row.email_hash) {
+    return payloadEmailHash === row.email_hash
+  }
+  if (row.email?.trim()) {
+    return normalizeEmail(payloadEmail) === normalizeEmail(row.email)
+  }
+  return true
+}
+
+// Async convenience wrapper that hashes the payload email itself. Prefer
+// rowMatchesEmailHash with a precomputed hash when matching against many rows.
 export async function payloadEmailMatchesRow(
   payloadEmail: string,
   row: { email?: string; email_hash?: string },
 ): Promise<boolean> {
-  const normalized = normalizeEmail(payloadEmail)
-  if (row.email_hash) {
-    return (await emailHash(normalized)) === row.email_hash
-  }
-  if (row.email?.trim()) {
-    return normalized === normalizeEmail(row.email)
-  }
-  return true
+  return rowMatchesEmailHash(
+    row,
+    payloadEmail,
+    await emailHash(normalizeEmail(payloadEmail)),
+  )
 }
 
 // Self-report payload committed to ONBOARDING_YAML_PATH. github_username/

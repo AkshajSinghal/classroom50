@@ -34,7 +34,7 @@ import {
   isValidInviteToken,
   onboardingRepoPrefixForGithubId,
   ONBOARDING_YAML_PATH,
-  payloadEmailMatchesRow,
+  rowMatchesEmailHash,
 } from "@/util/onboarding"
 import { parseOnboardingYaml } from "@/util/yaml"
 import { mapWithConcurrency } from "@/util/concurrency"
@@ -606,7 +606,7 @@ export async function reconcileOnboarding(
     //   1. invite_token  — unguessable, issued per row; present only if the
     //      student used their secure link.
     //   2. github_id     — immutable; binds a username-invited row.
-    //   3. email         — last resort (payloadEmailMatchesRow); the email-first
+    //   3. email         — last resort (rowMatchesEmailHash); the email-first
     //      path when the student onboards via the classroom-wide link.
     // A row is matched at most once (claimedRows), so a report can't steal a row
     // another took; merely HAVING a token/github_id column doesn't exclude a row
@@ -636,18 +636,20 @@ export async function reconcileOnboarding(
       // Email is the last-resort key, for a genuinely email-first row (no token
       // and no github_id) onboarded via the classroom-wide link. Constraints:
       //  - Row must carry an email key (email_hash or email); else
-      //    payloadEmailMatchesRow returns true by fallthrough and an unrelated
+      //    rowMatchesEmailHash returns true by fallthrough and an unrelated
       //    report binds to a keyless row.
       //  - 2+ unclaimed rows matching the same email is ambiguous -> needsAttention.
       // SECURITY: the claimed email is attacker-supplied (only github_id is
       // GitHub-attested), so this is accepted residual risk for students who
       // skip their secure link; token/github_id matches are unaffected.
+      // Hash the payload email once so matching N rows doesn't re-hash it N times.
+      const payloadEmailHash = await emailHash(payload.email)
       const emailCandidates: StudentCsvRow[] = []
       for (const row of targets) {
         if (claimedRows.has(row)) continue
         if (row.invite_token || row.github_id) continue
         if (!row.email_hash && !row.email.trim()) continue
-        if (await payloadEmailMatchesRow(payload.email, row)) {
+        if (rowMatchesEmailHash(row, payload.email, payloadEmailHash)) {
           emailCandidates.push(row)
         }
       }
@@ -694,38 +696,11 @@ export async function reconcileOnboarding(
     })
   }
 
-  // Value a row presents for a given match kind, so a resolved entry can re-bind
-  // to the same logical row by matchBy/matchValue. All three keys are computed
-  // unconditionally since every row may carry a token, github_id, AND email.
-  const rowKeyForMatchBy = async (
-    row: StudentCsvRow,
-    matchBy: Resolved["matchBy"],
-  ): Promise<string | undefined> => {
-    if (matchBy === "token") return row.invite_token || undefined
-    if (matchBy === "github_id") return row.github_id || undefined
-    return (
-      row.email_hash || (row.email ? await emailHash(row.email) : undefined)
-    )
-  }
-
-  const rowMatchesResolved = async (
-    row: StudentCsvRow,
-    r: Resolved,
-  ): Promise<boolean> => {
-    const key = await rowKeyForMatchBy(row, r.matchBy)
-    return key !== undefined && key === r.matchValue
-  }
-
   // Reconcilable rows with no matching self-report this run = not onboarded yet.
+  // claimedRows holds exactly the target rows bound during the resolve phase, so
+  // membership is the authoritative "resolved" test (no re-matching/re-hashing).
   for (const row of targets) {
-    let isResolved = false
-    for (const r of resolved) {
-      if (await rowMatchesResolved(row, r)) {
-        isResolved = true
-        break
-      }
-    }
-    if (!isResolved) {
+    if (!claimedRows.has(row)) {
       result.pending.push(row.email || row.username)
     }
   }
@@ -741,6 +716,20 @@ export async function reconcileOnboarding(
   // Team-add and cleanup are driven from THIS set (not resolved[]), so a repo
   // whose row was already enrolled or failed to re-bind is never touched.
   let committed: Resolved[] = []
+
+  // Value a freshly-read row presents for a given match kind, so a resolved
+  // entry can re-bind to the same logical row by matchBy/matchValue after the
+  // commit-phase re-read (the resolve-phase row objects no longer apply).
+  const rowKeyForMatchBy = async (
+    row: StudentCsvRow,
+    matchBy: Resolved["matchBy"],
+  ): Promise<string | undefined> => {
+    if (matchBy === "token") return row.invite_token || undefined
+    if (matchBy === "github_id") return row.github_id || undefined
+    return (
+      row.email_hash || (row.email ? await emailHash(row.email) : undefined)
+    )
+  }
 
   // Single batched commit. Re-reads the roster inside the retry so it applies
   // onto the latest students.csv even if another write landed meanwhile.
