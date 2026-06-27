@@ -19,6 +19,15 @@ name: Mirror to public repo
 # Both targets are downstream-only: direct edits there (including
 # wiki edits via the GitHub UI) are overwritten on the next sync.
 #
+# Reconcile guard: to avoid silently destroying direct wiki edits,
+# the wiki sync step inspects each target's commit history. If a
+# downstream wiki has any commit NOT authored by the sync bot and
+# its content differs from this repo's wiki/, the workflow FAILS
+# instead of overwriting. A human must pull those edits back into
+# wiki/ (open a PR to v1); once wiki/ matches, the guard passes and
+# the sync resumes. This keeps the "source of truth lives in wiki/"
+# invariant while ensuring no upstream edit is lost.
+#
 # One-time setup:
 #   1. Create a PAT with `contents: write` on
 #      `foundation50/classroom50`. Fine-grained PATs also need
@@ -127,6 +136,10 @@ jobs:
       - name: Mirror wiki content
         env:
           DEV_TOKEN: ${{ github.token }}
+          # Identity that the sync bot commits under (see "Configure git
+          # identity" above). Any downstream wiki commit NOT authored by
+          # this identity is treated as an unreconciled upstream edit.
+          SYNC_BOT_EMAIL: classroom50-sync@users.noreply.github.com
         run: |
           set -euo pipefail
           src="$GITHUB_WORKSPACE/wiki"
@@ -141,6 +154,17 @@ jobs:
           # repo uses the MIRROR_PAT; the dev repo uses the built-in
           # GITHUB_TOKEN (workflow `contents: write` covers same-repo
           # wiki pushes).
+          #
+          # Reconcile guard: the wikis are meant to be downstream-only,
+          # but people sometimes edit them directly (e.g. via the GitHub
+          # UI or by pushing to the .wiki.git remote). Blindly syncing
+          # would silently overwrite that work. So before pushing we
+          # check whether the downstream wiki carries any commit that the
+          # sync bot did not author. If it does AND its current content
+          # differs from the source wiki/, we fail and require a human to
+          # pull those edits back into wiki/ on this repo first. Once the
+          # source wiki/ matches (content reconciled), the guard passes
+          # and the sync proceeds normally.
           sync_wiki() {
             local target="$1" token="$2"
             echo "::group::Syncing wiki to ${target}"
@@ -154,6 +178,62 @@ jobs:
             fi
 
             cd wiki
+
+            # Detect unreconciled upstream edits: a commit not authored by
+            # the sync bot means someone changed the downstream wiki
+            # directly (e.g. via the GitHub UI or a direct push).
+            #
+            # We only care about foreign commits made AFTER our most recent
+            # sync. Rationale:
+            #   - Before the first sync the wiki must be bootstrapped with a
+            #     page via the GitHub UI (see setup notes above); that
+            #     initial commit is "foreign" but is meant to be overwritten,
+            #     so it must not block the first sync.
+            #   - After we've synced at least once, the latest sync commit is
+            #     our known-good baseline; anything foreign on top of it is a
+            #     genuine direct edit that would be lost.
+            local last_sync foreign_commits foreign_range
+            last_sync=$(git log -1 --format='%H' --author="${SYNC_BOT_EMAIL}" 2>/dev/null || true)
+            if [ -n "$last_sync" ]; then
+              foreign_range="${last_sync}..HEAD"
+            else
+              # No sync commit yet: treat the wiki as un-synced bootstrap and
+              # don't block. (range empty => no foreign commits considered)
+              foreign_range=""
+            fi
+            if [ -n "$foreign_range" ]; then
+              foreign_commits=$(git log "$foreign_range" \
+                --pretty=format:'%ae%x09%h %an <%ae> %s' \
+                | awk -F'\t' -v bot="${SYNC_BOT_EMAIL}" '$1 != bot {print $2}')
+            else
+              foreign_commits=""
+            fi
+
+            if [ -n "$foreign_commits" ]; then
+              # There are direct edits on top of our last sync. Only block if
+              # the live downstream content actually differs from what we'd
+              # push; if it already matches, the edits are reconciled and safe.
+              if ! diff -r --exclude='.git' "$src" . >/dev/null 2>&1; then
+                {
+                  echo "::error::Unreconciled wiki edits detected on ${target}."
+                  echo "The downstream wiki has commit(s) made after the last sync that"
+                  echo "the sync bot did not author, and its content differs from this"
+                  echo "repo's wiki/. Syncing now would overwrite that work."
+                  echo
+                  echo "Direct (non-sync) commits on ${target}.wiki.git:"
+                  echo "${foreign_commits}"
+                  echo
+                  echo "To reconcile: clone ${target}.wiki.git, copy the changed pages/"
+                  echo "images into this repo's wiki/ directory, open a PR to v1, then"
+                  echo "re-run this workflow. See .github/workflows/mirror-to-public.yaml"
+                  echo "for the downstream-only policy."
+                } >&2
+                echo "::endgroup::"
+                return 1
+              fi
+              echo "Direct commits exist on ${target} but content already matches wiki/; proceeding."
+            fi
+
             find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
             rsync -a "$src"/ ./
 
