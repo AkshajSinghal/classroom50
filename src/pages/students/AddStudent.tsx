@@ -141,7 +141,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
 
           <form.Field name="name">
             {(field) => (
-              <div className="flex mb-2">
+              <div className="flex mb-2 items-center">
                 <UserRound className="mr-2 text-[#bbb]" />
                 <input
                   id={field.name}
@@ -159,7 +159,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
           <form.Field name="username">
             {(field) => (
               <div className="mb-2">
-                <div className="flex">
+                <div className="flex items-center">
                   <GitHub className="size-6 mr-2 text-[#ddd] opacity-25" />
                   <input
                     id={field.name}
@@ -183,7 +183,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
           <form.Field name="email">
             {(field) => (
               <div className="mb-4">
-                <div className="flex">
+                <div className="flex items-center">
                   <Mail className="size-6 mr-2 text-[#bbb]" />
                   <input
                     id={field.name}
