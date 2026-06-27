@@ -28,6 +28,13 @@ export type RosterStatus = {
   statusAvailable: boolean
   reportsLoaded: boolean
   reportsErrored: boolean
+  // True once everything the section partition depends on has settled, so the
+  // roster can render without a row briefly landing in the wrong section. The
+  // "ready vs awaiting" split needs the onboarding-reports query specifically:
+  // until it resolves, an onboarded student is classified "awaiting" and then
+  // jumps to "ready". For a non-owner (status unavailable) reports aren't
+  // fetched, so we don't wait on them.
+  rosterReady: boolean
   partition: RosterPartition
 }
 
@@ -89,6 +96,14 @@ const useRosterStatus = (
     [students, statusByKey],
   )
 
+  // Roster is renderable without a section flash once members + invitations
+  // have settled AND, when status is available, the onboarding-reports query
+  // has resolved (loaded or errored — an error surfaces its own warning and
+  // shouldn't spin forever). For a non-owner we never fetch reports, so status
+  // settling is enough.
+  const rosterReady =
+    !statusLoading && (!statusAvailable || reportsLoaded || reportsErrored)
+
   return {
     statusByKey,
     getStatus,
@@ -96,6 +111,7 @@ const useRosterStatus = (
     statusAvailable,
     reportsLoaded,
     reportsErrored,
+    rosterReady,
     partition,
   }
 }

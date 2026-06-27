@@ -413,6 +413,7 @@ const EnrolledStudents = ({
     getStatus,
     statusAvailable,
     reportsErrored,
+    rosterReady,
     partition: { readyToConfirm, awaitingEnrollment, enrolled },
   } = useRosterStatus(org, classroom, students)
 
@@ -749,9 +750,23 @@ const EnrolledStudents = ({
         </div>
       ) : null}
 
+      {/* Hold the status-driven sections until everything the partition depends
+          on (members, invitations, onboarding self-reports) has settled, so an
+          onboarded student doesn't flash in "Awaiting enrollment" before
+          jumping to "Ready for enrollment confirmation". The Invite students
+          card still renders below so links are available while status loads. */}
+      {!rosterReady ? (
+        <div className="card card-border w-full bg-base-100 shadow-sm">
+          <div className="flex items-center justify-center gap-3 px-6 py-12 text-base-content/50">
+            <span className="loading loading-spinner loading-md" />
+            <span className="text-sm">Loading roster...</span>
+          </div>
+        </div>
+      ) : null}
+
       {/* Ready for enrollment confirmation (state 2) — the teacher's first
           priority: confirm students who have onboarded. */}
-      {readyToConfirm.length > 0 ? (
+      {rosterReady && readyToConfirm.length > 0 ? (
         <div className="card card-border w-full overflow-hidden border-info/30 bg-info/5 shadow-sm">
           <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-info/20">
             <div className="flex flex-col">
@@ -820,7 +835,7 @@ const EnrolledStudents = ({
 
       {/* Awaiting enrollment (state 1): invited, not yet onboarded. Bulk
           "Resend invites" lives here, where the outstanding invitations are. */}
-      {awaitingEnrollment.length > 0 ? (
+      {rosterReady && awaitingEnrollment.length > 0 ? (
         <div className="card card-border w-full overflow-hidden bg-base-100 shadow-sm">
           <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-base-300">
             <div className="flex flex-col">
@@ -852,23 +867,25 @@ const EnrolledStudents = ({
       ) : null}
 
       {/* Enrolled students (state 3) — reviewed last. */}
-      <div className="card card-border w-full overflow-hidden bg-base-100 shadow-sm">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-base-300">
-          <h2 className="text-lg font-semibold">Enrolled students</h2>
-          <div className="badge badge-primary badge-soft text-base">
-            {enrolled.length}
+      {rosterReady ? (
+        <div className="card card-border w-full overflow-hidden bg-base-100 shadow-sm">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-base-300">
+            <h2 className="text-lg font-semibold">Enrolled students</h2>
+            <div className="badge badge-primary badge-soft text-base">
+              {enrolled.length}
+            </div>
           </div>
+          {enrolled.length > 0 ? (
+            <ul className="divide-y divide-base-300">
+              {enrolled.map((student) => renderStudentRow(student))}
+            </ul>
+          ) : (
+            <div className="px-6 py-10 text-center text-sm text-base-content/50">
+              No students enrolled yet.
+            </div>
+          )}
         </div>
-        {enrolled.length > 0 ? (
-          <ul className="divide-y divide-base-300">
-            {enrolled.map((student) => renderStudentRow(student))}
-          </ul>
-        ) : (
-          <div className="px-6 py-10 text-center text-sm text-base-content/50">
-            No students enrolled yet.
-          </div>
-        )}
-      </div>
+      ) : null}
 
       <ConfirmModal
         open={confirmResendAllOpen}
