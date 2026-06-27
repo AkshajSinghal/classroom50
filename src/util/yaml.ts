@@ -66,6 +66,10 @@ const OnboardingYamlSchema = z.object({
   github_id: z.number(),
   classroom: z.string().min(1),
   created_at: z.string().optional(),
+  // Teacher-issued secure-link token, present only when the student onboarded
+  // via a unique link. Reconcile's strongest match key; validated loosely here
+  // (any string) and pattern-checked by the consumer before use.
+  invite_token: z.string().optional(),
 })
 
 export type OnboardingYaml = z.infer<typeof OnboardingYamlSchema>

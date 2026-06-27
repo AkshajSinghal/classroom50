@@ -2,14 +2,16 @@ import type { GitHubClient } from "@/hooks/github/client"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import {
   addRepoCollaborator,
+  archiveRepo,
   createCommitRepo,
   createTreeRepo,
+  deleteRepo,
   updateRefForRepo,
 } from "@/hooks/github/mutations"
 import {
+  resolveOwnOnboardingRepo,
   getBranchRefRepo,
   getCommitByRepo,
-  isTeamMember,
   withFreshRepoRetry,
 } from "@/hooks/github/queries"
 import type { GitHubRepo } from "@/hooks/github/types"
@@ -17,9 +19,8 @@ import { getAuthenticatedUser } from "@/api/queries/users"
 import { acceptPendingOrgInvite } from "@/api/mutations/users"
 import {
   ONBOARDING_YAML_PATH,
+  generateOnboardingSuffix,
   onboardingRepoName,
-  onboardingRepoNameByGithubId,
-  onboardingRepoNameByToken,
   isValidInviteToken,
   type OnboardingPayload,
 } from "@/util/onboarding"
@@ -27,15 +28,20 @@ import { stringifyOnboardingYaml } from "@/util/yaml"
 
 export type OnboardingResult = {
   status: "created" | "already-onboarded"
+  // The created or reused onboarding repo. Always present (every path either
+  // creates the repo or re-fetches an existing one before returning).
   repo: GitHubRepo
   repoName: string
   payload: OnboardingPayload
 }
 
-// Create the deterministically-named onboarding repo in the org and commit the
-// self-report payload. The student is authenticated, so username/id come from
-// GitHub (unforgeable). Idempotent: a re-run on an existing repo is treated as
-// "already-onboarded" (the teacher reconcile reads whatever payload is present).
+// Create the student's onboarding repo in the org and commit the self-report
+// payload. The student is authenticated, so username/id come from GitHub
+// (unforgeable). The repo name carries a browser-random suffix (not derivable
+// by the teacher), so it isn't a lookup key — reconcile finds it by prefix and
+// matches on the YAML. Idempotent: a re-submit reuses the student's existing
+// repo and re-commits the payload ("already-onboarded") rather than minting a
+// duplicate.
 export async function submitOnboarding(
   client: GitHubClient,
   input: {
@@ -44,8 +50,9 @@ export async function submitOnboarding(
     email: string
     first_name: string
     last_name: string
-    // Present only on the secure-link flow: the teacher-issued token that
-    // names the onboarding repo unguessably. Absent on the classroom-wide link.
+    // Present only on the secure-link flow: the teacher-issued token. It is
+    // written into the self-report YAML (it does NOT name the repo) and is
+    // reconcile's strongest match key. Absent on the classroom-wide link.
     invite_token?: string
   },
 ): Promise<OnboardingResult> {
@@ -66,6 +73,25 @@ export async function submitOnboarding(
   // on the repo create with a clearer message.
   await acceptPendingOrgInvite(client, org)
 
+  // Orphan guard: reuse the student's existing onboarding repo for THIS
+  // classroom instead of minting a duplicate on a re-submit / stale tab /
+  // double-click. resolveOwnOnboardingRepo distinguishes a classroom-matched
+  // repo, a single in-progress repo whose YAML hasn't landed yet (reuse it so
+  // the first attempt isn't stranded as an orphan), and "none". It THROWS on a
+  // transient list failure rather than reporting "none", so a blip can't make
+  // us fork a second repo for a student who already has one — that error
+  // propagates as a retryable failure. We don't use classroom-team membership
+  // as the signal: the username-invite flow adds the student to the team at
+  // INVITE time, so they're an active team member before they onboard.
+  const existing = await resolveOwnOnboardingRepo(
+    client,
+    org,
+    user.id,
+    classroom,
+  )
+  const existingRepoName =
+    existing.status === "none" ? undefined : existing.repo
+
   const payload: OnboardingPayload = {
     email: email.trim(),
     first_name: first_name.trim(),
@@ -74,26 +100,30 @@ export async function submitOnboarding(
     github_id: user.id,
     classroom,
     created_at: new Date().toISOString(),
+    // Carried only when the student used a teacher-issued secure link; it's the
+    // strongest reconcile match key. Absent on the classroom-wide link.
+    ...(inviteToken ? { invite_token: inviteToken } : {}),
   }
 
-  // Repo naming, in trust order. A secure-link token (when present and valid)
-  // names the repo unguessably, so only the link holder can create it — the
-  // strongest binding. Otherwise branch on classroom-team access: a student on
-  // the classroom team came via the username invite flow (roster row already
-  // has github_id), so the teacher reconciles by github_id -> name by id.
-  // Otherwise it's the email-first flow (roster row keyed on email hash). The
-  // derived team slug is good enough for a membership probe; on a false
-  // negative we fall back to email-hash naming, the safe default (email is
-  // known in both flows). Reconcile mirrors this branch.
-  const teamSlug = `classroom50-${classroom}`
-  const repoName = inviteToken
-    ? onboardingRepoNameByToken(inviteToken)
-    : (await isTeamMember(client, org, teamSlug, user.login))
-      ? onboardingRepoNameByGithubId(user.id)
-      : await onboardingRepoName(email)
+  // The repo name is `classroom50-onboarding-<github-id>-<random-hash>`. The
+  // browser-generated random suffix makes the name unguessable (no other org
+  // member can pre-create — "squat" — this student's repo) and unique per
+  // onboarding (a student in multiple classrooms of one org gets a distinct
+  // repo each time). The name is NOT a teacher-side lookup key: reconcile lists
+  // by prefix and matches on the YAML payload contents. On a re-submit we reuse
+  // the student's existing repo (found above) so we never leave an orphan.
+  const reusingExisting = existingRepoName !== undefined
+  const repoName =
+    existingRepoName ?? onboardingRepoName(user.id, generateOnboardingSuffix())
 
   let repo: GitHubRepo
-  let status: OnboardingResult["status"] = "created"
+  let status: OnboardingResult["status"] = reusingExisting
+    ? "already-onboarded"
+    : "created"
+  // True only when THIS call created the repo (so a commit failure means the
+  // repo is a brand-new empty orphan we should clean up). A reused/pre-existing
+  // repo is left in place on failure — it may already hold a valid payload.
+  let createdThisCall = false
 
   try {
     repo = await client.request<GitHubRepo>(`/orgs/${org}/repos`, {
@@ -105,9 +135,10 @@ export async function submitOnboarding(
         description: `Classroom50 onboarding for ${classroom}`,
       },
     })
+    createdThisCall = true
   } catch (err) {
-    // 422 = repo already exists (a prior onboarding attempt). Re-fetch and
-    // re-commit the payload so a half-finished attempt still self-heals.
+    // 422 = repo already exists (a prior attempt, or a reused repo). Re-fetch
+    // and re-commit the payload so a half-finished attempt still self-heals.
     if (err instanceof GitHubAPIError && err.status === 422) {
       repo = await client.request<GitHubRepo>(`/repos/${org}/${repoName}`)
       status = "already-onboarded"
@@ -132,67 +163,88 @@ export async function submitOnboarding(
   const payloadYaml = stringifyOnboardingYaml(payload)
 
   // Commit the payload, riding out GitHub's post-create git-data lag (a fresh
-  // auto_init repo's git APIs 404/409 transiently). No concurrent writers.
-  await withFreshRepoRetry(async () => {
-    const ref = await getBranchRefRepo(client, org, repoName, branch)
-    const parentSha = ref.object.sha
-    const currentCommit = await getCommitByRepo(
-      client,
-      org,
-      repoName,
-      parentSha,
-    )
-    const baseTreeSha = currentCommit.tree?.sha
+  // auto_init repo's git APIs 404/409 transiently). No concurrent writers. If
+  // the commit ultimately fails AND we created the repo this call, clean it up
+  // so a permanent failure can't leave an empty orphan repo behind (each failed
+  // retry-with-fresh-suffix would otherwise accumulate one).
+  try {
+    await withFreshRepoRetry(async () => {
+      const ref = await getBranchRefRepo(client, org, repoName, branch)
+      const parentSha = ref.object.sha
+      const currentCommit = await getCommitByRepo(
+        client,
+        org,
+        repoName,
+        parentSha,
+      )
+      const baseTreeSha = currentCommit.tree?.sha
 
-    if (!parentSha || !baseTreeSha) {
-      // Match the message isFreshRepoLagError keys on so withFreshRepoRetry
-      // retries instead of surfacing a hard failure.
-      throw new GitHubAPIError({
-        status: 409,
-        url: `/repos/${org}/${repoName}/git/commits`,
-        message: "Git Repository is empty.",
-        body: null,
-        rateLimit: {
-          limit: null,
-          remaining: null,
-          used: null,
-          reset: null,
-          resource: null,
-          retryAfter: null,
-        },
+      if (!parentSha || !baseTreeSha) {
+        // Match the message isFreshRepoLagError keys on so withFreshRepoRetry
+        // retries instead of surfacing a hard failure.
+        throw new GitHubAPIError({
+          status: 409,
+          url: `/repos/${org}/${repoName}/git/commits`,
+          message: "Git Repository is empty.",
+          body: null,
+          rateLimit: {
+            limit: null,
+            remaining: null,
+            used: null,
+            reset: null,
+            resource: null,
+            retryAfter: null,
+          },
+        })
+      }
+
+      const tree = await createTreeRepo(client, {
+        org,
+        repo: repoName,
+        base_tree: baseTreeSha,
+        tree: [
+          {
+            path: ONBOARDING_YAML_PATH,
+            mode: "100644",
+            type: "blob",
+            content: payloadYaml,
+          },
+        ],
       })
+
+      const commit = await createCommitRepo(client, {
+        org,
+        repo: repoName,
+        parents: [parentSha],
+        tree: tree.sha,
+        message: "Classroom50 onboarding self-report",
+      })
+
+      await updateRefForRepo({
+        client,
+        owner: org,
+        repo: repoName,
+        branch,
+        commitSha: commit.sha,
+      })
+    })
+  } catch (err) {
+    if (createdThisCall) {
+      // Best-effort cleanup of the empty repo we just created; fall back to
+      // archive if delete isn't permitted. Either way, re-throw so the caller
+      // surfaces a retryable failure rather than a half-created success.
+      try {
+        await deleteRepo(client, { owner: org, repo: repoName })
+      } catch {
+        try {
+          await archiveRepo(client, { owner: org, repo: repoName })
+        } catch {
+          // Nothing more we can do; the orphan guard will reuse it next time.
+        }
+      }
     }
-
-    const tree = await createTreeRepo(client, {
-      org,
-      repo: repoName,
-      base_tree: baseTreeSha,
-      tree: [
-        {
-          path: ONBOARDING_YAML_PATH,
-          mode: "100644",
-          type: "blob",
-          content: payloadYaml,
-        },
-      ],
-    })
-
-    const commit = await createCommitRepo(client, {
-      org,
-      repo: repoName,
-      parents: [parentSha],
-      tree: tree.sha,
-      message: "Classroom50 onboarding self-report",
-    })
-
-    await updateRefForRepo({
-      client,
-      owner: org,
-      repo: repoName,
-      branch,
-      commitSha: commit.sha,
-    })
-  })
+    throw err
+  }
 
   // Now that the self-report is committed, drop our own access to read-only.
   // The student created the repo (so they're its admin); demoting to "pull"

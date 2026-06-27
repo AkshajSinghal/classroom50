@@ -1,5 +1,4 @@
 import {
-  AlertTriangle,
   CheckCircle2,
   GraduationCap,
   Loader2,
@@ -14,13 +13,11 @@ import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useGithubAuth } from "@/auth/useGithubAuth"
 import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
 import { submitOnboarding } from "@/api/mutations/onboarding"
-import { getRepo } from "@/hooks/github/queries"
 import {
-  isValidEmail,
-  isValidInviteToken,
-  onboardingRepoNameByGithubId,
-  onboardingRepoNameByToken,
-} from "@/util/onboarding"
+  hasActiveOnboardingForClassroom,
+  isTeamMember,
+} from "@/hooks/github/queries"
+import { isValidEmail, isValidInviteToken } from "@/util/onboarding"
 
 const OnboardNavbar = () => (
   <div className="navbar bg-base-100 shadow-sm">
@@ -50,38 +47,35 @@ const NotOrgMember = ({
     <OnboardCard>
       <div className="card-body gap-6">
         <div>
-          <span className="badge badge-error badge-soft gap-2">
-            <AlertTriangle className="size-4" />
-            Access Denied
+          <span className="badge badge-ghost badge-soft gap-2">
+            <Mail className="size-4" />
+            Onboarding
           </span>
-          <h1 className="mt-6 text-2xl font-bold">Not an org member yet</h1>
+          <h1 className="mt-6 text-2xl font-bold">Nothing to do here yet</h1>
           <p className="mt-2 text-base text-base-content/70">
-            You are not currently a member of the{" "}
-            <span className="font-bold">{org}</span> organization.
+            We couldn&apos;t find an invitation for your account to the{" "}
+            <span className="font-semibold text-base-content">{org}</span>{" "}
+            organization.
           </p>
         </div>
 
-        <div className="rounded-2xl border border-info/20 bg-info/5 p-5">
+        <div className="rounded-2xl border border-base-300 bg-base-200/50 p-5">
           <div className="flex gap-3">
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-info/10 text-info">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-base-300/40 text-base-content/60">
               <UserPlus className="size-5" />
             </div>
             <div className="min-w-0">
               <h2 className="font-semibold text-base-content">
-                Accept your invitation first
+                Waiting on an invitation
               </h2>
               <p className="mt-2 leading-5 text-sm text-base-content/70">
-                Your instructor invited you to the{" "}
-                <span className="font-semibold text-base-content">{org}</span>{" "}
-                GitHub organization for{" "}
+                If your instructor has invited you to{" "}
                 <span className="font-semibold text-base-content">
                   {classroom}
                 </span>
-                . Check your email for the GitHub invitation and accept it.
-              </p>
-              <p className="mt-3 text-xs leading-5 text-base-content/60">
-                After accepting the GitHub organization invitation, return to
-                this page and refresh.
+                , check your email for the GitHub invitation and accept it, then
+                return to this page and refresh. Otherwise, there&apos;s nothing
+                you need to do here right now.
               </p>
             </div>
           </div>
@@ -95,10 +89,12 @@ const OnboardingStatus = ({
   classroom,
   title,
   message,
+  tone = "success",
 }: {
   classroom?: string
   title: string
   message: string
+  tone?: "success" | "info"
 }) => (
   <div className="min-h-screen bg-base-100">
     <OnboardNavbar />
@@ -114,9 +110,19 @@ const OnboardingStatus = ({
             <p className="mt-2 text-sm text-base-content/60">{classroom}</p>
           )}
         </div>
-        <div className="rounded-2xl border border-success/20 bg-success/5 p-5">
+        <div
+          className={`rounded-2xl border p-5 ${
+            tone === "success"
+              ? "border-success/20 bg-success/5"
+              : "border-info/20 bg-info/5"
+          }`}
+        >
           <div className="flex gap-3">
-            <CheckCircle2 className="size-6 shrink-0 text-success" />
+            <CheckCircle2
+              className={`size-6 shrink-0 ${
+                tone === "success" ? "text-success" : "text-info"
+              }`}
+            />
             <p className="text-sm text-base-content/70">{message}</p>
           </div>
         </div>
@@ -130,14 +136,15 @@ const OnboardingPage = () => {
   // The invited email may travel in the link as a prefill (an individual link
   // the teacher sent). On the generic classroom-wide link it's absent and the
   // student types it. Either way it's an untrusted value: it only seeds the
-  // deterministic repo name + claimed-email field; the authenticated session is
-  // what actually authorizes everything, and reconciliation re-verifies the
-  // commit author against the claimed identity.
+  // claimed-email field; the authenticated session is what actually authorizes
+  // everything, and reconciliation re-verifies the commit author against the
+  // claimed identity.
   const search = useSearch({ strict: false }) as { email?: string; t?: string }
   const prefilledEmail = typeof search.email === "string" ? search.email : ""
-  // Secure-link token: names the onboarding repo unguessably so only the link
-  // holder can create it. Validated before use; an absent/garbage value just
-  // degrades to the classroom-wide (email-hash) flow.
+  // Secure-link token: written into the self-report YAML (it does NOT name the
+  // repo), where reconcile uses it as the strongest match key. Validated before
+  // use; an absent/garbage value just degrades to the classroom-wide flow
+  // (reconcile then matches by github_id, else email).
   const inviteToken =
     typeof search.t === "string" && isValidInviteToken(search.t)
       ? search.t.trim()
@@ -151,24 +158,39 @@ const OnboardingPage = () => {
   const { data: orgMembership, isLoading: loadingMembership } =
     useGetOwnOrgMembership(org)
 
-  // Detect a prior onboarding on re-visit. With a secure token the repo name is
-  // known directly; otherwise the github-id-based name is knowable from the
-  // authenticated user (no email needed), so we probe it once the student is a
-  // member: it exists & active -> onboarding already kicked off, awaiting the
-  // teacher's reconcile; exists & archived -> the teacher reconciled
-  // (complete). A missing repo is ambiguous — under the default "delete"
-  // cleanup a reconciled student's repo is gone, so we fall back to showing the
-  // form, where a re-submit is idempotent on the SAME repo name (the token or
-  // github-id name); it does not strand an orphan because the name is stable.
-  const probeRepoName = inviteToken
-    ? onboardingRepoNameByToken(inviteToken)
-    : user
-      ? onboardingRepoNameByGithubId(user.id)
-      : ""
-  const { data: existingRepo, isLoading: loadingExisting } = useQuery({
-    queryKey: ["github", "repo", org, probeRepoName],
-    queryFn: () => getRepo(client, org ?? "", probeRepoName),
-    enabled: Boolean(org && probeRepoName && orgMembership),
+  // Repo-based "in progress" detection that survives a page reload: the student
+  // already created an onboarding repo for this classroom (awaiting the
+  // teacher's reconcile). This is the unambiguous "submitted, nothing more to
+  // do" signal.
+  const { data: hasOnboarded, isLoading: loadingOnboarded } = useQuery({
+    queryKey: ["github", "onboarding-progress", org, classroom, user?.id],
+    queryFn: () =>
+      hasActiveOnboardingForClassroom(
+        client,
+        org ?? "",
+        user?.id ?? "",
+        classroom ?? "",
+      ),
+    enabled: Boolean(org && classroom && user?.id && orgMembership),
+  })
+
+  // "Has access" signal: active membership of the classroom team. Both invite
+  // flows put the student on the team (username at invite time; email via the
+  // invite's team_ids), so this means "you can already work in this classroom"
+  // — NOT necessarily fully enrolled. We use it to replace a misleading
+  // repeated form on revisit with a clean "you're all set" page.
+  //
+  // Slug caveat: the authoritative team slug lives in the private classroom50
+  // config repo, which a student can't read, so we derive `classroom50-
+  // <classroom>`. On a GitHub name collision the real slug can differ; the
+  // failure mode is intentionally safe — isTeamMember degrades any miss/error to
+  // false, so the worst case is showing the form to an already-enrolled student
+  // (a re-submit is idempotent and harmless), never granting false access.
+  const teamSlug = `classroom50-${classroom}`
+  const { data: onClassroomTeam, isLoading: loadingTeam } = useQuery({
+    queryKey: ["github", "team-membership", org, teamSlug, user?.login],
+    queryFn: () => isTeamMember(client, org ?? "", teamSlug, user?.login ?? ""),
+    enabled: Boolean(org && user?.login && orgMembership),
   })
 
   const emailValid = isValidEmail(email)
@@ -187,7 +209,10 @@ const OnboardingPage = () => {
       }),
   })
 
-  if (loadingMembership || (orgMembership && loadingExisting)) {
+  if (
+    loadingMembership ||
+    (orgMembership && (loadingOnboarded || loadingTeam))
+  ) {
     return (
       <div className="min-h-screen bg-base-100">
         <OnboardNavbar />
@@ -198,33 +223,41 @@ const OnboardingPage = () => {
     )
   }
 
+  // Gate on having a membership record at all. A "pending" invite still lets
+  // the student through to the form: submitOnboarding self-heals by accepting
+  // the invite (acceptPendingOrgInvite) before creating the repo, so requiring
+  // "active" here would wrongly block an invited student who simply hasn't
+  // clicked accept in email yet. Only a genuinely missing membership (the
+  // query 404s -> undefined) means they were never invited.
   if (!orgMembership) {
     return <NotOrgMember org={org} classroom={classroom} />
   }
 
-  // A just-submitted onboarding, or a pre-existing active onboarding repo found
-  // on re-visit, means the process kicked off and is awaiting the teacher.
-  const justSubmitted = onboardMutation.isSuccess
-  const priorInProgress = Boolean(existingRepo) && !existingRepo?.archived
-  const priorComplete = Boolean(existingRepo?.archived)
-  const inProgress = justSubmitted || priorInProgress
-
-  if (inProgress) {
+  // A just-submitted onboarding (this session) OR a previously-created
+  // onboarding repo for this classroom found on revisit means the process
+  // kicked off and is awaiting the teacher's reconcile. Unambiguous "submitted,
+  // nothing more to do" — show it before the form.
+  if (onboardMutation.isSuccess || hasOnboarded) {
     return (
       <OnboardingStatus
         classroom={classroom}
-        title="Enrollment submitted"
-        message="We've recorded your details and notified your instructor. They'll confirm your enrollment shortly — there's nothing more for you to do here."
+        tone="info"
+        title="Pending confirmation"
+        message="Your details are in — your instructor just needs to confirm your enrollment. There's nothing more for you to do here."
       />
     )
   }
 
-  if (priorComplete) {
+  // The student already has classroom access (active team member). Show a
+  // clean "you're all set" page rather than the editable form, which is
+  // confusing for someone who's already in.
+  if (onClassroomTeam) {
     return (
       <OnboardingStatus
         classroom={classroom}
+        tone="success"
         title="You're all set"
-        message="Your enrollment has been confirmed by your instructor. You can now accept assignments shared with you."
+        message="You already have access to this classroom — there's nothing more you need to do here. You can accept assignments your instructor shares with you."
       />
     )
   }
