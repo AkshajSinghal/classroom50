@@ -95,41 +95,39 @@ const OnboardingStatus = ({
   title: string
   message: string
   tone?: "success" | "info"
-}) => (
-  <div className="min-h-screen bg-base-100">
-    <OnboardNavbar />
-    <OnboardCard>
-      <div className="card-body gap-6">
-        <div>
-          <span className="badge badge-primary badge-soft gap-2">
-            <Mail className="size-4" />
-            Onboarding
-          </span>
-          <h1 className="mt-6 text-2xl font-bold">{title}</h1>
-          {classroom && (
-            <p className="mt-2 text-sm text-base-content/60">{classroom}</p>
-          )}
-        </div>
-        <div
-          className={`rounded-2xl border p-5 ${
-            tone === "success"
-              ? "border-success/20 bg-success/5"
-              : "border-info/20 bg-info/5"
-          }`}
-        >
-          <div className="flex gap-3">
-            <CheckCircle2
-              className={`size-6 shrink-0 ${
-                tone === "success" ? "text-success" : "text-info"
-              }`}
-            />
-            <p className="text-sm text-base-content/70">{message}</p>
+}) => {
+  const toneClasses =
+    tone === "success"
+      ? { box: "border-success/20 bg-success/5", icon: "text-success" }
+      : { box: "border-info/20 bg-info/5", icon: "text-info" }
+  return (
+    <div className="min-h-screen bg-base-100">
+      <OnboardNavbar />
+      <OnboardCard>
+        <div className="card-body gap-6">
+          <div>
+            <span className="badge badge-primary badge-soft gap-2">
+              <Mail className="size-4" />
+              Onboarding
+            </span>
+            <h1 className="mt-6 text-2xl font-bold">{title}</h1>
+            {classroom && (
+              <p className="mt-2 text-sm text-base-content/60">{classroom}</p>
+            )}
+          </div>
+          <div className={`rounded-2xl border p-5 ${toneClasses.box}`}>
+            <div className="flex gap-3">
+              <CheckCircle2
+                className={`size-6 shrink-0 ${toneClasses.icon}`}
+              />
+              <p className="text-sm text-base-content/70">{message}</p>
+            </div>
           </div>
         </div>
-      </div>
-    </OnboardCard>
-  </div>
-)
+      </OnboardCard>
+    </div>
+  )
+}
 
 const OnboardingPage = () => {
   const { org, classroom } = useParams({ strict: false })
