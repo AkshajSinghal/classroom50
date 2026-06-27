@@ -21,6 +21,7 @@ import {
   getRepoFile,
   getUser,
   listOnboardingRepos,
+  ONBOARDING_READ_CONCURRENCY,
 } from "@/hooks/github/queries"
 import { getAuthenticatedUser } from "@/api/queries/users"
 import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
@@ -55,45 +56,14 @@ async function resolveClassroomTeamSlug(
   org: string,
   classroom: string,
 ): Promise<string> {
-  try {
-    const classroomJson = await getClassroomJson(client, { org, classroom })
-    if (classroomJson.team?.slug) {
-      return classroomJson.team.slug
-    }
-  } catch (err) {
-    // 404 = no classroom.json (pre-feature) is a genuine "no team"; fall
-    // through. Anything else is transient and must not be misread as "no team".
-    if (!(err instanceof GitHubAPIError && err.isNotFound)) {
-      throw err
-    }
-  }
-  return `classroom50-${classroom}`
-}
-
-// The classroom team's numeric id from classroom.json, used to add a student to
-// the team directly on an org invitation (team_ids). Returns undefined when the
-// classroom has no team block (pre-feature classroom) so callers can simply
-// omit team_ids. Best-effort: any read failure degrades to undefined (the
-// student still gets added to the team at reconcile time as a fallback).
-async function resolveClassroomTeamId(
-  client: GitHubClient,
-  org: string,
-  classroom: string,
-): Promise<number | undefined> {
-  try {
-    const classroomJson = await getClassroomJson(client, { org, classroom })
-    return classroomJson.team?.id
-  } catch {
-    return undefined
-  }
+  return (await resolveClassroomTeam(client, org, classroom)).slug
 }
 
 // Both the slug and numeric id of the classroom team from a SINGLE classroom.json
-// read, for callers (enrollStudentInClassroom) that need both — avoids fetching
-// the same file twice. Mirrors resolveClassroomTeamSlug's collision handling for
-// the slug (404 -> derived slug; other errors propagate) while the id degrades to
-// undefined when absent. On a transient read failure the slug resolution throws,
-// which the caller catches into a warning, and the id is simply undefined.
+// read. The slug follows the collision handling above (404 -> derived slug;
+// other errors propagate); the id degrades to undefined when absent. Callers
+// that only need the slug go through resolveClassroomTeamSlug; callers that want
+// a best-effort id (e.g. team_ids on an invite) catch the throw into undefined.
 async function resolveClassroomTeam(
   client: GitHubClient,
   org: string,
@@ -439,11 +409,9 @@ export async function inviteStudentByEmail(
   // Add the classroom team to the invite so the student lands in it directly on
   // acceptance (no separate team-add needed). Best-effort: if the team id can't
   // be resolved, send the invite without it and reconcile adds them later.
-  const teamId = await resolveClassroomTeamId(
-    client,
-    input.org,
-    input.classroom,
-  )
+  const teamId = await resolveClassroomTeam(client, input.org, input.classroom)
+    .then((team) => team.id)
+    .catch(() => undefined)
 
   try {
     await createOrgInvitation(client, {
@@ -464,11 +432,6 @@ export async function inviteStudentByEmail(
 
   return result
 }
-
-// Max simultaneous per-repo onboarding YAML reads during reconcile. Bounded so
-// a large classroom doesn't fan out into hundreds of concurrent GitHub requests
-// (secondary-rate-limit territory) while still beating a serial loop.
-const RECONCILE_READ_CONCURRENCY = 8
 
 export type ReconcileOnboardingResult = {
   // Rows newly bound to a GitHub identity this run.
@@ -594,7 +557,7 @@ export async function reconcileOnboarding(
   }
   const reads: RepoRead[] = await mapWithConcurrency(
     onboardingRepos,
-    RECONCILE_READ_CONCURRENCY,
+    ONBOARDING_READ_CONCURRENCY,
     async (repoMeta): Promise<RepoRead> => {
       const repo = repoMeta.name
       try {

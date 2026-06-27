@@ -905,8 +905,9 @@ export async function getClassroom50OrgSummary(
 
 // Max simultaneous per-repo onboarding reads. Bounded so a large class doesn't
 // fan out into hundreds of concurrent GitHub requests (secondary-rate-limit
-// territory) while still avoiding a slow strictly-sequential loop.
-const ONBOARDING_READ_CONCURRENCY = 8
+// territory) while still avoiding a slow strictly-sequential loop. Shared by the
+// roster/own-onboarding listings here and by reconcile's read phase.
+export const ONBOARDING_READ_CONCURRENCY = 8
 
 // One onboarding repo owned by a github-id, with its parsed self-report when
 // the YAML is readable. `payload` is null when the repo exists but its YAML
