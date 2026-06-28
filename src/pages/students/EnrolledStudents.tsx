@@ -621,12 +621,18 @@ const EnrolledStudents = ({
           <Avatar
             name={displayName}
             github={displayHandle}
+            subtitle={displayHandle ? `@${displayHandle}` : undefined}
             initials={
               student.username
                 ? getInitials(student.username, students)
                 : (student.email[0]?.toUpperCase() ?? "?")
             }
           />
+          {student.section?.trim() ? (
+            <span className="badge badge-sm badge-ghost mt-1">
+              {student.section.trim()}
+            </span>
+          ) : null}
         </div>
 
         <div className="flex shrink-0 items-center gap-2">

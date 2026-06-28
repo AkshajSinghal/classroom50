@@ -1097,8 +1097,13 @@ export async function getOpenPullRequests(
 
 export async function getOrgRepos(client: GitHubClient, owner: string) {
   try {
-    return await client.request<GitHubRepo[]>(
-      `/orgs/${owner}/repos?per_page=100`,
+    // Paginate to exhaustion: a single per_page=100 page silently under-counts
+    // orgs with >100 repos, which would make repo-list-derived signals (e.g.
+    // assignment acceptance on the submissions dashboard) miss students in
+    // large orgs. The first page's failure still surfaces a 404 as null below.
+    return await paginateAll<GitHubRepo>(
+      client,
+      (page) => `/orgs/${owner}/repos?per_page=100&page=${page}&type=all`,
     )
   } catch (err) {
     if (err instanceof GitHubAPIError && err.status === 404) {

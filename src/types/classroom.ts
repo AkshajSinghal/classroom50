@@ -63,8 +63,24 @@ export type Assignment = {
   // Ordered .gitignore-style allowlist (last match wins, `!` re-includes).
   // Empty/absent = all files allowed. Enforced server-side.
   allowed_files?: string[]
+  // Integer percentage (0–100) at/above which a submission counts as "passing"
+  // in the gradebook's Passing rollup, badges, and passing/failing filter. A
+  // display/contract field only — it does not change a student's actual score
+  // (grading is points-based via the autograder). Absent = default (see
+  // DEFAULT_PASS_THRESHOLD). Kept in lockstep with the CLI's assignments-v1
+  // schema (`pass_threshold`, integer, omitempty) — see classroom50-cli.
+  pass_threshold?: number
   tests?: AssignmentTest[]
 }
+
+// Inclusive bounds for an assignment's pass_threshold (integer percentage).
+export const PASS_THRESHOLD_MIN = 0
+export const PASS_THRESHOLD_MAX = 100
+
+// Default passing bar when an assignment sets no pass_threshold: a submission
+// must score full marks to count as "passing". Deliberately strict — a teacher
+// lowers it per assignment when partial credit should count as a pass.
+export const DEFAULT_PASS_THRESHOLD = 100
 
 // Write-side provenance for `due`. Since `due` is stored as a UTC instant
 // (losing wall-clock and offset), this records what was supplied. `zone` is set

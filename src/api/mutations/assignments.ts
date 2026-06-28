@@ -1,6 +1,7 @@
 import type { GitHubClient } from "@/hooks/github/client"
 import type { Assignment } from "@/types/classroom"
 import { GROUP_SIZE_MAX, GROUP_SIZE_MIN } from "@/types/classroom"
+import { PASS_THRESHOLD_MAX, PASS_THRESHOLD_MIN } from "@/types/classroom"
 import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
 import { getUser } from "@/hooks/github/queries"
 import { GitHubAPIError } from "@/hooks/github/errors"
@@ -646,6 +647,24 @@ async function buildAssignmentEntry(
     entry.tests = tests
   }
 
+  // pass_threshold: opt-in integer percentage [0,100]. Absent (undefined) means
+  // the teacher didn't enable a passing threshold, so the field is omitted
+  // entirely — absent = "no passing concept" everywhere downstream. Validate
+  // the bounds so a bad value can't produce a file the CLI refuses to parse.
+  if (input.pass_threshold !== undefined) {
+    const threshold = input.pass_threshold
+    if (
+      !Number.isInteger(threshold) ||
+      threshold < PASS_THRESHOLD_MIN ||
+      threshold > PASS_THRESHOLD_MAX
+    ) {
+      throw new Error(
+        `pass_threshold: must be a whole number between ${PASS_THRESHOLD_MIN} and ${PASS_THRESHOLD_MAX} (got ${threshold}).`,
+      )
+    }
+    entry.pass_threshold = threshold
+  }
+
   return { entry, needsTeamGrant }
 }
 
@@ -961,6 +980,7 @@ export type CreateAssignmentInput = {
   container_user?: string
   setup_command?: string
   allowed_files?: string
+  pass_threshold?: number
   tests: AssignmentTestDraft[]
 }
 export async function createAssignmentWithConflictRetry(

@@ -1,18 +1,24 @@
 import {
-  ChartColumnIncreasing,
   ChevronRight,
+  GitCommitHorizontal,
   MessageCircle,
-  SquareArrowOutUpRight,
+  ScrollText,
   UsersRound,
 } from "lucide-react"
 import { Fragment, useRef, useState } from "react"
 
 import GitHub from "@/assets/github.svg?react"
-import { getName, getInitials } from "@/util/students"
+import {
+  getName,
+  getInitials,
+  getSection,
+  resolveStudent,
+} from "@/util/students"
 import { studentRepoName, studentRepoUrl } from "@/util/studentRepo"
 import { safeHttpUrl } from "@/util/url"
 import Avatar from "@/components/avatar"
 import { GroupCollaboratorsModal } from "@/components/modals/GroupCollaboratorsModal"
+import { StudentProfileModal } from "@/components/modals/StudentProfileModal"
 import type { SubmissionAttempt, SubmissionRow } from "@/hooks/useGetScores"
 import useGetFeedbackPr from "@/hooks/useGetFeedbackPr"
 import useGetRepoCollaborators from "@/hooks/useGetRepoCollaborators"
@@ -24,20 +30,88 @@ const formatDateTime = (datetime: string) =>
     timeStyle: "short",
   })
 
-// <= 50% = red
-// >= 60% = yellow
-// >= 70% = green
-// A vacuous/ungraded result (no autograder) has max === 0; show it neutral
-// rather than letting NaN% fall through to green.
-const scoreToBadgeType = (score: number, max: number) => {
-  if (!max) return "badge-ghost"
-
-  const percent = (score / max) * 100
-
-  if (percent <= 50) return "badge-error"
-  if (percent < 70) return "badge-warning"
-  return "badge-success"
+// Badge color from the assignment's pass threshold: green at/above the bar, red
+// below, neutral when ungraded (max 0) or no threshold is set (`null`).
+const scoreToBadgeType = (
+  score: number,
+  max: number,
+  thresholdFraction: number | null,
+) => {
+  if (thresholdFraction == null || !max) return "badge-ghost"
+  return score / max >= thresholdFraction ? "badge-success" : "badge-error"
 }
+
+// Icon action in the Actions cell: an external link when a URL is present, else
+// a dimmed non-clickable span (with a "no … yet" label) so the row stays aligned.
+type IconComponent = React.ComponentType<{ className?: string }>
+
+const ACTION_BTN = "btn btn-ghost btn-sm btn-square"
+
+const ActionIconLink = ({
+  href,
+  icon: Icon,
+  label,
+  title,
+  emptyLabel,
+  emptyTitle,
+}: {
+  href: string | null | undefined
+  icon: IconComponent
+  label: string
+  title: string
+  emptyLabel: string
+  emptyTitle: string
+}) =>
+  href ? (
+    <a
+      className={`${ACTION_BTN} text-base-content/70`}
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      aria-label={label}
+      title={title}
+    >
+      <Icon className="size-4" />
+    </a>
+  ) : (
+    <span
+      className={`${ACTION_BTN} text-base-content/30`}
+      aria-label={emptyLabel}
+      title={emptyTitle}
+    >
+      <Icon className="size-4" />
+    </span>
+  )
+
+// An inline commit/details link in the expanded submission-history row.
+// Renders an external link when a URL is present, else dimmed non-clickable
+// text. The label text is shown next to the icon (unlike the icon-only
+// row-action variant above).
+const HistoryLink = ({
+  href,
+  icon: Icon,
+  label,
+}: {
+  href: string | null | undefined
+  icon: IconComponent
+  label: string
+}) =>
+  href ? (
+    <a
+      className="link link-hover inline-flex items-center gap-1"
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+    >
+      <Icon className="size-3.5" />
+      {label}
+    </a>
+  ) : (
+    <span className="inline-flex items-center gap-1 text-base-content/40">
+      <Icon className="size-3.5" />
+      {label}
+    </span>
+  )
 
 // Compact group identity: shared repo + stacked avatars. Renders from the
 // scores.json `usernames` snapshot and never fetches (enabled: false) to avoid
@@ -157,16 +231,17 @@ const ReviewButton = ({ org, repo }: { org: string; repo: string }) => {
     <>
       <button
         type="button"
-        className="flex gap-2 text-base-content/70 hover:text-base-content disabled:opacity-60"
+        className="btn btn-ghost btn-sm btn-square text-base-content/70 disabled:opacity-60"
         disabled={resolving}
         onClick={handleReview}
+        aria-label="Open feedback pull request"
+        title="Review"
       >
         {resolving ? (
           <span className="loading loading-spinner loading-xs" />
         ) : (
-          <MessageCircle />
+          <MessageCircle className="size-4" />
         )}
-        <span>Review</span>
       </button>
       <dialog ref={dialogRef} className="modal">
         <div className="modal-box max-w-md">
@@ -225,11 +300,13 @@ const SubmissionHistory = ({
   repoHref,
   isGroup,
   students,
+  thresholdFraction,
 }: {
   submissions: SubmissionAttempt[]
   repoHref: string
   isGroup: boolean
   students: Student[]
+  thresholdFraction: number | null
 }) => (
   <ol className="flex flex-col gap-2">
     {submissions.map((s, i) => (
@@ -242,7 +319,7 @@ const SubmissionHistory = ({
         </span>
         <span className="w-44 shrink-0">{formatDateTime(s.datetime)}</span>
         <span
-          className={`badge badge-soft badge-sm ${scoreToBadgeType(s.score, s["max-score"])}`}
+          className={`badge badge-soft badge-sm ${scoreToBadgeType(s.score, s["max-score"], thresholdFraction)}`}
         >
           {s.score}/{s["max-score"]}
         </span>
@@ -260,38 +337,16 @@ const SubmissionHistory = ({
           </span>
         ) : null}
         <span className="ml-auto flex gap-3">
-          {safeHttpUrl(s.commit) ? (
-            <a
-              className="link link-hover inline-flex items-center gap-1"
-              href={safeHttpUrl(s.commit)}
-              target="_blank"
-              rel="noreferrer"
-            >
-              <SquareArrowOutUpRight className="size-3.5" />
-              Commit
-            </a>
-          ) : (
-            <span className="inline-flex items-center gap-1 text-base-content/40">
-              <SquareArrowOutUpRight className="size-3.5" />
-              Commit
-            </span>
-          )}
-          {safeHttpUrl(s.release) ? (
-            <a
-              className="link link-hover inline-flex items-center gap-1"
-              href={safeHttpUrl(s.release)}
-              target="_blank"
-              rel="noreferrer"
-            >
-              <ChartColumnIncreasing className="size-3.5" />
-              Details
-            </a>
-          ) : (
-            <span className="inline-flex items-center gap-1 text-base-content/40">
-              <ChartColumnIncreasing className="size-3.5" />
-              Details
-            </span>
-          )}
+          <HistoryLink
+            href={safeHttpUrl(s.commit)}
+            icon={GitCommitHorizontal}
+            label="Commit"
+          />
+          <HistoryLink
+            href={safeHttpUrl(s.release)}
+            icon={ScrollText}
+            label="Details"
+          />
         </span>
       </li>
     ))}
@@ -315,6 +370,8 @@ const SubmissionsTable = ({
   assignment,
   assignmentName,
   maxGroupSize,
+  acceptedUsernames,
+  thresholdFraction,
 }: {
   scores: SubmissionRow[]
   students: Student[]
@@ -325,13 +382,42 @@ const SubmissionsTable = ({
   assignment: string
   assignmentName?: string
   maxGroupSize?: number
+  // Lowercased usernames with an assignment repo (individual assignments).
+  // Used to decide whether the profile modal shows the "Open repo" button for a
+  // non-submitter — a never-accepted student has no repo, so the link would 404.
+  acceptedUsernames?: Set<string>
+  // Passing bar as a fraction of max (e.g. 1.0 = full marks); drives score
+  // badge color. `null`/omitted means the assignment has no passing threshold
+  // (badges render neutral).
+  thresholdFraction?: number | null
 }) => {
+  const passBar = thresholdFraction ?? null
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const toggle = (owner: string) =>
     setExpanded((prev) => ({ ...prev, [owner]: !prev[owner] }))
 
   // The owner (group founder) whose collaborators modal is open, or null.
   const [manageOwner, setManageOwner] = useState<string | null>(null)
+
+  // The student whose profile modal is open (resolved from a row's username),
+  // or null. Resolves to a roster Student for the richer detail view.
+  const [profileUsername, setProfileUsername] = useState<string | null>(null)
+  const profileStudent = profileUsername
+    ? resolveStudent(profileUsername, students)
+    : null
+
+  // The profiled student has an assignment repo iff they submitted (their
+  // login is credited on a score row) or they accepted (in acceptedUsernames).
+  // A never-accepted non-submitter has no repo, so we omit the modal's repo link
+  // rather than point it at a 404.
+  const profileHasRepo = (() => {
+    if (!profileUsername) return false
+    const login = profileUsername.toLowerCase()
+    if (acceptedUsernames?.has(login)) return true
+    return scores.some((row) =>
+      row.usernames.some((u) => u.toLowerCase() === login),
+    )
+  })()
 
   return (
     <>
@@ -349,200 +435,172 @@ const SubmissionsTable = ({
           <tbody>
             {!scores?.length && !nonSubmitters.length && (
               <tr>
-                <td colSpan={5} className="text-center">
-                  No scores submitted!
+                <td colSpan={5} className="text-center text-base-content/60">
+                  No submissions match the current filters.
                 </td>
               </tr>
             )}
-            {scores
-              .slice()
-              .sort(
-                (a, b) =>
-                  new Date(a.datetime).getTime() -
-                  new Date(b.datetime).getTime(),
-              )
-              .toReversed()
-              .map(
-                ({
-                  usernames,
-                  score,
-                  datetime,
-                  submissionCount,
-                  late,
-                  ...rest
-                }) => {
-                  const repo = studentRepoName(
-                    classroom,
-                    assignment,
-                    rest.owner,
-                  )
-                  const repoHref = studentRepoUrl(
-                    org,
-                    classroom,
-                    assignment,
-                    rest.owner,
-                  )
-                  const canExpand = submissionCount > 1
-                  const isOpen = !!expanded[rest.owner]
-                  return (
-                    <Fragment key={rest.owner}>
-                      <tr>
-                        <td>
-                          {isGroup ? (
-                            <GroupMembers
-                              org={org}
-                              repoName={repo}
-                              usernames={usernames}
-                              students={students}
-                              repoHref={repoHref}
-                              repoLabel={repo}
+            {scores.map(
+              ({
+                usernames,
+                score,
+                datetime,
+                submissionCount,
+                late,
+                ...rest
+              }) => {
+                const repo = studentRepoName(classroom, assignment, rest.owner)
+                const repoHref = studentRepoUrl(
+                  org,
+                  classroom,
+                  assignment,
+                  rest.owner,
+                )
+                const canExpand = submissionCount > 1
+                const isOpen = !!expanded[rest.owner]
+                return (
+                  <Fragment key={rest.owner}>
+                    <tr>
+                      <td>
+                        {isGroup ? (
+                          <GroupMembers
+                            org={org}
+                            repoName={repo}
+                            usernames={usernames}
+                            students={students}
+                            repoHref={repoHref}
+                            repoLabel={repo}
+                          />
+                        ) : (
+                          <Avatar
+                            name={getName(usernames[0], students)}
+                            initials={getInitials(usernames[0], students)}
+                            github={usernames[0]}
+                            subtitle={getSection(usernames[0], students)}
+                            onClick={() => setProfileUsername(usernames[0])}
+                          />
+                        )}
+                      </td>
+                      <td>
+                        {canExpand ? (
+                          <button
+                            type="button"
+                            className="badge max-xl:text-xs whitespace-nowrap gap-1 hover:badge-neutral cursor-pointer"
+                            aria-expanded={isOpen}
+                            title={
+                              isOpen
+                                ? "Hide submissions"
+                                : "Show all submissions"
+                            }
+                            onClick={() => toggle(rest.owner)}
+                          >
+                            <ChevronRight
+                              className={`size-3.5 transition-transform ${isOpen ? "rotate-90" : ""}`}
                             />
-                          ) : (
-                            <div className="flex flex-col gap-2">
-                              <Avatar
-                                name={getName(usernames[0], students)}
-                                initials={getInitials(usernames[0], students)}
-                                github={usernames[0]}
-                              />
-                              <a
-                                className="flex items-center gap-1 text-sm link link-hover w-fit text-base-content/70"
-                                href={repoHref}
-                                target="_blank"
-                                rel="noreferrer"
-                                title="Open the student repository"
-                              >
-                                <GitHub className="size-4" />
-                                <span className="font-mono">{repo}</span>
-                              </a>
-                            </div>
-                          )}
-                        </td>
-                        <td>
-                          {canExpand ? (
+                            {submissionCount} Submissions
+                          </button>
+                        ) : (
+                          <label className="badge max-xl:text-xs whitespace-nowrap">
+                            {submissionCount} Submission
+                          </label>
+                        )}
+                      </td>
+                      <td>
+                        <label
+                          className={`badge badge-soft ${scoreToBadgeType(score, rest["max-score"], passBar)}`}
+                        >
+                          {score}/{rest["max-score"]}
+                        </label>
+                      </td>
+                      <td>
+                        <div className="flex items-center gap-2">
+                          <span className="whitespace-nowrap">
+                            {formatDateTime(datetime)}
+                          </span>
+                          {late ? (
+                            <span
+                              className="badge badge-sm badge-error badge-soft"
+                              title="The latest submission was pushed after the deadline."
+                            >
+                              Late
+                            </span>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td>
+                        <div className="flex items-center gap-1">
+                          {isGroup && (
                             <button
                               type="button"
-                              className="badge max-xl:text-xs whitespace-nowrap gap-1 hover:badge-neutral cursor-pointer"
-                              aria-expanded={isOpen}
-                              title={
-                                isOpen
-                                  ? "Hide submissions"
-                                  : "Show all submissions"
-                              }
-                              onClick={() => toggle(rest.owner)}
+                              className="btn btn-ghost btn-sm btn-square text-base-content/70"
+                              onClick={() => setManageOwner(rest.owner)}
+                              aria-label="View and manage group members"
+                              title="Members"
                             >
-                              <ChevronRight
-                                className={`size-3.5 transition-transform ${isOpen ? "rotate-90" : ""}`}
-                              />
-                              {submissionCount} Submissions
+                              <UsersRound className="size-4" />
                             </button>
-                          ) : (
-                            <label className="badge max-xl:text-xs whitespace-nowrap">
-                              {submissionCount} Submission
-                            </label>
                           )}
-                        </td>
-                        <td>
-                          <label
-                            className={`badge badge-soft ${scoreToBadgeType(score, rest["max-score"])}`}
-                          >
-                            {score}/{rest["max-score"]}
-                          </label>
-                        </td>
-                        <td>
-                          <div className="flex items-center gap-2">
-                            <span className="whitespace-nowrap">
-                              {formatDateTime(datetime)}
-                            </span>
-                            {late ? (
-                              <span
-                                className="badge badge-sm badge-error badge-soft"
-                                title="The latest submission was pushed after the deadline."
-                              >
-                                Late
-                              </span>
-                            ) : null}
-                          </div>
-                        </td>
-                        <td>
-                          <div className="flex gap-4 max-xl:[&>div>a]:flex-col">
-                            {isGroup && (
-                              <div>
-                                <button
-                                  type="button"
-                                  className="flex gap-2 text-base-content/70 hover:text-base-content"
-                                  onClick={() => setManageOwner(rest.owner)}
-                                  title="View and manage group members"
-                                >
-                                  <UsersRound />
-                                  <span>Members</span>
-                                </button>
-                              </div>
-                            )}
-                            <div>
-                              {safeHttpUrl(rest.commit) ? (
-                                <a
-                                  className="flex gap-2"
-                                  href={safeHttpUrl(rest.commit)}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  <SquareArrowOutUpRight />
-                                  <span>Commit</span>
-                                </a>
-                              ) : (
-                                <span className="flex gap-2 text-base-content/40">
-                                  <SquareArrowOutUpRight />
-                                  <span>Commit</span>
-                                </span>
-                              )}
-                            </div>
-                            <div>
-                              <ReviewButton org={org} repo={repo} />
-                            </div>
-                            <div>
-                              {safeHttpUrl(rest.release) ? (
-                                <a
-                                  className="flex gap-2"
-                                  href={safeHttpUrl(rest.release)}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  <ChartColumnIncreasing />
-                                  <span>Details</span>
-                                </a>
-                              ) : (
-                                <span className="flex gap-2 text-base-content/40">
-                                  <ChartColumnIncreasing />
-                                  <span>Details</span>
-                                </span>
-                              )}
-                            </div>
-                          </div>
+                          <ActionIconLink
+                            href={repoHref}
+                            icon={GitHub}
+                            label={`Open repository ${repo}`}
+                            title="View repo"
+                            emptyLabel={`Open repository ${repo}`}
+                            emptyTitle="View repo"
+                          />
+                          <ActionIconLink
+                            href={safeHttpUrl(rest.commit)}
+                            icon={GitCommitHorizontal}
+                            label="View latest commit"
+                            title="Commit"
+                            emptyLabel="No commit yet"
+                            emptyTitle="No commit yet"
+                          />
+                          <ReviewButton org={org} repo={repo} />
+                          <ActionIconLink
+                            href={safeHttpUrl(rest.release)}
+                            icon={ScrollText}
+                            label="View autograder details"
+                            title="Details"
+                            emptyLabel="No autograder details yet"
+                            emptyTitle="No details yet"
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                    {canExpand && isOpen && (
+                      <tr>
+                        <td colSpan={5} className="bg-base-200/40">
+                          <SubmissionHistory
+                            submissions={rest.submissions}
+                            repoHref={repoHref}
+                            isGroup={isGroup}
+                            students={students}
+                            thresholdFraction={passBar}
+                          />
                         </td>
                       </tr>
-                      {canExpand && isOpen && (
-                        <tr>
-                          <td colSpan={5} className="bg-base-200/40">
-                            <SubmissionHistory
-                              submissions={rest.submissions}
-                              repoHref={repoHref}
-                              isGroup={isGroup}
-                              students={students}
-                            />
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  )
-                },
-              )}
+                    )}
+                  </Fragment>
+                )
+              },
+            )}
             {nonSubmitters.map((student) => (
-              <tr key={`missing-${student.username}`} className="opacity-60">
+              <tr
+                key={`missing-${student.username || student.email || student.github_id}`}
+                className="opacity-60"
+              >
                 <td>
                   <Avatar
                     name={getName(student.username, students)}
                     initials={getInitials(student.username, students)}
-                    github={student.username}
+                    github={student.username || student.email}
+                    subtitle={student.section?.trim() || undefined}
+                    onClick={
+                      student.username
+                        ? () => setProfileUsername(student.username)
+                        : undefined
+                    }
                   />
                 </td>
                 <td>
@@ -571,6 +629,30 @@ const SubmissionsTable = ({
           assignmentName={assignmentName}
           maxGroupSize={maxGroupSize}
           students={students}
+        />
+      )}
+
+      {profileStudent && (
+        <StudentProfileModal
+          key={profileUsername}
+          onClose={() => setProfileUsername(null)}
+          student={profileStudent}
+          students={students}
+          repoName={
+            profileHasRepo
+              ? studentRepoName(classroom, assignment, profileStudent.username)
+              : undefined
+          }
+          repoUrl={
+            profileHasRepo
+              ? studentRepoUrl(
+                  org,
+                  classroom,
+                  assignment,
+                  profileStudent.username,
+                )
+              : undefined
+          }
         />
       )}
     </>

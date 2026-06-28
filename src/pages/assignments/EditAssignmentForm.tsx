@@ -72,6 +72,9 @@ const EditAssignmentForm = ({
           container_user: values.container_user,
           setup_command: values.setup_command,
           allowed_files: values.allowed_files,
+          pass_threshold: values.pass_threshold_enabled
+            ? values.pass_threshold
+            : undefined,
           classroom,
           tests: values.tests,
           slug: assignment,
