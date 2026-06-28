@@ -224,11 +224,8 @@ export async function addStudentToClassroom(
     email: studentEmail,
     section: input.section?.trim() ?? "",
     github_id: String(githubUser.id),
-    // Normally starts "invited" and reconcile flips it to "enrolled". When the
-    // student is already an active org member (input.enrolled), write
-    // "enrolled" directly — no invite is sent and no onboarding repo will
-    // exist, so reconcile could never confirm them (#65). email_hash cached so
-    // reconcile can still match a self-report by email if one ever appears.
+    // Already-member students are written "enrolled" directly (input.enrolled):
+    // no invite/onboarding repo exists for them, so reconcile can't confirm them (#65).
     enrollment_status: input.enrolled ? "enrolled" : "invited",
     enrollment_method: "github",
     email_hash: studentEmail ? await emailHash(studentEmail) : "",
@@ -387,13 +384,9 @@ export async function addEmailInviteToClassroomWithConflictRetry(
   return withGitConflictRetry(() => addEmailInviteToClassroom(client, input))
 }
 
-// Resolve a bare email to a GitHub identity (username + github_id) by scanning
-// the org's OTHER classroom rosters for a row that already carries that email
-// AND a resolved identity. GitHub has no email->user lookup, so a teacher's
-// other classrooms are the only in-app source: a student enrolled elsewhere has
-// a row with their username/github_id keyed to the same email. Returns the
-// first such match, or null. `excludeClassroom` skips the current classroom;
-// `ref` pins all reads to one commit for a consistent snapshot.
+// Resolve a bare email to a GitHub identity by scanning the org's OTHER
+// classroom rosters (GitHub has no email->user lookup). Returns the first
+// enrolled row with a matching email, or null. `ref` pins all reads to one commit.
 async function resolveStudentIdentityByEmail(
   client: GitHubClient,
   org: string,
@@ -435,16 +428,13 @@ async function resolveStudentIdentityByEmail(
       const rows = parseStudentsCsv(csv)
       const hit = rows.find(
         (row) =>
-          // Must carry a resolved identity (an email-only invited row elsewhere
-          // has empty username/github_id and is useless here), and match the
-          // email by hash (guard against rowMatchesEmailHash's keyless-true case).
+          // A resolved identity matched by email_hash (the && guards against
+          // rowMatchesEmailHash's keyless-true fallthrough).
           Boolean(row.username) &&
           (Boolean(row.email_hash) || Boolean(row.email.trim())) &&
           rowMatchesEmailHash(row, email, targetHash),
       )
-      // Carry the matched row's name so the new classroom's row stays in sync
-      // with where the student is already enrolled. Section is intentionally NOT
-      // copied — it's classroom-specific.
+      // Carry the matched row's name (not section — that's classroom-specific).
       return hit
         ? {
             username: hit.username,
@@ -459,11 +449,8 @@ async function resolveStudentIdentityByEmail(
   return matches.find((m) => m !== null) ?? null
 }
 
-// Flip an email-only roster row (matched by email) to enrolled, backfilling the
-// resolved username/github_id. Used when an email invite 422s because the email
-// is already an org member and we resolved their identity from another roster.
-// Matches by email (the row has no username/github_id yet), unlike
-// markStudentEnrolled which matches by username/github_id.
+// Enroll an email-only row (matched by email, since it has no username yet),
+// backfilling the resolved identity. Used on the already-member 422 path.
 async function enrollEmailRowWithResolvedIdentity(
   client: GitHubClient,
   input: {
@@ -496,10 +483,8 @@ async function enrollEmailRowWithResolvedIdentity(
             ...row,
             username: input.username,
             github_id: input.github_id,
-            // Keep this classroom's row in sync with the student's other
-            // enrollment: backfill name only when the teacher left it blank here
-            // (teacher-entered values win — mirrors reconcile's fill-missing).
-            // Section is NOT synced — it's classroom-specific.
+            // Backfill name only where the teacher left it blank (teacher wins);
+            // section is not synced — it's classroom-specific.
             first_name: row.first_name?.trim() || (input.first_name ?? ""),
             last_name: row.last_name?.trim() || (input.last_name ?? ""),
             enrollment_status: "enrolled",
@@ -519,9 +504,8 @@ async function enrollEmailRowWithResolvedIdentity(
   })
 }
 
-// Remove an email-only roster row (matched by email) — used to undo a just-added
-// stub when the email belongs to an org member we couldn't identify, so it
-// doesn't sit stuck in "Awaiting enrollment" forever.
+// Remove an email-only row (matched by email) — undoes a stub when the email is
+// an org member we couldn't identify, so it isn't left stuck in "Awaiting".
 async function removeEmailRowWithRetry(
   client: GitHubClient,
   input: { org: string; classroom: string; email: string },
@@ -612,12 +596,9 @@ export async function inviteStudentByEmail(
       team_ids: teamId ? [teamId] : undefined,
     })
   } catch (err) {
-    // A 422 here means GitHub refused the invite — almost always because the
-    // email already belongs to an org member (or already has a pending invite).
-    // GitHub gives us no identity for the email, so we resolve it from the
-    // teacher's OTHER classroom rosters; if found (and still an active member)
-    // we enroll the row directly, else we remove the just-added stub so the
-    // student isn't stranded in "Awaiting enrollment" forever (#65).
+    // A 422 means the email already belongs to a member (or is already invited).
+    // GitHub gives no identity for the email, so resolve it from the teacher's
+    // other rosters: enroll directly if found + active, else drop the stub (#65).
     if (err instanceof GitHubAPIError && err.status === 422) {
       const resolved = await resolveStudentIdentityByEmail(
         client,
@@ -670,8 +651,7 @@ export async function inviteStudentByEmail(
         }
       }
 
-      // Already a member but we couldn't identify them from any roster — remove
-      // the stub row rather than leave it stuck, and tell the teacher.
+      // Member but unidentifiable from any roster — drop the stub and warn.
       if (!resolved) {
         await removeEmailRowWithRetry(client, {
           org: input.org,
@@ -1205,10 +1185,8 @@ type AddStudentToClassroomInput = {
   last_name?: string
   email?: string
   section?: string
-  // When true, write the new row directly as `enrolled` (with enrolled_at)
-  // instead of `invited`. Set by enrollStudentInClassroom when the student is
-  // already an active org member, so an already-member never lands in
-  // "Awaiting enrollment" with no onboarding repo to confirm against (#65).
+  // Write the new row directly as `enrolled` (vs `invited`); set when the
+  // student is already an active org member, so they aren't stranded (#65).
   enrolled?: boolean
 }
 export async function enrollStudentInClassroom(
@@ -1222,12 +1200,9 @@ export async function enrollStudentInClassroom(
   const teamPromise = resolveClassroomTeam(client, org, classroom)
   teamPromise.catch(() => {})
 
-  // Pre-check org membership: a student already an active member (e.g. invited
-  // from another classroom in the same org) gets no invite and never creates an
-  // onboarding repo, so reconcile could never confirm them — they'd be stuck in
-  // "Awaiting enrollment" forever. Detecting it here lets the roster row be
-  // written directly as "enrolled" (#65). Best-effort: a failed/forbidden read
-  // falls back to the normal "invited" path.
+  // Already an active member -> write the row enrolled directly (no invite is
+  // sent, so reconcile would never confirm them). Best-effort: a failed read
+  // falls back to the normal "invited" path (#65).
   let alreadyMember = false
   const normalizedUsername = input.username.trim()
   if (normalizedUsername) {
@@ -1307,18 +1282,9 @@ export type MarkStudentEnrolledInput = {
   github_id?: string
 }
 
-// Manually confirm enrollment for a roster row that is a verified live org
-// member but has no onboarding self-report (e.g. a student already in the org
-// via another classroom, or a teacher self-test). This is the per-row teacher
-// action complementing the enroll-time fix: reconcileOnboarding can only
-// confirm rows backed by an onboarding repo, so without this such rows are
-// stuck in "Awaiting enrollment" forever (#65).
-//
-// Security: re-verifies the row's username is a CURRENT active org member
-// before writing, so a manual confirm can never bind a non-member (keeps the
-// #50 autonomous-reconcile trust model unchanged). Writes the same canonical
-// shape reconcile produces (enrollment_status: "enrolled", enrolled_at), no new
-// CSV columns.
+// Teacher-initiated confirm for a verified live org member with no onboarding
+// repo (reconcile can't confirm those). Re-verifies active membership before
+// writing, so a non-member can't be bound (#65; keeps the #50 trust model).
 async function markStudentEnrolled(
   client: GitHubClient,
   input: MarkStudentEnrolledInput,
