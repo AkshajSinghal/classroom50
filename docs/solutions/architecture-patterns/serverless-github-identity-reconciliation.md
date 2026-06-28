@@ -176,3 +176,9 @@ await ensureOrgMembership(client, {
   failed-to-rebind row must never have its repo deleted.
 - Bound-parallelize per-repo reads (a small concurrency pool, e.g. 8) to avoid
   GitHub secondary rate limits on a large roster while beating a serial loop.
+
+## Related
+
+- `docs/solutions/architecture-patterns/forward-only-cross-binary-repo-name-contract.md` — applies §3 ("the artifact name is a read/delete address, NOT a match key") to a case where the name _is_ derivable: derive membership by forward-constructing the exact expected repo name, never by reverse-parsing arbitrary names.
+- `docs/solutions/developer-experience/capability-url-drift-protected-classroom-publishing.md` — the path-contract sibling of §5's data contract; the capability path drifts between the web app and the publisher when the shared formula isn't coordinated.
+- `docs/solutions/architecture-patterns/evolving-strict-cross-binary-schemas.md` — the schema-evolution specialization of §5: how to _add_ a field to a shared schema when a consumer parses strictly (advance the leading client behind an opt-in/omitempty write, coordinate laggards via tracked issues, and make the parser tolerate **and** preserve unknown fields). The JSON analogue of §5's "preserve unknown columns verbatim."

@@ -1,4 +1,4 @@
-import { Mail, UserRound } from "lucide-react"
+import { Mail, UserRound, Users } from "lucide-react"
 import GitHub from "@/assets/github.svg?react"
 import { revalidateLogic, useForm } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -22,6 +22,7 @@ type AddStudentFormValues = {
   name: string
   username: string
   email: string
+  section: string
 }
 
 // Single add/invite form. A username enrolls via GitHub (resolve, add to team,
@@ -40,6 +41,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
       const { first_name, last_name } = splitName(value.name)
       const username = value.username.trim()
       const email = value.email.trim()
+      const section = value.section.trim()
 
       // Username present -> GitHub enrolment (carry the email onto the row).
       if (username) {
@@ -50,6 +52,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
           first_name,
           last_name,
           email: email || undefined,
+          section: section || undefined,
         })
         return {
           label: username,
@@ -66,6 +69,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
         email,
         first_name,
         last_name,
+        section: section || undefined,
       })
       return {
         label: email,
@@ -90,6 +94,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
       name: "",
       username: "",
       email: "",
+      section: "",
     } satisfies AddStudentFormValues,
     // Validate on submit, then re-validate on every change after the first
     // attempt. Without this, a failed form-level validation leaves canSubmit
@@ -207,6 +212,24 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
                     {String(field.state.meta.errors[0] ?? "")}
                   </p>
                 )}
+              </div>
+            )}
+          </form.Field>
+
+          <form.Field name="section">
+            {(field) => (
+              <div className="flex mb-4 items-center">
+                <Users className="mr-2 text-[#bbb]" />
+                <input
+                  id={field.name}
+                  name={field.name}
+                  type="text"
+                  placeholder="Section (optional, e.g. Period 3)"
+                  className="input w-full"
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                />
               </div>
             )}
           </form.Field>

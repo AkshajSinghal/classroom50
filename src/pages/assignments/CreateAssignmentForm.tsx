@@ -39,6 +39,11 @@ import {
 } from "./formFieldHelpers"
 import type { Assignment } from "@/types/classroom"
 import { GROUP_SIZE_MAX, GROUP_SIZE_MIN } from "@/types/classroom"
+import {
+  DEFAULT_PASS_THRESHOLD,
+  PASS_THRESHOLD_MAX,
+  PASS_THRESHOLD_MIN,
+} from "@/types/classroom"
 
 export type CreateAssignmentFormValues = {
   name: string
@@ -54,6 +59,10 @@ export type CreateAssignmentFormValues = {
   setup_command: string
   // Raw textarea text; parsed to string[] on save, joined back on read.
   allowed_files: string
+  // Opt-in passing threshold (off by default). When enabled, pass_threshold is
+  // an integer percentage 0–100; when disabled, no passing concept is written.
+  pass_threshold_enabled: boolean
+  pass_threshold: number
   tests: AssignmentTestDraft[]
 }
 
@@ -83,6 +92,8 @@ const useAssignmentForm = (
       container_user: defaultValues?.container_user || "",
       setup_command: defaultValues?.setup_command || "",
       allowed_files: defaultValues?.allowed_files || "",
+      pass_threshold_enabled: defaultValues?.pass_threshold_enabled ?? false,
+      pass_threshold: defaultValues?.pass_threshold ?? DEFAULT_PASS_THRESHOLD,
       tests: defaultValues?.tests || [],
     } satisfies CreateAssignmentFormValues,
     validators: {
@@ -117,6 +128,19 @@ const useAssignmentForm = (
           errors.allowed_files = allowedFilesError
         }
 
+        // pass_threshold: only validated when the teacher enabled it. Integer
+        // percentage in [0, 100] (mirrors the CLI schema bounds).
+        if (value.pass_threshold_enabled) {
+          const threshold = Number(value.pass_threshold)
+          if (
+            !Number.isInteger(threshold) ||
+            threshold < PASS_THRESHOLD_MIN ||
+            threshold > PASS_THRESHOLD_MAX
+          ) {
+            errors.pass_threshold = `Pass threshold must be a whole number between ${PASS_THRESHOLD_MIN} and ${PASS_THRESHOLD_MAX}.`
+          }
+        }
+
         return Object.keys(errors).length > 0 ? { fields: errors } : undefined
       },
     },
@@ -134,6 +158,8 @@ const useAssignmentForm = (
         container_user: value.container_user.trim(),
         setup_command: value.setup_command.trim(),
         allowed_files: value.allowed_files,
+        pass_threshold_enabled: value.pass_threshold_enabled,
+        pass_threshold: Number(value.pass_threshold),
         tests: value.tests,
       })
     },
@@ -400,6 +426,8 @@ export const assignmentToFormValues = (
     container_image: assignment.runtime?.container?.image ?? "",
     container_user: assignment.runtime?.container?.user ?? "",
     setup_command: setupCommand,
+    pass_threshold_enabled: typeof assignment.pass_threshold === "number",
+    pass_threshold: assignment.pass_threshold ?? DEFAULT_PASS_THRESHOLD,
     allowed_files: allowedFilesToText(assignment.allowed_files),
     tests,
   }
@@ -812,6 +840,71 @@ const CreateAssignmentForm = ({
                   </div>
                 )
               }}
+            </form.Field>
+
+            <form.Field name="pass_threshold_enabled">
+              {(toggle) => (
+                <div className="mt-4">
+                  <label className="label cursor-pointer justify-start gap-3 p-0 font-bold">
+                    <input
+                      type="checkbox"
+                      className="toggle toggle-sm"
+                      checked={toggle.state.value}
+                      onChange={(e) => toggle.handleChange(e.target.checked)}
+                    />
+                    Set a passing threshold
+                  </label>
+                  <p className="mt-1.5 text-sm text-base-content/60">
+                    Off by default. When on, the gradebook marks submissions
+                    passing/failing against the bar below (Passing rollup, score
+                    badges, passing/failing filter). A display threshold only —
+                    it does not change a student&apos;s actual score.
+                  </p>
+
+                  {toggle.state.value && (
+                    <form.Field name="pass_threshold">
+                      {(field) => {
+                        const error = field.state.meta.errors[0] as
+                          | string
+                          | undefined
+                        return (
+                          <div className="mt-3">
+                            <div className="flex items-center gap-2">
+                              <input
+                                id={field.name}
+                                name={field.name}
+                                type="number"
+                                inputMode="numeric"
+                                min={PASS_THRESHOLD_MIN}
+                                max={PASS_THRESHOLD_MAX}
+                                step={1}
+                                className="input w-28"
+                                value={field.state.value}
+                                onBlur={field.handleBlur}
+                                onChange={(e) =>
+                                  field.handleChange(Number(e.target.value))
+                                }
+                              />
+                              <span className="text-sm text-base-content/60">
+                                % of max score to pass
+                              </span>
+                            </div>
+                            {error ? (
+                              <p
+                                role="alert"
+                                className="mt-1.5 flex items-center gap-1.5 text-sm text-error"
+                              >
+                                <AlertTriangle className="size-4 shrink-0" />
+                                {error}
+                              </p>
+                            ) : null}
+                          </div>
+                        )
+                      }}
+                    </form.Field>
+                  )}
+                </div>
+              )}
             </form.Field>
           </details>
         </div>

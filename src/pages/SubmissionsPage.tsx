@@ -1,8 +1,7 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Papa from "papaparse"
 
 import {
-  ArrowDownWideNarrow,
   Check,
   ChevronRight,
   Copy,
@@ -22,10 +21,30 @@ import Drawer, {
   DrawerToggle,
 } from "@/components/drawer"
 import SubmissionsTable from "@/pages/submissions/SubmissionsTable"
+import SubmissionsControls from "@/pages/submissions/SubmissionsControls"
+import {
+  DEFAULT_FILTERS,
+  DEFAULT_SORT,
+  acceptedRosterCount,
+  acceptedUsernames,
+  buildSectionLookup,
+  classAverage,
+  computeStats,
+  distinctSections,
+  filterAndSortRows,
+  filterNonSubmitters,
+  hasAccepted,
+  rowInSection,
+  showsNonSubmitters,
+  studentInSection,
+  type SubmissionFilters,
+  type SubmissionSort,
+} from "@/pages/submissions/dashboard"
 import useGetScores from "@/hooks/useGetScores"
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import useGetStudents from "@/hooks/useGetStudents"
+import useGetOrgRepos from "@/hooks/useGetMyOrgRepos"
 import useTriggerScoreCollection from "@/hooks/useTriggerScoreCollection"
 import useGetLastCollectScoresRun from "@/hooks/useGetLastCollectScoresRun"
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
@@ -54,7 +73,7 @@ const CopyIconButton = ({
   label,
 }: {
   copied: boolean
-  onCopy: () => void
+  onCopy: (e: React.MouseEvent<HTMLButtonElement>) => void
   label: string
 }) => (
   <button
@@ -66,6 +85,26 @@ const CopyIconButton = ({
   >
     {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
   </button>
+)
+
+// Shared chrome for the dashboard stat strip: a bordered card with an uppercase
+// label. The body (value, denominator, sub-links) varies per stat and is passed
+// as children.
+const StatCard = ({
+  label,
+  children,
+}: {
+  label: string
+  children: React.ReactNode
+}) => (
+  <div className="card bg-base-100 rounded-xl border border-[#eee]">
+    <div className="card-body gap-1 p-4">
+      <label className="text-xs uppercase tracking-wide text-base-content/50">
+        {label}
+      </label>
+      {children}
+    </div>
+  </div>
 )
 
 const SubmissionsPageContent = () => {
@@ -113,24 +152,15 @@ const SubmissionsPageContent = () => {
     (a) => a.slug === assignment,
   )
   const isGroupAssignment = assignmentInfo?.mode === "group"
-  const scoresInfo = scoresData?.submissions?.[assignment ?? ""] || []
+  const scoresInfo = useMemo(
+    () => scoresData?.submissions?.[assignment ?? ""] || [],
+    [scoresData, assignment],
+  )
 
   // Count repos whose latest submission landed after the deadline. `late` is
   // computed upstream (collect_scores.py) from the push time, not the grade
   // time, so an on-time push graded after the deadline still counts as on time.
   const lateCount = scoresInfo.filter((row) => row.late).length
-
-  // Class average over numeric scores only. Guards the old `sum/length || 1`
-  // form (`/` bound before `||`, so a NaN/empty result showed "1"); null -> "N/A".
-  const classAverage = (() => {
-    const numericScores = scoresInfo
-      .map((row) => Number(row["score"]))
-      .filter((n) => Number.isFinite(n))
-    if (numericScores.length === 0) return null
-    const avg =
-      numericScores.reduce((sum, n) => sum + n, 0) / numericScores.length
-    return Math.round(avg * 100) / 100
-  })()
 
   // Roster students with no submission. A student is "credited" if their login
   // appears in any row's `usernames` (which is `member_usernames` for groups,
@@ -140,15 +170,146 @@ const SubmissionsPageContent = () => {
   // loaded (`scoresData` present): until then `scoresInfo` is empty, which
   // would otherwise flag the entire roster as non-submitters mid-load.
   const scoresLoaded = scoresData !== undefined
-  const creditedUsernames = new Set(
-    scoresInfo.flatMap((row) => row.usernames.map((u) => u.toLowerCase())),
+  const nonSubmitters = useMemo(() => {
+    if (isGroupAssignment || !scoresLoaded) return []
+    const credited = new Set(
+      scoresInfo.flatMap((row) => row.usernames.map((u) => u.toLowerCase())),
+    )
+    return students.filter(
+      (student) => !credited.has(student.username.toLowerCase()),
+    )
+  }, [isGroupAssignment, scoresLoaded, scoresInfo, students])
+
+  // Dashboard controls (#59) — all client-side over already-loaded data.
+  const [query, setQuery] = useState("")
+  const [filters, setFilters] = useState<SubmissionFilters>(DEFAULT_FILTERS)
+  const [sort, setSort] = useState<SubmissionSort>(DEFAULT_SORT)
+
+  // Deterministic acceptance from the org repo list (see acceptedUsernames);
+  // individual assignments only, so the filter is gated on acceptedAvailable.
+  const { data: orgRepos } = useGetOrgRepos(org ?? "")
+  const acceptedSet = useMemo(
+    () =>
+      acceptedUsernames(orgRepos, classroom ?? "", assignment ?? "", students),
+    [orgRepos, classroom, assignment, students],
   )
-  const nonSubmitters =
-    isGroupAssignment || !scoresLoaded
-      ? []
-      : students.filter(
-          (student) => !creditedUsernames.has(student.username.toLowerCase()),
-        )
+  const acceptedAvailable = !isGroupAssignment && orgRepos != null
+
+  // Section filtering: distinct sections for the dropdown, and a username ->
+  // section lookup so submitted rows (which carry only logins) can be matched.
+  const sections = useMemo(() => distinctSections(students), [students])
+  const sectionByUsername = useMemo(
+    () => buildSectionLookup(students),
+    [students],
+  )
+
+  // With a section filter active, scope the roster and rows to that section so
+  // the stat cards describe the filtered view, not the whole class.
+  const sectionFilter = filters.section
+  const scopedStudents = useMemo(
+    () =>
+      sectionFilter === "all"
+        ? students
+        : students.filter((s) => studentInSection(s, sectionFilter)),
+    [students, sectionFilter],
+  )
+  const scopedScores = useMemo(
+    () =>
+      sectionFilter === "all"
+        ? scoresInfo
+        : scoresInfo.filter((row) =>
+            rowInSection(row, sectionFilter, sectionByUsername),
+          ),
+    [scoresInfo, sectionFilter, sectionByUsername],
+  )
+  const scopedNonSubmitters = useMemo(
+    () =>
+      sectionFilter === "all"
+        ? nonSubmitters
+        : nonSubmitters.filter((s) => studentInSection(s, sectionFilter)),
+    [nonSubmitters, sectionFilter],
+  )
+
+  // Passing bar as a fraction of max, or null when the teacher didn't opt in
+  // (off by default) — then no Passing rollup/filter and neutral badges.
+  const passThresholdPct = assignmentInfo?.pass_threshold
+  const passingEnabled =
+    typeof passThresholdPct === "number" && Number.isFinite(passThresholdPct)
+  const thresholdFraction = passingEnabled ? passThresholdPct / 100 : null
+
+  // Top-line counts over the (section-scoped) submitted set + roster size.
+  const stats = useMemo(
+    () => computeStats(scopedScores, scopedStudents.length, thresholdFraction),
+    [scopedScores, scopedStudents, thresholdFraction],
+  )
+
+  // Class average over numeric scores in the (section-scoped) set; null -> "N/A".
+  const avgScore = useMemo(() => classAverage(scopedScores), [scopedScores])
+
+  // Roster-scoped accepted count (scoped to the active section to match the
+  // Accepted card's denominator).
+  const acceptedCount = useMemo(
+    () => acceptedRosterCount(scopedStudents, acceptedSet),
+    [scopedStudents, acceptedSet],
+  )
+
+  // Accepted-but-not-submitted count: roster students who accepted (repo
+  // exists) but have no submission row. Individual assignments only.
+  const acceptedNotSubmittedCount = acceptedAvailable
+    ? scopedNonSubmitters.filter((s) => hasAccepted(s.username, acceptedSet))
+        .length
+    : 0
+
+  // One-click stat shortcuts: jump straight to the students a sub-label calls
+  // out. Reset the other axes so the surfaced set matches the label exactly.
+  const showFailing = () =>
+    setFilters({ ...DEFAULT_FILTERS, passing: "failing" })
+  const showAcceptedNotSubmitted = () =>
+    setFilters({
+      ...DEFAULT_FILTERS,
+      accepted: "accepted",
+      submission: "not-submitted",
+    })
+
+  // Rows actually rendered. When acceptance data isn't loaded yet, neutralize
+  // the accepted axis so a transient empty repo list can't flip the visible set.
+  const effectiveFilters = useMemo(
+    () =>
+      acceptedAvailable ? filters : { ...filters, accepted: "all" as const },
+    [acceptedAvailable, filters],
+  )
+  const visibleRows = useMemo(
+    () =>
+      filterAndSortRows(scoresInfo, {
+        query,
+        filters: effectiveFilters,
+        sort,
+        students,
+        sectionByUsername,
+        thresholdFraction,
+      }),
+    [
+      scoresInfo,
+      query,
+      effectiveFilters,
+      sort,
+      students,
+      sectionByUsername,
+      thresholdFraction,
+    ],
+  )
+  const visibleNonSubmitters = useMemo(
+    () =>
+      showsNonSubmitters(effectiveFilters)
+        ? filterNonSubmitters(
+            nonSubmitters,
+            query,
+            effectiveFilters,
+            acceptedSet,
+          )
+        : [],
+    [effectiveFilters, nonSubmitters, query, acceptedSet],
+  )
 
   const collectScores = useTriggerScoreCollection(org)
   const { data: lastRun, refetch: refetchLastRun } =
@@ -262,34 +423,15 @@ const SubmissionsPageContent = () => {
               </h1>
               <div className="flex flex-wrap items-center gap-2 pb-10 text-sm text-base-content/70">
                 <span>
-                  {isGroupAssignment ? (
-                    <>
-                      {scoresInfo.length}{" "}
-                      {scoresInfo.length === 1 ? "group" : "groups"} submitted
-                    </>
-                  ) : (
-                    <>
-                      {scoresInfo.length} of {students.length} submitted
-                    </>
-                  )}
-                </span>
-                <span>•</span>
-                <span>
                   {assignmentInfo?.due
                     ? `Due ${formatDueDateTime(assignmentInfo.due)}`
                     : "No due date"}
                 </span>
                 {lateCount > 0 && (
-                  <>
-                    <span>•</span>
-                    <span className="badge badge-sm badge-error badge-soft">
-                      {lateCount} late
-                    </span>
-                  </>
+                  <span className="badge badge-sm badge-error badge-soft">
+                    {lateCount} late
+                  </span>
                 )}
-                <span>•</span>
-                <ArrowDownWideNarrow className="size-4" />
-                <span>Sorted by most recent</span>
               </div>
             </div>
             <div className="pt-10">
@@ -372,26 +514,36 @@ const SubmissionsPageContent = () => {
               </a>
             </div>
           </div>
-          <div className="card bg-base-100 rounded-xl border border-[#eee] mb-4">
-            <div className="card-body gap-4">
-              <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex items-start gap-3">
-                  <div className="rounded-xl bg-primary/10 p-3 text-primary">
-                    <LinkIcon className="size-5" />
-                  </div>
-
-                  <div>
-                    <h2 className="font-bold">How students accept</h2>
-                    <p className="text-sm text-base-content/60">
-                      Share this link with students so they can accept this
-                      assignment.
-                      {secret
-                        ? " This classroom uses an unlisted URL, so the link includes the access key — treat it like a shared password and send the full link as-is."
-                        : ""}
-                    </p>
-                  </div>
-                </div>
+          <details className="card bg-base-100 rounded-xl border border-[#eee] mb-4 group">
+            <summary className="card-body flex-row items-center gap-3 cursor-pointer list-none py-4">
+              <div className="rounded-xl bg-primary/10 p-2.5 text-primary">
+                <LinkIcon className="size-5" />
               </div>
+              <div className="min-w-0 flex-1">
+                <h2 className="font-bold">How students accept</h2>
+                <p className="text-sm text-base-content/60">
+                  Share an invite link or CLI command so students can accept
+                  this assignment.
+                </p>
+              </div>
+              <CopyIconButton
+                copied={copiedSubmitLink}
+                onCopy={(e) => {
+                  e.preventDefault()
+                  copySubmitLink()
+                }}
+                label="Copy accept link"
+              />
+              <ChevronRight className="size-5 shrink-0 text-base-content/40 transition-transform group-open:rotate-90" />
+            </summary>
+            <div className="card-body gap-4 pt-0">
+              {secret ? (
+                <p className="text-sm text-base-content/60">
+                  This classroom uses an unlisted URL, so the link includes the
+                  access key — treat it like a shared password and send the full
+                  link as-is.
+                </p>
+              ) : null}
 
               <div className="flex justify-between bg-base-200 text-base-content border border-base-300 items-center">
                 <pre className="overflow-x-auto px-4 py-3 text-sm">
@@ -404,9 +556,9 @@ const SubmissionsPageContent = () => {
                 />
               </div>
 
-              <details className="group">
+              <details className="group/cli">
                 <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-sm text-base-content/60 hover:text-base-content">
-                  <ChevronRight className="size-4 transition-transform group-open:rotate-90" />
+                  <ChevronRight className="size-4 transition-transform group-open/cli:rotate-90" />
                   Prefer the command line?
                 </summary>
                 <div className="mt-2 flex justify-between bg-base-200 text-base-content border border-base-300 items-center">
@@ -421,38 +573,87 @@ const SubmissionsPageContent = () => {
                 </div>
               </details>
             </div>
-          </div>{" "}
-          <div className="grid grid-cols-12 gap-4 mb-6">
-            <div className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
-              <div className="card-body">
-                <label className="uppercase">
-                  {isGroupAssignment ? "Groups Submitted" : "Submitted"}
-                </label>
-                <div className="flex items-end content-end gap-1">
-                  <h2 className="text-xl font-bold">{scoresInfo.length}</h2>
-                  {isGroupAssignment ? null : (
-                    <>
-                      /<h4>{students.length}</h4>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
-              <div className="card-body">
-                <label className="uppercase">Class Average</label>
-                {!scoresInfo?.[0]?.["max-score"] ? (
-                  <h2 className="text-xl">N/A</h2>
-                ) : (
-                  <div className="flex items-end gap-1">
-                    <h2 className="text-xl font-bold">
-                      {classAverage ?? "N/A"}
-                    </h2>
-                    /<h4>{scoresInfo?.[0]?.["max-score"]}</h4>
-                  </div>
+          </details>{" "}
+          <div className="grid grid-cols-2 gap-4 mb-6 lg:grid-cols-4">
+            <StatCard
+              label={isGroupAssignment ? "Groups Submitted" : "Submitted"}
+            >
+              <div className="flex items-baseline gap-1">
+                <span className="text-2xl font-bold">{stats.submitted}</span>
+                {isGroupAssignment ? null : (
+                  <span className="text-base-content/50">
+                    / {scopedStudents.length}
+                  </span>
                 )}
               </div>
-            </div>
+            </StatCard>
+            <StatCard label="Class Average">
+              {!scopedScores?.[0]?.["max-score"] ? (
+                <span className="text-2xl font-bold">N/A</span>
+              ) : (
+                <div className="flex items-baseline gap-1">
+                  <span className="text-2xl font-bold">
+                    {avgScore ?? "N/A"}
+                  </span>
+                  <span className="text-base-content/50">
+                    / {scopedScores?.[0]?.["max-score"]}
+                  </span>
+                </div>
+              )}
+            </StatCard>
+            {passingEnabled && (
+              <StatCard label="Passing">
+                {stats.passing + stats.failing === 0 ? (
+                  <span className="text-2xl font-bold">N/A</span>
+                ) : (
+                  <>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-2xl font-bold">
+                        {stats.passing}
+                      </span>
+                      <span className="text-base-content/50">
+                        / {stats.passing + stats.failing}
+                      </span>
+                    </div>
+                    <span className="text-xs text-base-content/50">
+                      {stats.failing > 0 ? (
+                        <button
+                          type="button"
+                          className="link link-hover decoration-dotted underline-offset-2 hover:text-error"
+                          onClick={showFailing}
+                          title="Show failing students"
+                        >
+                          {stats.failing} failing
+                        </button>
+                      ) : (
+                        <>{stats.failing} failing</>
+                      )}
+                      {stats.ungraded > 0 ? `, ${stats.ungraded} ungraded` : ""}
+                    </span>
+                  </>
+                )}
+              </StatCard>
+            )}
+            {acceptedAvailable ? (
+              <StatCard label="Accepted">
+                <div className="flex items-baseline gap-1">
+                  <span className="text-2xl font-bold">{acceptedCount}</span>
+                  <span className="text-base-content/50">
+                    / {scopedStudents.length}
+                  </span>
+                </div>
+                {acceptedNotSubmittedCount > 0 && (
+                  <button
+                    type="button"
+                    className="link link-hover w-fit text-xs text-base-content/50 decoration-dotted underline-offset-2 hover:text-warning"
+                    onClick={showAcceptedNotSubmitted}
+                    title="Show students who accepted but haven't submitted"
+                  >
+                    {acceptedNotSubmittedCount} not yet submitted
+                  </button>
+                )}
+              </StatCard>
+            ) : null}
           </div>
           <div className="mb-2 flex items-center justify-end gap-1 text-sm text-base-content/60">
             <span>Updated {scoresLastUpdated}</span>
@@ -471,16 +672,30 @@ const SubmissionsPageContent = () => {
               />
             </button>
           </div>
+          <SubmissionsControls
+            query={query}
+            onQueryChange={setQuery}
+            filters={filters}
+            onFiltersChange={setFilters}
+            sort={sort}
+            onSortChange={setSort}
+            isGroup={isGroupAssignment}
+            acceptedAvailable={acceptedAvailable}
+            passingAvailable={passingEnabled}
+            sections={sections}
+          />
           <SubmissionsTable
-            scores={scoresInfo}
+            scores={visibleRows}
             students={students}
-            nonSubmitters={nonSubmitters}
+            nonSubmitters={visibleNonSubmitters}
             isGroup={isGroupAssignment}
             org={org}
             classroom={classroom}
             assignment={assignment}
             assignmentName={assignmentInfo?.name}
             maxGroupSize={assignmentInfo?.max_group_size}
+            acceptedUsernames={acceptedAvailable ? acceptedSet : undefined}
+            thresholdFraction={thresholdFraction}
           />
         </DrawerContent>
         <DrawerSidebar selected="assignments" />
