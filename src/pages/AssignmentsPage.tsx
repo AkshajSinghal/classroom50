@@ -4,6 +4,7 @@ import { useState } from "react"
 
 import AssignmentsTable from "@/pages/assignments/AssignmentsTable"
 import Breadcrumb from "@/components/breadcrumb"
+import { ArchivedClassroomNotice } from "@/components/ArchivedClassroomNotice"
 import Drawer, {
   DrawerContent,
   DrawerSidebar,
@@ -14,6 +15,7 @@ import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetStudents from "@/hooks/useGetStudents"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
+import { isClassroomArchived } from "@/types/classroom"
 import { OrgRepos } from "./ClassesPage"
 
 // Split button: primary "Assignment" creates; the caret reveals "Reuse
@@ -94,6 +96,7 @@ const TeacherAssignmentsView = ({
     org,
     classroom,
   )
+  const archived = isClassroomArchived(classroomData ?? {})
 
   return (
     <div>
@@ -112,15 +115,34 @@ const TeacherAssignmentsView = ({
           </h3>
         </div>
         <div className="pt-10">
-          <NewAssignmentButton org={org} classroom={classroom} />
+          {archived ? (
+            <span className="badge badge-soft badge-neutral">Archived</span>
+          ) : (
+            <NewAssignmentButton org={org} classroom={classroom} />
+          )}
         </div>
       </div>
+      {archived ? (
+        <ArchivedClassroomNotice>
+          This classroom is archived — new assignments and student accepts are
+          disabled. Unarchive it from{" "}
+          <Link
+            className="link"
+            to="/$org/$classroom/edit"
+            params={{ org, classroom }}
+          >
+            Classroom Settings
+          </Link>{" "}
+          to make changes.
+        </ArchivedClassroomNotice>
+      ) : null}
       <AssignmentsTable
         org={org}
         classroom={classroom}
         assignments={classData?.assignments}
         students={students}
         loading={assignmentsLoading}
+        archived={archived}
       />
     </div>
   )

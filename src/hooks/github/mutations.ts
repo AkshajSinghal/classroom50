@@ -14,6 +14,7 @@ import sodium from "libsodium-wrappers"
 import { getBranchRef, getClassroomJson, getCommit } from "@/api/github/queries"
 import type { CreateClassroomInput } from "@/api/mutations/classrooms"
 import type { OnboardingCleanupMode } from "@/types/classroom"
+import { isClassroomArchived } from "@/types/classroom"
 import { STUDENT_CSV_FIELDS } from "@/api/mutations/students"
 import { getRepo } from "./queries"
 
@@ -187,7 +188,9 @@ export function createTreeForAssignment(params: {
 
 export function createCommit(
   client: GitHubClient,
-  input: CreateClassroomInput & {
+  input: {
+    org: string
+    classroom: string
     parents: [string]
     tree_sha: string
     message?: string
@@ -2173,18 +2176,50 @@ export type UpdateClassroomMetadataResult = {
 export type EditClassroomInput = {
   org: string
   slug: string
-  term: string
-  name: string
+  // name/term are written only when provided — a pure archive/unarchive toggle
+  // omits them so editClassroom's `...current` spread preserves the persisted
+  // values (no stale-cache overwrite, no lost-update of a concurrent rename).
+  term?: string
+  name?: string
   onboarding_cleanup?: OnboardingCleanupMode
+  // Archive lifecycle: false = archive, true = unarchive. Omitted leaves the
+  // current value (or its absence) intact. See isClassroomArchived.
+  active?: boolean
 }
 
 export type EditClassroomResult = Awaited<ReturnType<typeof editClassroom>>
+
+// Merge an edit onto the current classroom.json record. Pure (no I/O):
+// - spreads `...current` first so unknown/future fields a sibling binary wrote
+//   ride through verbatim (the strict CLI round-trips this file);
+// - writes name/term/onboarding_cleanup/active ONLY when provided, so a pure
+//   archive toggle preserves the persisted name/term, and a name edit doesn't
+//   disturb the lifecycle flag. `active` is a meaningful boolean (false =
+//   archived), so unarchive writes `true` rather than deleting the key.
+export function buildClassroomUpdate(
+  current: Record<string, unknown>,
+  fields: {
+    name?: string
+    term?: string
+    onboarding_cleanup?: OnboardingCleanupMode
+    active?: boolean
+  },
+): Record<string, unknown> {
+  const { name, term, onboarding_cleanup, active } = fields
+  return {
+    ...current,
+    ...(name !== undefined ? { name } : {}),
+    ...(term !== undefined ? { term } : {}),
+    ...(onboarding_cleanup !== undefined ? { onboarding_cleanup } : {}),
+    ...(active !== undefined ? { active } : {}),
+  }
+}
 
 export async function editClassroom(
   client: GitHubClient,
   input: EditClassroomInput,
 ) {
-  const { org, slug, term, name, onboarding_cleanup } = input
+  const { org, slug, term, name, onboarding_cleanup, active } = input
 
   const ref = await getBranchRef(client, org)
 
@@ -2202,14 +2237,26 @@ export async function editClassroom(
     )
   }
 
-  const next = {
-    ...current,
+  // Archived classrooms are read-only — refuse a settings edit (name / term /
+  // onboarding_cleanup), but let a lifecycle toggle through since unarchiving
+  // re-enables editing. Gate on whether a settings field is actually present
+  // rather than on `active === undefined`, so a payload that bundles a settings
+  // change with `active: false` (a stale tab, a direct API call, or a CLI/agent)
+  // cannot slip an edit past the guard by re-asserting the archived state.
+  const editsSettings =
+    name !== undefined || term !== undefined || onboarding_cleanup !== undefined
+  if (editsSettings && active !== true && isClassroomArchived(current)) {
+    throw new Error(
+      `Classroom "${slug}" is archived — settings are read-only. Unarchive it first to make changes.`,
+    )
+  }
+
+  const next = buildClassroomUpdate(current, {
     name,
     term,
-    // Only write the field when explicitly provided, so an edit that doesn't
-    // touch cleanup leaves any existing value (or its absence) intact.
-    ...(onboarding_cleanup !== undefined ? { onboarding_cleanup } : {}),
-  }
+    onboarding_cleanup,
+    active,
+  })
 
   const blob = await createBlob(client, {
     org,
@@ -2235,7 +2282,6 @@ export async function editClassroom(
     tree_sha: tree.sha,
     parents: [ref.object.sha],
     classroom: slug,
-    term,
   })
 
   const updatedRef = await updateRef(client, org, newCommit.sha)
