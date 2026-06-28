@@ -3,13 +3,16 @@ import { GitHubAPIError } from "@/hooks/github/errors"
 import type { GitHubMoveBranch } from "@/hooks/github/types"
 import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
 import { sleep } from "@/hooks/github/queries"
+import { isClassroomArchived } from "@/types/classroom"
 import {
   createCommit,
   createTree,
   deleteClassroomTeam,
+  editClassroom,
   ensureClassroomTeam,
   getErrorMessage,
   updateRef,
+  type EditClassroomInput,
   type GitTreeEntry,
   type GitTreeFileMode,
 } from "@/hooks/github/mutations"
@@ -115,6 +118,82 @@ export async function createClassroomFilesWithConflictRetry(
   input: CreateClassroomInput,
 ) {
   return withGitConflictRetry(() => createClassroomFiles(client, input))
+}
+
+// editClassroom does a read-modify-write on the shared classroom50 main branch
+// (re-reading the ref + classroom.json each call), so a concurrent write 409s
+// the updateRef. It is safe to retry.
+// Refuse a write into an archived classroom (active: false). The UI hides the
+// affordances, but the write path is the authoritative guard (stale tab, direct
+// API call, CLI/agent). Reads classroom.json fresh and fails closed before any
+// commit; a missing/legacy classroom.json reads as active. Shared by the
+// assignment and roster mutations.
+export async function assertClassroomNotArchived(
+  client: GitHubClient,
+  org: string,
+  classroom: string,
+) {
+  let classroomJson
+  try {
+    classroomJson = await readClassroomJsonForGuard(client, org, classroom)
+  } catch (err) {
+    // A missing/legacy classroom.json reads as active — never block.
+    if (err instanceof GitHubAPIError && err.isNotFound) return
+    // A transient read failure (rate-limit / 5xx / network) can't prove the
+    // classroom's state. Stay fail-closed (don't let a write into a possibly
+    // archived classroom through), but surface an actionable message instead
+    // of bubbling the raw GitHub error as if the write itself failed.
+    if (isTransientReadError(err)) {
+      throw new Error(
+        `Couldn't verify whether classroom "${classroom}" is archived (a temporary problem reading its settings). Please try again.`,
+        { cause: err },
+      )
+    }
+    throw err
+  }
+  if (isClassroomArchived(classroomJson)) {
+    throw new Error(
+      `Classroom "${classroom}" is archived — changes are disabled. Unarchive it in Classroom Settings first.`,
+    )
+  }
+}
+
+// A transient read can't determine archive state and shouldn't fail-closed on
+// the first blip; retry once before giving up so a single rate-limit/5xx/network
+// hiccup doesn't block an otherwise-valid mutation.
+async function readClassroomJsonForGuard(
+  client: GitHubClient,
+  org: string,
+  classroom: string,
+) {
+  try {
+    return await getClassroomJson(client, { org, classroom })
+  } catch (err) {
+    if (isTransientReadError(err)) {
+      await sleep(300)
+      return await getClassroomJson(client, { org, classroom })
+    }
+    throw err
+  }
+}
+
+// Errors that don't prove the classroom's state: rate limiting, 5xx, and
+// non-HTTP (network) failures. A 404 is determinate (handled by the caller as
+// legacy/active) and is therefore NOT transient.
+function isTransientReadError(err: unknown): boolean {
+  if (err instanceof GitHubAPIError) {
+    return err.isRateLimited || err.status >= 500
+  }
+  // A thrown non-GitHubAPIError here is a network/parse failure, not a
+  // determinate API answer — treat as transient.
+  return err instanceof Error
+}
+
+export async function editClassroomWithConflictRetry(
+  client: GitHubClient,
+  input: EditClassroomInput,
+) {
+  return withGitConflictRetry(() => editClassroom(client, input))
 }
 
 export type DeleteClassroomInput = {

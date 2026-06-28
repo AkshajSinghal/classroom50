@@ -29,7 +29,11 @@ import {
   getAssignmentsFile,
   type AssignmentsFile,
 } from "../queries/assignments"
-import { withGitConflictRetry, type CreateClassroomResult } from "./classrooms"
+import {
+  withGitConflictRetry,
+  assertClassroomNotArchived,
+  type CreateClassroomResult,
+} from "./classrooms"
 import type { GitHubRepo } from "@/hooks/github/types"
 import {
   getBranchRefRepo,
@@ -413,7 +417,13 @@ export async function editAssignment(
 ): Promise<CreateAssignmentResult> {
   const { org, classroom, slug } = input
 
-  const ref = await getBranchRef(client, org)
+  // The archive guard is independent of the org ref read, so run them
+  // concurrently — Promise.all rejects on the first rejection, so an archived
+  // classroom still fails closed before any write.
+  const [, ref] = await Promise.all([
+    assertClassroomNotArchived(client, org, classroom),
+    getBranchRef(client, org),
+  ])
   const commit = await getCommit(client, org, ref.object.sha)
 
   const assignmentsFilePath = `${classroom}/assignments.json`
@@ -741,16 +751,25 @@ async function tryGrantTeamTemplateRead(
   }
 }
 
+// Refuse a write into an archived classroom (active: false). The UI hides the
+// New-assignment / reuse / edit affordances, but the write path is the
+// authoritative guard — a stale tab, a direct API call, or a CLI/agent must not
+// be able to mutate an archived classroom. Reads classroom.json fresh and fails
+// closed before any commit. A genuinely teamless/legacy classroom (no `active`)
+// reads as active, so this never blocks normal use.
 export async function createAssignment(
   client: GitHubClient,
   input: CreateAssignmentInput,
 ): Promise<CreateAssignmentResult> {
-  const { entry: assignmentBody, needsTeamGrant } = await buildAssignmentEntry(
-    client,
-    input,
-  )
+  // The archive guard, the assignment-entry build, and the org ref read are
+  // independent, so run them concurrently — Promise.all rejects on the first
+  // rejection, so an archived classroom still fails closed before any write.
+  const [, { entry: assignmentBody, needsTeamGrant }, ref] = await Promise.all([
+    assertClassroomNotArchived(client, input.org, input.classroom),
+    buildAssignmentEntry(client, input),
+    getBranchRef(client, input.org),
+  ])
 
-  const ref = await getBranchRef(client, input.org)
   const commit = await getCommit(client, input.org, ref.object.sha)
 
   const assignmentsFilePath = `${input.classroom}/assignments.json`
@@ -1086,16 +1105,19 @@ export async function copyAssignmentToClassroom(
   input: CopyAssignmentInput,
 ): Promise<CreateAssignmentResult> {
   const { org, source, targetClassroom } = input
+
   const entry = buildReusedEntry(source, {
     slug: input.targetSlug ?? source.slug,
     name: input.targetName ?? source.name,
   })
 
-  // The template re-check is independent of the org ref read, so run them
-  // concurrently — one fewer serial round-trip per conflict-retry attempt. The
-  // fail-closed validation below still throws before any write, so a bad
-  // template never produces a commit.
-  const [repo, ref] = await Promise.all([
+  // The archive guard (refuse reuse into an archived target), the template
+  // re-check, and the org ref read are all independent, so run them
+  // concurrently — one fewer serial round-trip per conflict-retry attempt.
+  // Promise.all rejects on the first rejection, so an archived classroom or a
+  // bad template still throws before any write — no commit.
+  const [, repo, ref] = await Promise.all([
+    assertClassroomNotArchived(client, org, targetClassroom),
     entry.template
       ? getRepo(client, entry.template.owner, entry.template.repo)
       : Promise.resolve(null),
@@ -1292,7 +1314,12 @@ export async function deleteAssignment(
 ) {
   const { org, classroom, assignment: slug } = input
 
-  const ref = await getBranchRef(client, org)
+  // Refuse a delete into an archived classroom (write-path guard); run the
+  // check concurrently with the ref read.
+  const [, ref] = await Promise.all([
+    assertClassroomNotArchived(client, org, classroom),
+    getBranchRef(client, org),
+  ])
   const commit = await getCommit(client, org, ref.object.sha)
 
   const assignmentsFilePath = `${classroom}/assignments.json`

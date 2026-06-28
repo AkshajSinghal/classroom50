@@ -2,6 +2,7 @@ import { useState } from "react"
 import { Link, useParams, useRouter } from "@tanstack/react-router"
 import { UsersRound } from "lucide-react"
 import Breadcrumb from "@/components/breadcrumb"
+import { ArchivedClassroomNotice } from "@/components/ArchivedClassroomNotice"
 import Drawer, {
   DrawerContent,
   DrawerSidebar,
@@ -17,6 +18,8 @@ import { useGithubAuth } from "@/auth/useGithubAuth"
 import { GroupCollaboratorsModal } from "@/components/modals/GroupCollaboratorsModal"
 import EditAssignmentForm from "./assignments/EditAssignmentForm"
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
+import useGetClassroom from "@/hooks/useGetClassroom"
+import { isClassroomArchived } from "@/types/classroom"
 
 const EditAssignmentFormStudent = ({
   org,
@@ -163,6 +166,8 @@ const EditAssignmentPage = () => {
   const router = useRouter()
   const { isTeacher, isStudent } = useCourseTeacherAccess(org)
   const { data: assignments } = useGetClassroomAssignments(org, classroom)
+  const { data: classroomData } = useGetClassroom(org, classroom)
+  const archived = isClassroomArchived(classroomData ?? {})
   const [editSuccess, setEditSuccess] = useState(false)
   const [editWarning, setEditWarning] = useState("")
   const [editError, setEditError] = useState("")
@@ -189,12 +194,27 @@ const EditAssignmentPage = () => {
             <div className="alert alert-warning mt-6">{editWarning}</div>
           )}
           <h1 className="text-2xl font-bold mt-4 mb-6">Edit Assignment</h1>
+          {isTeacher && archived && (
+            <ArchivedClassroomNotice>
+              This classroom is archived — its assignments are read-only.
+              Unarchive it in{" "}
+              <Link
+                className="link"
+                to="/$org/$classroom/edit"
+                params={{ org: org ?? "", classroom: classroom ?? "" }}
+              >
+                Classroom Settings
+              </Link>{" "}
+              to edit assignments.
+            </ArchivedClassroomNotice>
+          )}
           {isTeacher && org && classroom && assignment && (
             <EditAssignmentForm
               org={org}
               classroom={classroom}
               assignment={assignment}
               defaultData={assignmentData}
+              readOnly={archived}
               onCancel={() => {
                 router.history.back()
               }}
