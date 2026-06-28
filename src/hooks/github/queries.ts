@@ -6,6 +6,7 @@ import type { GitHubClient } from "./client"
 import type {
   GitHubBranchRef,
   GitHubCommitRef,
+  GitHubFileListing,
   GitHubOrgInvitation,
   GitHubOrgMembership,
   GitHubRelease,
@@ -567,6 +568,28 @@ export async function getFileCommitAuthorIds(
 export function listOrgMembers(client: GitHubClient, org: string, page = 1) {
   return client.request<GitHubUser[]>(
     `/orgs/${org}/members?per_page=100&page=${page}`,
+  )
+}
+
+// List the classroom directories in the org's classroom50 repo (the same set
+// the classes page shows): the repo-root contents, filtered to directories
+// excluding .github. Server-side equivalent of useGetClasses, for callers
+// (mutations) that can't use the react-query hook. Reads at the default branch
+// unless a ref is given.
+export async function listClassroomDirs(
+  client: GitHubClient,
+  org: string,
+  ref?: string,
+): Promise<GitHubFileListing[]> {
+  const raw = await client.requestRaw(
+    `/repos/${encodeURIComponent(org)}/classroom50/contents/${
+      ref ? `?ref=${encodeURIComponent(ref)}` : ""
+    }`,
+    { method: "GET" },
+  )
+  const listing = JSON.parse(raw) as GitHubFileListing[]
+  return listing.filter(
+    (entry) => entry.type === "dir" && entry.name !== ".github",
   )
 }
 
