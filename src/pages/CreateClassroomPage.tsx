@@ -1,8 +1,9 @@
-import { Link, useParams } from "@tanstack/react-router"
+import { useParams, useNavigate } from "@tanstack/react-router"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 
 import { createClassroomFilesWithConflictRetry } from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
+import { useToast } from "@/context/notifications/NotificationProvider"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import Drawer, {
   DrawerContent,
@@ -14,7 +15,6 @@ import MissingParams from "@/components/MissingParams"
 import RequireTeacher from "@/components/RequireTeacher"
 import CreateClassroomForm from "./classes/CreateClassroomForm"
 import { githubKeys } from "@/hooks/github/queries"
-import { useState } from "react"
 import type {
   CreateClassroomInput,
   CreateClassroomResult,
@@ -23,9 +23,9 @@ import type {
 const CreateClassroomPage = () => {
   const client = useGitHubClient()
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const { notify } = useToast()
   const { org } = useParams({ strict: false })
-  const [classroomCreated, setClassroomCreated] = useState(false)
-  const [classroomSlug, setClassroomSlug] = useState("")
 
   const createClassroomMutation = useMutation<
     CreateClassroomResult,
@@ -52,12 +52,27 @@ const CreateClassroomPage = () => {
       } else {
         console.error("non-GitHub API error:", err)
       }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: githubKeys.rawFile(org ?? "", "classroom50", `/`),
+      notify({
+        tone: "error",
+        message: `Couldn't create classroom: ${err.message}`,
       })
-      setClassroomCreated(true)
+    },
+    onSuccess: (_result, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: githubKeys.jsonFile(org ?? "", "classroom50"),
+      })
+      // Toast before navigating: the provider is mounted above the router, so
+      // the confirmation survives the redirect. GitHub's contents API is
+      // read-after-write eventual, hence "may take a moment to appear".
+      notify({
+        tone: "success",
+        durationMs: 6000,
+        message: "Classroom created. It may take a moment to appear.",
+      })
+      navigate({
+        to: "/$org/$classroom",
+        params: { org: org ?? "", classroom: variables.classroom },
+      })
     },
   })
 
@@ -79,29 +94,10 @@ const CreateClassroomPage = () => {
                 </h1>
               </div>
             </div>
-            {classroomCreated ? (
-              <div className="alert alert-success mb-4">
-                <div>
-                  Your classroom has been created. Click{" "}
-                  <Link
-                    className="underline"
-                    to="/$org/$classroom"
-                    params={{ org, classroom: classroomSlug }}
-                  >
-                    here
-                  </Link>{" "}
-                  to view your new classroom; please note it may take a minute
-                  or two for the new class to show up.
-                </div>
-              </div>
-            ) : (
-              <></>
-            )}
             <div className="flex flex-col">
               <div className="mb-8">
                 <CreateClassroomForm
                   onSubmit={(values) => {
-                    setClassroomSlug(values.slug)
                     createClassroomMutation.mutateAsync({
                       name: values.name,
                       classroom: values.slug,
