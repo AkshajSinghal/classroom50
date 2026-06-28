@@ -51,16 +51,16 @@ const ClassCard = ({
   const canEdit = isTeacher && cl.name
   const archived = isClassroomArchived(classroomData ?? {})
 
-  // Filter only once the classroom's lifecycle is known. Until classroomData
-  // loads we can't tell active from archived, so hide the card under the
-  // Archived tab (avoid a wrong card flashing in) and show a skeleton slot
-  // under Active/All — never paint an archived card that then self-unmounts.
-  if (!classroomData) {
-    if (filter === "archived") return null
-  } else {
-    if (filter === "active" && archived) return null
-    if (filter === "archived" && !archived) return null
-  }
+  // Defer rendering until the classroom's lifecycle is known, for every tab.
+  // We can't tell active from archived until classroomData loads, so painting a
+  // full card (or even a skeleton slot) under Active/All and then unmounting it
+  // when it resolves archived causes a grid relayout flash. Rendering nothing
+  // until resolved means each card appears exactly once, in its correct tab —
+  // never painted then self-unmounted. (The page already shows a top-level
+  // skeleton grid during the initial classes load.)
+  if (!classroomData) return null
+  if (filter === "active" && archived) return null
+  if (filter === "archived" && !archived) return null
 
   return (
     <div className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
