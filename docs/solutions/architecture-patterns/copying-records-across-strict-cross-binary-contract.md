@@ -48,9 +48,9 @@ object, change only its `slug`/`name`, and write it into the target's
 goes onto the wire** (so the strict Go parser accepts it and so a future field
 isn't dropped), and **who actually guards the write** (the optimistic client checks
 vs. the authoritative server-side re-validation). This learning captures the
-copy-record discipline that answers both — it is the *copy/clone* sibling of the
-*field-ADD* learning in
-`evolving-strict-cross-binary-schemas.md` and the *name-construct* learning in
+copy-record discipline that answers both — it is the _copy/clone_ sibling of the
+_field-ADD_ learning in
+`evolving-strict-cross-binary-schemas.md` and the _name-construct_ learning in
 `forward-only-cross-binary-repo-name-contract.md`.
 
 ## Guidance
@@ -63,7 +63,7 @@ never trust the optimistic UI check as the contract guard.**
 
 ### 1. Spread the whole source first — tolerate AND preserve unknown fields
 
-The copy starts by spreading the entire source object, *then* overriding the two
+The copy starts by spreading the entire source object, _then_ overriding the two
 fields it intends to change:
 
 ```ts
@@ -110,10 +110,10 @@ the copy shares no mutable structure with the source:
   tests: source.tests ? source.tests.map((t) => ({ ...t })) : undefined,
 ```
 
-**Caveat to state explicitly:** this clones only the *modeled* nested fields. An
-*unknown* nested object that rode in via `...source` (§1) is **shallow-shared** with
+**Caveat to state explicitly:** this clones only the _modeled_ nested fields. An
+_unknown_ nested object that rode in via `...source` (§1) is **shallow-shared** with
 the source — the spread copies its reference, not its contents. That is acceptable
-here *only* because `source` is treated as read-only: the copy is serialized and
+here _only_ because `source` is treated as read-only: the copy is serialized and
 written immediately, and nothing mutates the shared sub-tree afterward. If this code
 ever began mutating an unknown nested field in place, the shallow share would leak
 back into the source object. The two rules pull in opposite directions — preserve
@@ -130,12 +130,12 @@ differently (or a `null`) would feed the strict Go parser a key it rejects. So t
 copy deletes every key that came out `undefined`:
 
 ```ts
-  if (!entry.template) delete entry.template
-  if (!entry.due_meta) delete entry.due_meta
-  if (entry.runtime && !entry.runtime.container) delete entry.runtime.container
-  if (!entry.runtime) delete entry.runtime
-  if (!entry.allowed_files) delete entry.allowed_files
-  if (!entry.tests) delete entry.tests
+if (!entry.template) delete entry.template
+if (!entry.due_meta) delete entry.due_meta
+if (entry.runtime && !entry.runtime.container) delete entry.runtime.container
+if (!entry.runtime) delete entry.runtime
+if (!entry.allowed_files) delete entry.allowed_files
+if (!entry.tests) delete entry.tests
 ```
 
 This keeps the written JSON byte-for-byte equivalent to what a minimal-source author
@@ -155,7 +155,7 @@ precisely so that legitimately falsy values survive:
   `absent` vs `[]` can mean different things to the CLI, so the copy faithfully
   reproduces the source's choice rather than normalizing one into the other.
 
-The discipline: *delete on the field being undefined, never on the value being falsy.*
+The discipline: _delete on the field being undefined, never on the value being falsy._
 
 ### 5. The UI check is UX; the write path is the contract guard
 
@@ -168,14 +168,14 @@ path, after re-reading the target file at the commit it is about to build on:
 - **Case-insensitive slug collision**, re-read live, so a mixed-case programmatic
   slug (or a slug taken since the modal opened) can't slip past.
 - **Fail-closed template re-check.** `getRepo` returns `null` on a 404 (deleted,
-  renamed, or made private outside the org). The write refuses *before any commit*
+  renamed, or made private outside the org). The write refuses _before any commit_
   rather than persisting a record that points at a template students can't generate
   from.
 - **Private-out-of-org refusal.** A private template owned outside the org can't have
   the target classroom's students granted read, so the write refuses with an
   actionable message rather than committing a broken assignment.
 - **`templateGrantWarning` partial-failure surface.** When an in-org private template
-  *does* need a team grant, the grant is attempted *after* the commit succeeds, and
+  _does_ need a team grant, the grant is attempted _after_ the commit succeeds, and
   any failure is returned as a non-fatal `templateGrantWarning` rather than throwing
   — the assignment was copied successfully; only the convenience grant is degraded.
 
@@ -206,7 +206,7 @@ Each shortcut fails on this specific strict, round-tripped contract:
   `getRepo`-null refusal stops the commit before it happens.
 
 Together: `...source` + selective deep-clone + omitempty `delete` produce a copy that
-is forward-compatible *and* strict-parser-clean, while authoritative write-path
+is forward-compatible _and_ strict-parser-clean, while authoritative write-path
 re-validation guarantees the contract regardless of what the optimistic UI allowed.
 
 ## When to Apply
@@ -288,7 +288,10 @@ expect(fullSource.tests).toHaveLength(1)
 
 ```ts
 const minimal: Assignment = {
-  slug: "bare", name: "Bare", mode: "individual", autograder: "default",
+  slug: "bare",
+  name: "Bare",
+  mode: "individual",
+  autograder: "default",
 }
 const entry = buildReusedEntry(minimal, { slug: "bare2", name: "Bare 2" })
 
@@ -303,7 +306,10 @@ expect("tests" in entry).toBe(false)
 
 ```ts
 const source: Assignment = {
-  slug: "z", name: "Zero", mode: "individual", autograder: "default",
+  slug: "z",
+  name: "Zero",
+  mode: "individual",
+  autograder: "default",
   pass_threshold: 0,
 }
 const entry = buildReusedEntry(source, { slug: "z2", name: "Zero 2" })
@@ -315,8 +321,12 @@ omitempty cleanup must NOT delete it; `absent` vs `[]` can differ to the CLI):
 
 ```ts
 const source: Assignment = {
-  slug: "e", name: "Empties", mode: "individual", autograder: "default",
-  tests: [], allowed_files: [],
+  slug: "e",
+  name: "Empties",
+  mode: "individual",
+  autograder: "default",
+  tests: [],
+  allowed_files: [],
 }
 const entry = buildReusedEntry(source, { slug: "e2", name: "Empties 2" })
 expect(entry.tests).toEqual([])
@@ -324,7 +334,7 @@ expect(entry.allowed_files).toEqual([])
 ```
 
 **Authoritative write-path re-validation** (`copyAssignmentToClassroom`) — the UI's
-optimistic `nextAvailableSlug` prefill is *not* the guard; the write re-checks live:
+optimistic `nextAvailableSlug` prefill is _not_ the guard; the write re-checks live:
 
 ```ts
 // Fail-closed template re-check, run concurrently with the ref read, throwing
@@ -336,7 +346,10 @@ const [repo, ref] = await Promise.all([
   getBranchRef(client, org),
 ])
 if (entry.template) {
-  if (!repo) throw new Error("Template … is not visible — deleted/renamed/private outside org.")
+  if (!repo)
+    throw new Error(
+      "Template … is not visible — deleted/renamed/private outside org.",
+    )
   if (repo.private) {
     const inOrg = entry.template.owner.toLowerCase() === org.toLowerCase()
     if (!inOrg) throw new Error("Template … is private and outside the org — …")
@@ -346,15 +359,27 @@ if (entry.template) {
 
 // Case-insensitive slug collision, re-read live from the target file.
 const entrySlugLower = entry.slug.toLowerCase()
-if (currentAssignments.assignments.some((a) => a.slug.toLowerCase() === entrySlugLower)) {
-  throw new Error(`Assignment "${entry.slug}" already exists in classroom "${targetClassroom}".`)
+if (
+  currentAssignments.assignments.some(
+    (a) => a.slug.toLowerCase() === entrySlugLower,
+  )
+) {
+  throw new Error(
+    `Assignment "${entry.slug}" already exists in classroom "${targetClassroom}".`,
+  )
 }
 
 // Partial-failure: the team grant is attempted AFTER the commit and degrades to
 // a non-fatal warning rather than throwing.
 let templateGrantWarning: string | undefined
 if (needsTeamGrant && entry.template) {
-  templateGrantWarning = await tryGrantTeamTemplateRead(client, org, targetClassroom, entry.slug, entry.template)
+  templateGrantWarning = await tryGrantTeamTemplateRead(
+    client,
+    org,
+    targetClassroom,
+    entry.slug,
+    entry.template,
+  )
 }
 ```
 
