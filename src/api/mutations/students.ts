@@ -24,6 +24,7 @@ import {
   getRawFile,
   getRepoFile,
   getUser,
+  listClassroomDirs,
   listOnboardingRepos,
   ONBOARDING_READ_CONCURRENCY,
 } from "@/hooks/github/queries"
@@ -215,6 +216,7 @@ export async function addStudentToClassroom(
 
   const studentEmail = input.email?.trim() ?? githubUser.email ?? ""
 
+  const now = new Date().toISOString()
   const student: StudentCsvRow = normalizeStudentRow({
     username: githubUser.login,
     first_name: input.first_name?.trim() ?? nameParts.first_name,
@@ -222,15 +224,16 @@ export async function addStudentToClassroom(
     email: studentEmail,
     section: input.section?.trim() ?? "",
     github_id: String(githubUser.id),
-    // Starts "invited"; reconcile flips to "enrolled". email_hash cached so
-    // reconcile can match the self-report by email if needed.
-    enrollment_status: "invited",
+    // Already-member students are written "enrolled" directly (input.enrolled):
+    // no invite/onboarding repo exists for them, so reconcile can't confirm them (#65).
+    enrollment_status: input.enrolled ? "enrolled" : "invited",
     enrollment_method: "github",
     email_hash: studentEmail ? await emailHash(studentEmail) : "",
     // Unique invite token so a per-student secure onboarding link always exists
     // (reconcile's strongest match key; else falls back to github_id / email).
     invite_token: generateInviteToken(),
-    invited_at: new Date().toISOString(),
+    invited_at: now,
+    enrolled_at: input.enrolled ? now : "",
   })
 
   const nextStudents = [...currentStudents, student]
@@ -381,6 +384,192 @@ export async function addEmailInviteToClassroomWithConflictRetry(
   return withGitConflictRetry(() => addEmailInviteToClassroom(client, input))
 }
 
+// Resolve a bare email to a GitHub identity by scanning the org's OTHER
+// classroom rosters (GitHub has no email->user lookup). Returns the first
+// enrolled row with a matching email, or null. `ref` pins all reads to one commit.
+async function resolveStudentIdentityByEmail(
+  client: GitHubClient,
+  org: string,
+  email: string,
+  excludeClassroom: string,
+  ref: string,
+): Promise<{
+  username: string
+  github_id: string
+  first_name: string
+  last_name: string
+} | null> {
+  const targetHash = await emailHash(email)
+
+  let dirs
+  try {
+    dirs = await listClassroomDirs(client, org, ref)
+  } catch {
+    return null
+  }
+  const otherClassrooms = dirs
+    .map((d) => d.name)
+    .filter((name) => name && name !== excludeClassroom)
+
+  const matches = await mapWithConcurrency(
+    otherClassrooms,
+    ONBOARDING_READ_CONCURRENCY,
+    async (classroom) => {
+      let csv: string
+      try {
+        csv = await getRawFile(client, {
+          org,
+          path: `${classroom}/students.csv`,
+          ref,
+        })
+      } catch {
+        return null // no roster / unreadable — skip
+      }
+      const rows = parseStudentsCsv(csv)
+      const hit = rows.find(
+        (row) =>
+          // A resolved identity matched by email_hash (the && guards against
+          // rowMatchesEmailHash's keyless-true fallthrough).
+          Boolean(row.username) &&
+          (Boolean(row.email_hash) || Boolean(row.email.trim())) &&
+          rowMatchesEmailHash(row, email, targetHash),
+      )
+      // Carry the matched row's name (not section — that's classroom-specific).
+      return hit
+        ? {
+            username: hit.username,
+            github_id: hit.github_id,
+            first_name: hit.first_name,
+            last_name: hit.last_name,
+          }
+        : null
+    },
+  )
+
+  return matches.find((m) => m !== null) ?? null
+}
+
+// Enroll an email-only row (matched by email, since it has no username yet),
+// backfilling the resolved identity. Used on the already-member 422 path.
+async function enrollEmailRowWithResolvedIdentity(
+  client: GitHubClient,
+  input: {
+    org: string
+    classroom: string
+    email: string
+    username: string
+    github_id: string
+    first_name?: string
+    last_name?: string
+  },
+) {
+  return withGitConflictRetry(async () => {
+    const { org, classroom } = input
+    const ref = await getBranchRef(client, org)
+    const commit = await getCommit(client, org, ref.object.sha)
+    const studentsFilePath = `${classroom}/students.csv`
+    const currentCsv = await getRawFile(client, {
+      org,
+      path: studentsFilePath,
+      ref: ref.object.sha,
+    })
+    const currentStudents = parseStudentsCsv(currentCsv)
+
+    const emailKey = input.email.trim().toLowerCase()
+    const now = new Date().toISOString()
+    const nextStudents = currentStudents.map((row) =>
+      row.email.toLowerCase() === emailKey && !row.username
+        ? normalizeStudentRow({
+            ...row,
+            username: input.username,
+            github_id: input.github_id,
+            // Backfill name only where the teacher left it blank (teacher wins);
+            // section is not synced — it's classroom-specific.
+            first_name: row.first_name?.trim() || (input.first_name ?? ""),
+            last_name: row.last_name?.trim() || (input.last_name ?? ""),
+            enrollment_status: "enrolled",
+            enrolled_at: now,
+          })
+        : row,
+    )
+    const nextCsv = stringifyStudentsCsv(nextStudents)
+    await commitStudentsCsv(client, {
+      org,
+      classroom,
+      baseTreeSha: commit.tree.sha,
+      parentSha: ref.object.sha,
+      content: nextCsv,
+      message: `Enroll already-member student: ${classroom}/${input.username}`,
+    })
+  })
+}
+
+// Remove an email-only row (matched by email) — undoes a stub when the email is
+// an org member we couldn't identify, so it isn't left stuck in "Awaiting".
+async function removeEmailRowWithRetry(
+  client: GitHubClient,
+  input: { org: string; classroom: string; email: string },
+) {
+  return withGitConflictRetry(async () => {
+    const { org, classroom } = input
+    const ref = await getBranchRef(client, org)
+    const commit = await getCommit(client, org, ref.object.sha)
+    const studentsFilePath = `${classroom}/students.csv`
+    const currentCsv = await getRawFile(client, {
+      org,
+      path: studentsFilePath,
+      ref: ref.object.sha,
+    })
+    const currentStudents = parseStudentsCsv(currentCsv)
+    const emailKey = input.email.trim().toLowerCase()
+    const nextStudents = currentStudents.filter(
+      (row) => !(row.email.toLowerCase() === emailKey && !row.username),
+    )
+    const nextCsv = stringifyStudentsCsv(nextStudents)
+    await commitStudentsCsv(client, {
+      org,
+      classroom,
+      baseTreeSha: commit.tree.sha,
+      parentSha: ref.object.sha,
+      content: nextCsv,
+      message: `Remove unresolved email invite: ${classroom}/${input.email}`,
+    })
+  })
+}
+
+// Commit a new students.csv content in one tree+commit+ref update.
+async function commitStudentsCsv(
+  client: GitHubClient,
+  input: {
+    org: string
+    classroom: string
+    baseTreeSha: string
+    parentSha: string
+    content: string
+    message: string
+  },
+) {
+  const tree = await createGitTree(client, {
+    org: input.org,
+    base_tree: input.baseTreeSha,
+    tree: [
+      {
+        path: `${input.classroom}/students.csv`,
+        mode: "100644",
+        type: "blob",
+        content: input.content,
+      },
+    ],
+  })
+  const newCommit = await createGitCommit(client, {
+    org: input.org,
+    message: input.message,
+    tree_sha: tree.sha,
+    parents: [input.parentSha],
+  })
+  await updateRef(client, input.org, newCommit.sha)
+}
+
 export type InviteStudentByEmailResult = AddStudentToClassroomResult & {
   // Set when the row committed but the org email-invite failed (non-fatal).
   inviteWarning?: string
@@ -407,6 +596,77 @@ export async function inviteStudentByEmail(
       team_ids: teamId ? [teamId] : undefined,
     })
   } catch (err) {
+    // A 422 means the email already belongs to a member (or is already invited).
+    // GitHub gives no identity for the email, so resolve it from the teacher's
+    // other rosters: enroll directly if found + active, else drop the stub (#65).
+    if (err instanceof GitHubAPIError && err.status === 422) {
+      const resolved = await resolveStudentIdentityByEmail(
+        client,
+        input.org,
+        result.student.email,
+        input.classroom,
+        result.previousCommitSha,
+      ).catch(() => null)
+
+      const stillActive =
+        Boolean(resolved?.username) &&
+        (await getOrgMembershipState(
+          client,
+          input.org,
+          resolved!.username,
+        ).catch(() => null)) === "active"
+
+      if (resolved && stillActive) {
+        try {
+          await enrollEmailRowWithResolvedIdentity(client, {
+            org: input.org,
+            classroom: input.classroom,
+            email: result.student.email,
+            username: resolved.username,
+            github_id: resolved.github_id,
+            first_name: resolved.first_name,
+            last_name: resolved.last_name,
+          })
+          return {
+            ...result,
+            student: {
+              ...result.student,
+              username: resolved.username,
+              github_id: resolved.github_id,
+              first_name:
+                result.student.first_name?.trim() || resolved.first_name || "",
+              last_name:
+                result.student.last_name?.trim() || resolved.last_name || "",
+              enrollment_status: "enrolled",
+            },
+          }
+        } catch (enrollErr) {
+          console.error(
+            "resolved already-member but enroll write failed:",
+            enrollErr,
+          )
+          // Fall through to the generic warning below (row stays as a stub).
+        }
+      } else if (!resolved) {
+        // Member but unidentifiable from any roster — drop the stub and warn.
+        await removeEmailRowWithRetry(client, {
+          org: input.org,
+          classroom: input.classroom,
+          email: result.student.email,
+        }).catch((removeErr) =>
+          console.error("failed to remove unresolved email stub:", removeErr),
+        )
+        return {
+          ...result,
+          inviteWarning:
+            `${result.student.email} already belongs to a member of the ${input.org} ` +
+            `organization, so no invite was sent and they were not added to this ` +
+            `classroom (we couldn't match the email to a student in your other ` +
+            `classrooms). Add them by their GitHub username instead.`,
+        }
+      }
+    }
+
     console.error("org email invite failed (row committed):", err)
     const detail = getErrorMessage(err)
     return {
@@ -921,6 +1181,9 @@ type AddStudentToClassroomInput = {
   last_name?: string
   email?: string
   section?: string
+  // Write the new row directly as `enrolled` (vs `invited`); set when the
+  // student is already an active org member, so they aren't stranded (#65).
+  enrolled?: boolean
 }
 export async function enrollStudentInClassroom(
   client: GitHubClient,
@@ -932,7 +1195,26 @@ export async function enrollStudentInClassroom(
   // Can reject on a transient read; attach a catch to avoid an unhandled rejection.
   const teamPromise = resolveClassroomTeam(client, org, classroom)
   teamPromise.catch(() => {})
-  const result = await addStudentToClassroomWithConflictRetry(client, input)
+
+  // Already an active member -> write the row enrolled directly (no invite is
+  // sent, so reconcile would never confirm them). Best-effort: a failed read
+  // falls back to the normal "invited" path (#65).
+  let alreadyMember = false
+  const normalizedUsername = input.username.trim()
+  if (normalizedUsername) {
+    try {
+      alreadyMember =
+        (await getOrgMembershipState(client, org, normalizedUsername)) ===
+        "active"
+    } catch {
+      alreadyMember = false
+    }
+  }
+
+  const result = await addStudentToClassroomWithConflictRetry(client, {
+    ...input,
+    enrolled: alreadyMember,
+  })
 
   // CLI order: roster row -> membership -> team. Membership/team failures are
   // non-fatal warnings since the commit already landed.
@@ -987,6 +1269,132 @@ export async function enrollStudentInClassroom(
     ...result,
     teamWarning: warnings.length > 0 ? warnings.join(" ") : undefined,
   }
+}
+
+export type MarkStudentEnrolledInput = {
+  org: string
+  classroom: string
+  username: string
+  github_id?: string
+}
+
+// Teacher-initiated confirm for a verified live org member with no onboarding
+// repo (reconcile can't confirm those). Re-verifies active membership before
+// writing, so a non-member can't be bound (#65; keeps the #50 trust model).
+async function markStudentEnrolled(
+  client: GitHubClient,
+  input: MarkStudentEnrolledInput,
+) {
+  const { org, classroom } = input
+  await assertClassroomNotArchived(client, org, classroom)
+
+  const normalizedUsername = input.username.trim()
+  if (!normalizedUsername) {
+    throw new Error("GitHub username is required")
+  }
+
+  // Authoritative member re-check (the UI gates on a cached member set; this is
+  // the real guard). Only an active member can be marked enrolled.
+  const state = await getOrgMembershipState(client, org, normalizedUsername)
+  if (state !== "active") {
+    throw new Error(
+      `${normalizedUsername} is not an active member of the ${org} organization, so they can't be marked enrolled.`,
+    )
+  }
+
+  const ref = await getBranchRef(client, org)
+  const commit = await getCommit(client, org, ref.object.sha)
+  const studentsFilePath = `${classroom}/students.csv`
+  const currentCsv = await getRawFile(client, {
+    org,
+    path: studentsFilePath,
+    ref: ref.object.sha,
+  })
+  const currentStudents = parseStudentsCsv(currentCsv)
+
+  // Match the target row by username or github_id (mirrors unenroll's predicate).
+  const sameRow = (student: StudentCsvRow) =>
+    student.username.toLowerCase() === normalizedUsername.toLowerCase() ||
+    (Boolean(input.github_id) &&
+      Boolean(student.github_id) &&
+      student.github_id === input.github_id)
+
+  const target = currentStudents.find(sameRow)
+  if (!target) {
+    throw new Error(`Student ${normalizedUsername} does not exist in roster!`)
+  }
+
+  if (target.enrollment_status === "enrolled") {
+    // Already enrolled — nothing to write; treat as success (idempotent).
+    return { alreadyEnrolled: true, student: target }
+  }
+
+  const now = new Date().toISOString()
+  const enrolledRow = normalizeStudentRow({
+    ...target,
+    enrollment_status: "enrolled",
+    enrolled_at: now,
+  })
+  const nextStudents = currentStudents.map((student) =>
+    sameRow(student) ? enrolledRow : student,
+  )
+  const nextCsv = stringifyStudentsCsv(nextStudents)
+
+  const tree = await createGitTree(client, {
+    org,
+    base_tree: commit.tree.sha,
+    tree: [
+      {
+        path: studentsFilePath,
+        mode: "100644",
+        type: "blob",
+        content: nextCsv,
+      },
+    ],
+  })
+
+  const newCommit = await createGitCommit(client, {
+    org,
+    message: `Mark student enrolled: ${classroom}/${enrolledRow.username}`,
+    tree_sha: tree.sha,
+    parents: [ref.object.sha],
+  })
+
+  await updateRef(client, org, newCommit.sha)
+
+  return { alreadyEnrolled: false, student: enrolledRow }
+}
+
+export async function markStudentEnrolledWithConflictRetry(
+  client: GitHubClient,
+  input: MarkStudentEnrolledInput,
+) {
+  const result = await withGitConflictRetry(() =>
+    markStudentEnrolled(client, input),
+  )
+
+  // Best-effort: ensure the now-enrolled member is on the classroom team (read
+  // on private templates). Non-fatal — the roster write already landed.
+  let teamWarning: string | undefined
+  try {
+    const team = await resolveClassroomTeam(client, input.org, input.classroom)
+    if (team.slug) {
+      await addUserToTeam(client, {
+        org: input.org,
+        teamSlug: team.slug,
+        username: result.student.username,
+        role: "member",
+      })
+    }
+  } catch (err) {
+    console.error("team add failed (mark enrolled):", err)
+    teamWarning =
+      `${result.student.username} was marked enrolled, but adding them to the ` +
+      `classroom team failed; they won't have read on private templates until ` +
+      `it's retried.`
+  }
+
+  return { ...result, teamWarning }
 }
 
 type BulkImportProgress = {

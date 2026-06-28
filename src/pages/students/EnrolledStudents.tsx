@@ -7,6 +7,7 @@ import {
   RefreshCw,
   Send,
   Trash,
+  UserCheck,
 } from "lucide-react"
 
 import { getName, getInitials, isSameGitHubUser } from "@/util/students"
@@ -15,10 +16,16 @@ import Avatar from "@/components/avatar"
 import type { Student } from "@/types/classroom"
 import { ConfirmModal } from "@/components/modals"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { reconcileOnboarding, unenrollStudent } from "@/api/mutations/students"
+import {
+  reconcileOnboarding,
+  unenrollStudent,
+  markStudentEnrolledWithConflictRetry,
+} from "@/api/mutations/students"
 import type { UnenrollStudentInput } from "@/api/mutations/students"
 import { resendOrgInvitation, getErrorMessage } from "@/hooks/github/mutations"
 import { useSafeSubmit } from "@/hooks/useSafeSubmit"
+import { useToast } from "@/context/notifications/NotificationProvider"
+import useGetOrgMembers from "@/hooks/useGetOrgMembers"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
@@ -26,7 +33,7 @@ import { invalidateInviteQueries as invalidateInviteQueriesForOrg } from "@/hook
 import { useUpdateRosterCache } from "@/hooks/useGetStudents"
 import useRosterStatus from "@/hooks/useRosterStatus"
 import { useGitHubViewer } from "@/hooks/github/hooks"
-import { type InviteStatus } from "@/util/inviteStatus"
+import { type InviteStatus, memberIdSet } from "@/util/inviteStatus"
 import {
   applyReconciledToRoster,
   removeFromRoster,
@@ -403,6 +410,11 @@ const EnrolledStudents = ({
   )
 
   const { data: viewer } = useGitHubViewer()
+  const { notify } = useToast()
+  const { members } = useGetOrgMembers(org)
+  // Live member github_ids (cache hit — useRosterStatus already fetched them),
+  // for gating the "Mark enrolled" affordance.
+  const memberIds = useMemo(() => memberIdSet(members ?? []), [members])
   const {
     statusByKey,
     getStatus,
@@ -516,6 +528,58 @@ const EnrolledStudents = ({
     },
   })
 
+  // Per-row confirm for an already-member with no onboarding repo (reconcile
+  // can't confirm those); the mutation re-verifies membership server-side (#65).
+  const runMarkEnrolled = useSafeSubmit()
+  const [markingUsernames, setMarkingUsernames] = useState<Set<string>>(
+    new Set(),
+  )
+
+  const markEnrolledMutation = useMutation({
+    mutationFn: (student: Student) =>
+      markStudentEnrolledWithConflictRetry(client, {
+        org,
+        classroom,
+        username: student.username,
+        github_id: student.github_id || undefined,
+      }),
+  })
+
+  const handleMarkEnrolled = async (student: Student) => {
+    setMarkingUsernames((prev) => new Set(prev).add(student.username))
+    dismissWarning(student.username)
+    try {
+      const result = await markEnrolledMutation.mutateAsync(student)
+      // Optimistic flip to enrolled; a refetch reconciles the remaining fields.
+      updateRosterCache((current) =>
+        current.map((s) =>
+          studentKey(s) === studentKey(student)
+            ? { ...s, enrollment_status: "enrolled" as const }
+            : s,
+        ),
+      )
+      invalidateInviteQueries()
+      notify({
+        tone: result.teamWarning ? "warning" : "success",
+        durationMs: 6000,
+        message: result.teamWarning
+          ? result.teamWarning
+          : `${student.username} marked enrolled.`,
+      })
+    } catch (err) {
+      notify({
+        tone: "error",
+        message: `Couldn't mark ${student.username} enrolled: ${getErrorMessage(err)}`,
+      })
+    } finally {
+      setMarkingUsernames((prev) => {
+        const next = new Set(prev)
+        next.delete(student.username)
+        return next
+      })
+    }
+  }
+
   const handleResend = async (student: Student) => {
     setResendingUsernames((prev) => new Set(prev).add(student.username))
     dismissWarning(student.username)
@@ -602,6 +666,17 @@ const EnrolledStudents = ({
       (status === "pending" || status === "expired" || status === "none") &&
       Boolean(student.github_id)
     const isResending = resendingUsernames.has(student.username)
+    // Show "Mark enrolled" only for a verified live member stuck awaiting (not
+    // already enrolled, not onboarding-confirmable); needs a github_id to verify.
+    const isVerifiedMember =
+      Boolean(student.github_id) && memberIds.has(student.github_id)
+    const showMarkEnrolled =
+      statusAvailable &&
+      isVerifiedMember &&
+      status !== "member" &&
+      status !== "removed" &&
+      status !== "ready"
+    const isMarking = markingUsernames.has(student.username)
     const invitedAtLabel =
       status === "pending" || status === "expired"
         ? formatInvitedAt(statusEntry?.invitedAt)
@@ -673,6 +748,28 @@ const EnrolledStudents = ({
               email={student.email}
               token={student.invite_token}
             />
+          ) : null}
+
+          {showMarkEnrolled ? (
+            <button
+              type="button"
+              className="btn btn-xs btn-primary"
+              disabled={isMarking}
+              aria-label={`Mark ${student.username} enrolled (already an organization member)`}
+              title="Already an organization member — mark enrolled"
+              onClick={() =>
+                void runMarkEnrolled(() => handleMarkEnrolled(student))
+              }
+            >
+              {isMarking ? (
+                <span className="loading loading-spinner loading-xs" />
+              ) : (
+                <>
+                  <UserCheck className="size-3.5" />
+                  Mark enrolled
+                </>
+              )}
+            </button>
           ) : null}
 
           <UnenrollStudentButton
