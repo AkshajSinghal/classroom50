@@ -571,11 +571,8 @@ export function listOrgMembers(client: GitHubClient, org: string, page = 1) {
   )
 }
 
-// List the classroom directories in the org's classroom50 repo (the same set
-// the classes page shows): the repo-root contents, filtered to directories
-// excluding .github. Server-side equivalent of useGetClasses, for callers
-// (mutations) that can't use the react-query hook. Reads at the default branch
-// unless a ref is given.
+// Server-side equivalent of useGetClasses: classroom dirs in the org's
+// classroom50 repo (root contents, dirs minus .github), for non-hook callers.
 export async function listClassroomDirs(
   client: GitHubClient,
   org: string,

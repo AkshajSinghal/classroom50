@@ -10,18 +10,13 @@ import { GitHubAPIError } from "@/hooks/github/errors"
 import type { GitHubClient } from "@/hooks/github/client"
 import { emailHash } from "@/util/onboarding"
 
-// These exercise the #65 fix: an already-org-member student must land directly
-// as `enrolled` (not stuck "invited"/awaiting), and the per-row "mark enrolled"
-// path must (a) refuse a non-member and (b) write the canonical enrolled shape.
-//
-// Both functions do I/O via the GitHubClient, so we stub a path-routing fake
-// client (same approach as classrooms.test.ts) and assert on the students.csv
-// content committed to git/trees.
+// #65: an already-org-member must land `enrolled` (not stuck "awaiting"), the
+// per-row confirm must refuse a non-member, and an already-member email invite
+// must resolve cross-roster or drop the stub. I/O is stubbed via a path-routing
+// fake client; assertions read the students.csv committed to git/trees.
 
 type CommittedCsv = { content: string | null }
 
-// Build a fake client that serves a starting students.csv and captures the CSV
-// written to the git tree. `membershipState` is what GET memberships returns.
 const makeClient = (opts: {
   startingCsv: string
   membershipState?: "active" | "pending" | null
@@ -37,13 +32,12 @@ const makeClient = (opts: {
 
   const requestRaw = vi.fn().mockImplementation((path: string) => {
     if (path.includes("/contents/") && path.includes("classroom.json")) {
-      // getClassroomJson (resolveClassroomTeam) reads raw JSON; no team -> default slug.
       return Promise.resolve(JSON.stringify({ short_name: "cs101" }))
     }
     return Promise.reject(new Error(`unexpected requestRaw: ${path}`))
   })
 
-  // getRawFile returns a base64 GitHub contents file object via client.request.
+  // getRawFile returns a base64 contents object via client.request.
   const csvFile = () => ({
     type: "file" as const,
     encoding: "base64" as const,
@@ -169,8 +163,6 @@ describe("markStudentEnrolledWithConflictRetry — member-guarded manual confirm
         github_id: "42",
       }),
     ).rejects.toThrow(/not an active member/i)
-
-    // No students.csv write happened.
     expect(committed.content).toBeNull()
   })
 
@@ -192,7 +184,6 @@ describe("markStudentEnrolledWithConflictRetry — member-guarded manual confirm
     const alice = rows.find((r) => r.username === "alice")
     expect(alice?.enrollment_status).toBe("enrolled")
     expect(alice?.enrolled_at).toBeTruthy()
-    // Preserved fields.
     expect(alice?.email).toBe("alice@x.edu")
     expect(alice?.github_id).toBe("42")
   })
@@ -232,7 +223,7 @@ describe("inviteStudentByEmail — already-member email resolution (#65 email pa
     })
 
   // Fake client over a mutable multi-classroom roster map. inviteSucceeds=false
-  // makes POST /invitations throw a 422 (the already-member signal).
+  // makes POST /invitations 422 (the already-member signal).
   const makeEmailClient = (opts: {
     rosters: Record<string, string>
     inviteSucceeds: boolean
@@ -337,8 +328,6 @@ describe("inviteStudentByEmail — already-member email resolution (#65 email pa
     lastName = "",
   ) => {
     const hash = await emailHash(email)
-    // Columns: username,first_name,last_name,email,section,github_id,
-    // enrollment_status,enrollment_method,email_hash,invite_token,invited_at,enrolled_at
     return `${username},${firstName},${lastName},${email},sec-other,${id},enrolled,github,${hash},,2026-01-01T00:00:00Z,2026-01-02T00:00:00Z\n`
   }
 
@@ -361,7 +350,7 @@ describe("inviteStudentByEmail — already-member email resolution (#65 email pa
     )
   })
 
-  it("422 + email found enrolled in another classroom -> enrolled here with resolved identity + name backfilled (section not copied)", async () => {
+  it("422 + email enrolled in another classroom -> enrolled here, name backfilled, section not copied", async () => {
     const otherRoster =
       HEADER +
       (await enrolledRowFor("dup@x.edu", "carol", "77", "Carol", "Diaz"))
@@ -382,10 +371,8 @@ describe("inviteStudentByEmail — already-member email resolution (#65 email pa
     expect(row?.enrollment_status).toBe("enrolled")
     expect(row?.username).toBe("carol")
     expect(row?.github_id).toBe("77")
-    // Name backfilled from the other roster (teacher left it blank here).
     expect(row?.first_name).toBe("Carol")
     expect(row?.last_name).toBe("Diaz")
-    // Section is classroom-specific and must NOT be copied from the other roster.
     expect(row?.section ?? "").not.toBe("sec-other")
     expect(result.student.enrollment_status).toBe("enrolled")
   })
@@ -425,7 +412,6 @@ describe("inviteStudentByEmail — already-member email resolution (#65 email pa
     })
 
     expect(result.inviteWarning).toMatch(/already belongs to a member/i)
-    // The stub row was removed so the student isn't stranded.
     const rows = rowsFromCsv(rosters.cs101)
     expect(rows.find((r) => r.email === "ghost@x.edu")).toBeUndefined()
   })
