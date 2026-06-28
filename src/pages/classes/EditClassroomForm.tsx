@@ -106,6 +106,7 @@ const ArchiveClassroomButton = ({
 }) => {
   const client = useGitHubClient()
   const { notify } = useToast()
+  const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
 
   // A pure archive/unarchive write: editClassroom now preserves name/term when
@@ -117,6 +118,21 @@ const ArchiveClassroomButton = ({
         slug: classroom,
         active,
       }),
+    onSuccess: (_result, active) => {
+      // Optimistically flip the cached classroom.json `active` so the button,
+      // the read-only fieldset, and the badges update immediately — GitHub's
+      // contents API is read-after-write eventual. The invalidate reconciles.
+      const key = githubKeys.jsonFile(
+        org,
+        "classroom50",
+        `${classroom}/classroom.json`,
+      )
+      queryClient.setQueryData(
+        key,
+        (prev: Record<string, unknown> | undefined) =>
+          prev ? { ...prev, active } : prev,
+      )
+    },
   })
 
   return (
@@ -202,6 +218,9 @@ const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
   const navigate = useNavigate()
   const { org, classroom } = useParams({ strict: false })
   const [submitted, setSubmitted] = useState(false)
+  // Archived = read-only: disable the settings fields + Save (the Archive /
+  // Delete header actions stay live). editClassroom enforces this server-side.
+  const archived = isClassroomArchived(cl ?? {})
 
   const form = useForm({
     defaultValues: {
@@ -254,6 +273,16 @@ const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
               classroom={classroom}
               archived={isClassroomArchived(cl ?? {})}
               onToggled={() => {
+                // Invalidate the exact classroom.json query (a bare
+                // jsonFile(org,"classroom50") prefix won't match — its empty
+                // `path` segment is concrete), plus the classes-list listing.
+                queryClient.invalidateQueries({
+                  queryKey: githubKeys.jsonFile(
+                    org,
+                    "classroom50",
+                    `${classroom}/classroom.json`,
+                  ),
+                })
                 queryClient.invalidateQueries({
                   queryKey: githubKeys.jsonFile(org, "classroom50"),
                 })
@@ -272,122 +301,133 @@ const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
           </div>
         </div>
 
-        <form.Field name="name">
-          {(field) => (
-            <>
-              <label htmlFor={field.name} className="label font-bold">
-                Classroom Name<span className="text-[#f00]">*</span>
-              </label>
+        {archived ? (
+          <div role="alert" className="alert alert-info alert-soft mb-2">
+            <span className="text-sm">
+              This classroom is archived — settings are read-only. Use Unarchive
+              above to make changes.
+            </span>
+          </div>
+        ) : null}
 
-              <input
-                id={field.name}
-                name={field.name}
-                type="text"
-                className="input w-full mb-4"
-                placeholder="e.g., AP CS Principles"
-                value={field.state.value}
-                onBlur={field.handleBlur}
-                onChange={(e) => field.handleChange(e.target.value)}
-              />
+        <fieldset disabled={archived} className="m-0 min-w-0 border-0 p-0">
+          <form.Field name="name">
+            {(field) => (
+              <>
+                <label htmlFor={field.name} className="label font-bold">
+                  Classroom Name<span className="text-[#f00]">*</span>
+                </label>
 
-              {field.state.meta.errors.length > 0 && (
-                <p className="text-error text-sm mb-4">
-                  {field.state.meta.errors[0]}
-                </p>
-              )}
-            </>
-          )}
-        </form.Field>
+                <input
+                  id={field.name}
+                  name={field.name}
+                  type="text"
+                  className="input w-full mb-4"
+                  placeholder="e.g., AP CS Principles"
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                />
 
-        <>
-          <label className="label font-bold">
-            Classroom Slug<span className="text-[#f00]">*</span>
-          </label>
-
-          <input
-            type="text"
-            disabled
-            className="input w-full mb-4"
-            placeholder="e.g., ap-cs-principles"
-            value={classroom}
-          />
-        </>
-
-        <form.Field name="term">
-          {(field) => (
-            <>
-              <label htmlFor={field.name} className="label font-bold">
-                Classroom Term
-              </label>
-
-              <input
-                id={field.name}
-                name={field.name}
-                type="text"
-                className="input w-full mb-4"
-                placeholder="e.g., Fall 2026"
-                value={field.state.value}
-                onBlur={field.handleBlur}
-                onChange={(e) => field.handleChange(e.target.value)}
-              />
-
-              {field.state.meta.errors.length > 0 && (
-                <p className="text-error text-sm mb-4">
-                  {field.state.meta.errors[0]}
-                </p>
-              )}
-            </>
-          )}
-        </form.Field>
-
-        <form.Field name="onboarding_cleanup">
-          {(field) => (
-            <>
-              <label htmlFor={field.name} className="label font-bold">
-                Onboarding repo cleanup
-              </label>
-              <p className="text-sm text-base-content/60 mb-2">
-                What to do with a student&apos;s onboarding repository once
-                their GitHub identity is reconciled into the roster.
-              </p>
-
-              <select
-                id={field.name}
-                name={field.name}
-                className="select w-full mb-4"
-                value={field.state.value}
-                onBlur={field.handleBlur}
-                onChange={(e) =>
-                  field.handleChange(e.target.value as OnboardingCleanupMode)
-                }
-              >
-                <option value="delete">
-                  Delete (default; removes the repo after reconcile)
-                </option>
-                <option value="archive">
-                  Archive (reversible; hides the repo)
-                </option>
-                <option value="keep">Keep (leave the repo untouched)</option>
-              </select>
-            </>
-          )}
-        </form.Field>
-
-        <div className="card-actions justify-end p-2">
-          <form.Subscribe
-            selector={(state) => [state.canSubmit, state.isSubmitting]}
-          >
-            {([canSubmit, isSubmitting]) => (
-              <button
-                type="submit"
-                className="btn btn-primary"
-                disabled={!canSubmit || isSubmitting || submitted}
-              >
-                {isSubmitting ? "Saving..." : "Save Classroom"}
-              </button>
+                {field.state.meta.errors.length > 0 && (
+                  <p className="text-error text-sm mb-4">
+                    {field.state.meta.errors[0]}
+                  </p>
+                )}
+              </>
             )}
-          </form.Subscribe>
-        </div>
+          </form.Field>
+
+          <>
+            <label className="label font-bold">
+              Classroom Slug<span className="text-[#f00]">*</span>
+            </label>
+
+            <input
+              type="text"
+              disabled
+              className="input w-full mb-4"
+              placeholder="e.g., ap-cs-principles"
+              value={classroom}
+            />
+          </>
+
+          <form.Field name="term">
+            {(field) => (
+              <>
+                <label htmlFor={field.name} className="label font-bold">
+                  Classroom Term
+                </label>
+
+                <input
+                  id={field.name}
+                  name={field.name}
+                  type="text"
+                  className="input w-full mb-4"
+                  placeholder="e.g., Fall 2026"
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                />
+
+                {field.state.meta.errors.length > 0 && (
+                  <p className="text-error text-sm mb-4">
+                    {field.state.meta.errors[0]}
+                  </p>
+                )}
+              </>
+            )}
+          </form.Field>
+
+          <form.Field name="onboarding_cleanup">
+            {(field) => (
+              <>
+                <label htmlFor={field.name} className="label font-bold">
+                  Onboarding repo cleanup
+                </label>
+                <p className="text-sm text-base-content/60 mb-2">
+                  What to do with a student&apos;s onboarding repository once
+                  their GitHub identity is reconciled into the roster.
+                </p>
+
+                <select
+                  id={field.name}
+                  name={field.name}
+                  className="select w-full mb-4"
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(e) =>
+                    field.handleChange(e.target.value as OnboardingCleanupMode)
+                  }
+                >
+                  <option value="delete">
+                    Delete (default; removes the repo after reconcile)
+                  </option>
+                  <option value="archive">
+                    Archive (reversible; hides the repo)
+                  </option>
+                  <option value="keep">Keep (leave the repo untouched)</option>
+                </select>
+              </>
+            )}
+          </form.Field>
+
+          <div className="card-actions justify-end p-2">
+            <form.Subscribe
+              selector={(state) => [state.canSubmit, state.isSubmitting]}
+            >
+              {([canSubmit, isSubmitting]) => (
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={!canSubmit || isSubmitting || submitted}
+                >
+                  {isSubmitting ? "Saving..." : "Save Classroom"}
+                </button>
+              )}
+            </form.Subscribe>
+          </div>
+        </fieldset>
       </div>
     </form>
   )

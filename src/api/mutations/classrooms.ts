@@ -3,6 +3,7 @@ import { GitHubAPIError } from "@/hooks/github/errors"
 import type { GitHubMoveBranch } from "@/hooks/github/types"
 import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
 import { sleep } from "@/hooks/github/queries"
+import { isClassroomArchived } from "@/types/classroom"
 import {
   createCommit,
   createTree,
@@ -122,6 +123,30 @@ export async function createClassroomFilesWithConflictRetry(
 // editClassroom does a read-modify-write on the shared classroom50 main branch
 // (re-reading the ref + classroom.json each call), so a concurrent write 409s
 // the updateRef. It is safe to retry.
+// Refuse a write into an archived classroom (active: false). The UI hides the
+// affordances, but the write path is the authoritative guard (stale tab, direct
+// API call, CLI/agent). Reads classroom.json fresh and fails closed before any
+// commit; a missing/legacy classroom.json reads as active. Shared by the
+// assignment and roster mutations.
+export async function assertClassroomNotArchived(
+  client: GitHubClient,
+  org: string,
+  classroom: string,
+) {
+  let classroomJson
+  try {
+    classroomJson = await getClassroomJson(client, { org, classroom })
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.isNotFound) return
+    throw err
+  }
+  if (isClassroomArchived(classroomJson)) {
+    throw new Error(
+      `Classroom "${classroom}" is archived — changes are disabled. Unarchive it in Classroom Settings first.`,
+    )
+  }
+}
+
 export async function editClassroomWithConflictRetry(
   client: GitHubClient,
   input: EditClassroomInput,

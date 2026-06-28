@@ -19,6 +19,7 @@ const EditAssignmentForm = ({
   onError,
   onMutate,
   onCancel,
+  readOnly = false,
 }: {
   org: string
   classroom: string
@@ -28,6 +29,8 @@ const EditAssignmentForm = ({
   onError?: (error: GitHubAPIError) => void
   onMutate?: () => void
   onCancel?: () => void
+  // View the assignment config read-only (e.g. an archived classroom).
+  readOnly?: boolean
 }) => {
   const client = useGitHubClient()
   const editAssignmentMutation = useMutation<
@@ -52,6 +55,7 @@ const EditAssignmentForm = ({
   return (
     <CreateAssignmentForm
       edit
+      readOnly={readOnly}
       loading={editAssignmentMutation.isPending}
       org={org}
       classroom={classroom}
