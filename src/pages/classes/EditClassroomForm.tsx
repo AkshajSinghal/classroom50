@@ -404,15 +404,29 @@ const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
 
           <div className="card-actions justify-end p-2">
             <form.Subscribe
-              selector={(state) => [state.canSubmit, state.isSubmitting]}
+              selector={(state) => [
+                state.canSubmit,
+                state.isSubmitting,
+                state.isDefaultValue,
+              ]}
             >
-              {([canSubmit, isSubmitting]) => (
+              {([canSubmit, isSubmitting, isDefaultValue]) => (
                 <button
                   type="submit"
                   className="btn btn-primary"
-                  disabled={!canSubmit || isSubmitting || submitted}
+                  disabled={
+                    !canSubmit || isSubmitting || submitted || isDefaultValue
+                  }
+                  title={isDefaultValue ? "No changes to save" : undefined}
                 >
-                  {isSubmitting ? "Saving..." : "Save Classroom"}
+                  {isSubmitting ? (
+                    <>
+                      <span className="loading loading-spinner loading-sm" />
+                      Saving...
+                    </>
+                  ) : (
+                    "Save Classroom"
+                  )}
                 </button>
               )}
             </form.Subscribe>

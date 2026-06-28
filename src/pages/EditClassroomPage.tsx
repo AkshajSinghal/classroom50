@@ -5,7 +5,7 @@ import Drawer, {
   DrawerSidebar,
   DrawerToggle,
 } from "@/components/drawer"
-import { Link, useParams } from "@tanstack/react-router"
+import { useParams } from "@tanstack/react-router"
 import EditClassroomForm from "./classes/EditClassroomForm"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { GitHubAPIError } from "@/hooks/github/errors"
@@ -18,6 +18,7 @@ import {
 import { editClassroomWithConflictRetry } from "@/api/mutations/classrooms"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useToast } from "@/context/notifications/NotificationProvider"
+import { useSafeSubmit } from "@/hooks/useSafeSubmit"
 import RequireTeacher from "@/components/RequireTeacher"
 
 const EditClassroomContent = ({
@@ -30,6 +31,7 @@ const EditClassroomContent = ({
   const client = useGitHubClient()
   const queryClient = useQueryClient()
   const { notify } = useToast()
+  const runSave = useSafeSubmit()
   const { data: cl, isLoading: loadingClassroom } = useGetClassroom(
     org,
     classroom,
@@ -65,21 +67,15 @@ const EditClassroomContent = ({
       queryClient.invalidateQueries({
         queryKey: githubKeys.jsonFile(org ?? "", "classroom50"),
       })
+      // Plain-text message only: the toast surface (NotificationProvider) is
+      // mounted ABOVE the RouterProvider, so a TanStack <Link> here has no
+      // router context and throws on render, blanking the whole app (the throw
+      // escapes the route-level errorComponent). The settings already update in
+      // place via the invalidations above, so no navigation link is needed.
       notify({
         tone: "success",
         durationMs: 5000,
-        message: (
-          <>
-            Classroom settings saved.{" "}
-            <Link
-              className="underline"
-              to="/$org/$classroom"
-              params={{ org, classroom }}
-            >
-              View classroom
-            </Link>
-          </>
-        ),
+        message: "Classroom settings saved.",
       })
     },
   })
@@ -116,15 +112,17 @@ const EditClassroomContent = ({
         <div className="mb-8">
           <EditClassroomForm
             cl={cl}
-            onSubmit={(values) => {
-              editClassroomMutation.mutateAsync({
-                name: values.name,
-                slug: classroom,
-                org,
-                term: values.term,
-                onboarding_cleanup: values.onboarding_cleanup,
-              })
-            }}
+            onSubmit={(values) =>
+              runSave(() =>
+                editClassroomMutation.mutateAsync({
+                  name: values.name,
+                  slug: classroom,
+                  org,
+                  term: values.term,
+                  onboarding_cleanup: values.onboarding_cleanup,
+                }),
+              )
+            }
           />
         </div>
       </div>

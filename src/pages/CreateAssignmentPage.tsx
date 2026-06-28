@@ -13,7 +13,8 @@ import Drawer, {
 import { GitHubAPIError } from "@/hooks/github/errors"
 import { createAssignment } from "@/hooks/github/mutations"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
-import { slugify } from "@/util/slug"
+import { useToast } from "@/context/notifications/NotificationProvider"
+import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import { githubKeys } from "@/hooks/github/queries"
 import { useState } from "react"
 import type {
@@ -26,8 +27,12 @@ const CreateAssignmentPage = () => {
   const navigate = useNavigate()
   const { org, classroom } = useParams({ strict: false })
   const queryClient = useQueryClient()
+  const { notify } = useToast()
   const [errorMessage, setErrorMessage] = useState("")
   const [warningMessage, setWarningMessage] = useState("")
+
+  const { data: assignmentsData } = useGetClassroomAssignments(org, classroom)
+  const takenSlugs = (assignmentsData?.assignments ?? []).map((a) => a.slug)
 
   const createClassroomMutation = useMutation<
     CreateAssignmentResult,
@@ -57,7 +62,7 @@ const CreateAssignmentPage = () => {
       setErrorMessage(err.message)
       window.scrollTo({ top: 0, behavior: "smooth" })
     },
-    onSuccess: (result) => {
+    onSuccess: (result, variables) => {
       queryClient.invalidateQueries({
         queryKey: githubKeys.jsonFile(
           org ?? "",
@@ -72,9 +77,21 @@ const CreateAssignmentPage = () => {
         window.scrollTo({ top: 0, behavior: "smooth" })
         return
       }
+      // Toast before navigating: the provider is mounted above the router, so
+      // the confirmation survives the redirect. GitHub's contents API is
+      // read-after-write eventual, hence "may take a moment to appear".
+      notify({
+        tone: "success",
+        durationMs: 6000,
+        message: "Assignment created. It may take a moment to appear.",
+      })
       navigate({
-        to: "/$org/$classroom/assignments",
-        params: { org: org ?? "", classroom: classroom ?? "" },
+        to: "/$org/$classroom/assignments/$assignment",
+        params: {
+          org: org ?? "",
+          classroom: classroom ?? "",
+          assignment: variables.slug,
+        },
       })
     },
   })
@@ -126,12 +143,13 @@ const CreateAssignmentPage = () => {
                   loading={createClassroomMutation.isPending}
                   org={org}
                   classroom={classroom}
+                  takenSlugs={takenSlugs}
                   onSubmit={(values) => {
                     setErrorMessage("")
                     setWarningMessage("")
                     createClassroomMutation.mutateAsync({
                       name: values.name,
-                      slug: slugify(values.name),
+                      slug: values.slug,
                       mode: values.mode,
                       org,
                       template_repo: values.template_repo,
