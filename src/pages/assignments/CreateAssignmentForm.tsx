@@ -171,6 +171,10 @@ type CreateAssignmentFormProps = {
   onCancel?: () => void
   edit?: boolean
   loading?: boolean
+  // Render every field/button disabled (e.g. an archived classroom's assignment
+  // is viewable but read-only). A disabled <fieldset> natively disables all
+  // descendant controls, including the submit button.
+  readOnly?: boolean
   // Org slug for verifying a runner label against the org's self-hosted
   // runners. When absent, verification never blocks.
   org?: string
@@ -439,6 +443,7 @@ const CreateAssignmentForm = ({
   onCancel,
   edit = false,
   loading = false,
+  readOnly = false,
   org,
   classroom,
 }: CreateAssignmentFormProps) => {
@@ -457,460 +462,465 @@ const CreateAssignmentForm = ({
         form.handleSubmit()
       }}
     >
-      <div className="card bg-base-100 w-full shadow-sm mb-6">
-        <div className="card-body">
-          <h3 className="text-lg font-bold pb-4">Basic Information</h3>
+      {/* readOnly disables every descendant control at once. */}
+      <fieldset disabled={readOnly} className="m-0 min-w-0 border-0 p-0">
+        <div className="card bg-base-100 w-full shadow-sm mb-6">
+          <div className="card-body">
+            <h3 className="text-lg font-bold pb-4">Basic Information</h3>
 
-          <form.Field name="name">
-            {(field) => (
-              <>
-                <label htmlFor={field.name} className="label font-bold">
-                  Assignment Name<span className="text-[#f00]">*</span>
-                </label>
-                <input
-                  id={field.name}
-                  name={field.name}
-                  type="text"
-                  className="input w-full mb-4"
-                  placeholder="e.g., Loops Assignment"
-                  value={field.state.value}
-                  onBlur={field.handleBlur}
-                  onChange={(e) => field.handleChange(e.target.value)}
-                />
-              </>
-            )}
-          </form.Field>
-
-          <form.Field name="description">
-            {(field) => (
-              <>
-                <label htmlFor={field.name} className="label font-bold">
-                  Description
-                </label>
-                <textarea
-                  id={field.name}
-                  name={field.name}
-                  className="textarea w-full mb-4"
-                  placeholder="Describe the assignment objectives..."
-                  value={field.state.value}
-                  onBlur={field.handleBlur}
-                  onChange={(e) => field.handleChange(e.target.value)}
-                />
-              </>
-            )}
-          </form.Field>
-
-          <div className="grid grid-cols-1 gap-4 mb-4 sm:grid-cols-2 sm:items-start">
-            <div>
-              <form.Field name="template_repo">
-                {(field) => (
-                  <TemplateField
-                    field={field}
-                    org={org}
-                    classroom={classroom}
-                  />
-                )}
-              </form.Field>
-            </div>
-            <div>
-              <form.Field name="due_date">
-                {(field) => (
-                  <>
-                    <label
-                      htmlFor={field.name}
-                      className="label font-bold mb-2"
-                    >
-                      Due Date ({tzShort})
-                    </label>
-                    <input
-                      id={field.name}
-                      name={field.name}
-                      type="datetime-local"
-                      className="input w-full"
-                      value={field.state.value}
-                      onBlur={field.handleBlur}
-                      onChange={(e) => field.handleChange(e.target.value)}
-                    />
-                  </>
-                )}
-              </form.Field>
-            </div>
-          </div>
-
-          <div>
-            <form.Field name="mode">
+            <form.Field name="name">
               {(field) => (
                 <>
-                  <div>
-                    <label className="label font-bold mb-2">
-                      Assignment Type
-                    </label>
-                  </div>
-                  <input
-                    type="radio"
-                    className="radio"
-                    name={field.name}
-                    value="individual"
-                    checked={field.state.value === "individual"}
-                    onBlur={field.handleBlur}
-                    onChange={() => field.handleChange("individual")}
-                  />
-                  <label className="label pl-2">Individual</label>
-                  <input
-                    type="radio"
-                    className="radio ml-6"
-                    name={field.name}
-                    value="group"
-                    checked={field.state.value === "group"}
-                    onBlur={field.handleBlur}
-                    onChange={() => field.handleChange("group")}
-                  />
-                  <label className="label pl-2">Group Project</label>
-                </>
-              )}
-            </form.Field>
-          </div>
-
-          <form.Subscribe selector={(state) => state.values.mode}>
-            {(modeValue) =>
-              modeValue === "group" && (
-                <div>
-                  <form.Field name="max_group_size">
-                    {(field) => (
-                      <>
-                        <div>
-                          <label className="label font-bold mb-2">
-                            Max Group Size
-                          </label>
-                        </div>
-                        <input
-                          id={field.name}
-                          name={field.name}
-                          type="number"
-                          className="input validator"
-                          placeholder="#"
-                          min={GROUP_SIZE_MIN}
-                          max={GROUP_SIZE_MAX}
-                          step="1"
-                          title={`Must be a whole number between ${GROUP_SIZE_MIN} and ${GROUP_SIZE_MAX}`}
-                          value={
-                            Number.isFinite(field.state.value)
-                              ? field.state.value
-                              : ""
-                          }
-                          onBlur={() => {
-                            // Snap to a valid whole number on blur so the CLI
-                            // never sees a non-integer or out-of-range size.
-                            const raw = field.state.value
-                            const next = Number.isFinite(raw)
-                              ? Math.min(
-                                  Math.max(Math.floor(raw), GROUP_SIZE_MIN),
-                                  GROUP_SIZE_MAX,
-                                )
-                              : GROUP_SIZE_MIN
-                            if (next !== raw) field.handleChange(next)
-                            field.handleBlur()
-                          }}
-                          onChange={(e) =>
-                            field.handleChange(e.target.valueAsNumber)
-                          }
-                        />
-                      </>
-                    )}
-                  </form.Field>
-                </div>
-              )
-            }
-          </form.Subscribe>
-
-          <form.Field name="feedback_pr">
-            {(field) => (
-              <div className="mt-4 flex items-start gap-3">
-                <input
-                  id={field.name}
-                  type="checkbox"
-                  className="toggle toggle-primary mt-0.5"
-                  name={field.name}
-                  checked={field.state.value}
-                  onBlur={field.handleBlur}
-                  onChange={(e) => field.handleChange(e.target.checked)}
-                />
-                <div>
-                  <div className="flex items-center gap-2">
-                    <label htmlFor={field.name} className="label font-bold">
-                      Feedback pull request
-                    </label>
-                    <span
-                      className={`badge badge-sm ${
-                        field.state.value
-                          ? "badge-success badge-soft"
-                          : "badge-ghost"
-                      }`}
-                    >
-                      {field.state.value ? "Enabled" : "Disabled"}
-                    </span>
-                  </div>
-                  <p className="text-sm text-base-content/60">
-                    Open a pull request per repo for inline review of each
-                    submission.
-                  </p>
-                </div>
-              </div>
-            )}
-          </form.Field>
-        </div>
-        <FormErrors form={form} />
-      </div>
-
-      <div className="card bg-base-100 w-full shadow-sm mb-6">
-        <div className="card-body">
-          <details className="group">
-            <summary className="cursor-pointer text-lg font-bold marker:content-none flex items-center gap-2">
-              <span className="transition-transform group-open:rotate-90">
-                ▶
-              </span>
-              Advanced Settings
-            </summary>
-
-            <p className="label pt-2 pb-4">
-              Optional runtime overrides. Leave blank for the defaults
-              (ubuntu-latest + Python 3.12).
-            </p>
-
-            <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
-              <form.Field name="runs_on">
-                {(field) => <RunnerField field={field} org={org} />}
-              </form.Field>
-
-              <form.Field name="container_image">
-                {(field) => (
-                  <div>
-                    <label
-                      htmlFor={field.name}
-                      className="label block font-bold mb-1.5"
-                    >
-                      Docker Image
-                    </label>
-                    <input
-                      id={field.name}
-                      name={field.name}
-                      type="text"
-                      className="input w-full max-w-xs"
-                      placeholder="e.g. gcc:13"
-                      value={field.state.value}
-                      onBlur={normalizeOnBlur(field)}
-                      onChange={(e) => field.handleChange(e.target.value)}
-                    />
-                    <p className="mt-1.5 text-sm text-base-content/60">
-                      Run the autograder inside this public image.
-                    </p>
-                  </div>
-                )}
-              </form.Field>
-
-              <form.Subscribe
-                selector={(state) => state.values.container_image}
-              >
-                {(containerImage) =>
-                  containerImage.trim() ? (
-                    <form.Field name="container_user">
-                      {(field) => (
-                        <div>
-                          <label
-                            htmlFor={field.name}
-                            className="block font-bold mb-1.5"
-                          >
-                            Container User
-                          </label>
-                          <input
-                            id={field.name}
-                            name={field.name}
-                            type="text"
-                            className="input w-full max-w-xs"
-                            placeholder="e.g. root"
-                            value={field.state.value}
-                            onBlur={normalizeOnBlur(field)}
-                            onChange={(e) => field.handleChange(e.target.value)}
-                          />
-                          <p className="mt-1.5 text-sm text-base-content/60">
-                            Use <code>root</code> if checkout fails with a
-                            permission error.
-                          </p>
-                        </div>
-                      )}
-                    </form.Field>
-                  ) : null
-                }
-              </form.Subscribe>
-            </div>
-
-            <form.Subscribe
-              selector={(state) => [
-                state.values.runs_on,
-                state.values.container_image,
-              ]}
-            >
-              {([runsOn, containerImage]) => {
-                const warning = containerRunnerWarning(runsOn, containerImage)
-                return warning ? (
-                  <p
-                    role="alert"
-                    className="mt-3 flex items-center gap-1.5 text-sm text-error"
-                  >
-                    <AlertTriangle className="size-4 shrink-0" />
-                    {warning}
-                  </p>
-                ) : null
-              }}
-            </form.Subscribe>
-
-            <form.Field name="setup_command">
-              {(field) => (
-                <div className="mt-4">
-                  <label
-                    htmlFor={field.name}
-                    className="label block font-bold mb-1.5"
-                  >
-                    Setup Command
+                  <label htmlFor={field.name} className="label font-bold">
+                    Assignment Name<span className="text-[#f00]">*</span>
                   </label>
                   <input
                     id={field.name}
                     name={field.name}
                     type="text"
-                    className="input w-full"
-                    placeholder="e.g., gcc -o hello hello.c"
+                    className="input w-full mb-4"
+                    placeholder="e.g., Loops Assignment"
                     value={field.state.value}
-                    onBlur={normalizeOnBlur(field)}
+                    onBlur={field.handleBlur}
                     onChange={(e) => field.handleChange(e.target.value)}
                   />
-                  <p className="mt-1.5 text-sm text-base-content/60">
-                    Runs once before grading (e.g. to compile). Added as a
-                    leading 0-point autograding step named “setup”.
-                  </p>
-                </div>
+                </>
               )}
             </form.Field>
 
-            <form.Field name="allowed_files">
-              {(field) => {
-                const patterns = parseAllowedFiles(field.state.value)
-                const error = field.state.meta.errors[0] as string | undefined
-                return (
+            <form.Field name="description">
+              {(field) => (
+                <>
+                  <label htmlFor={field.name} className="label font-bold">
+                    Description
+                  </label>
+                  <textarea
+                    id={field.name}
+                    name={field.name}
+                    className="textarea w-full mb-4"
+                    placeholder="Describe the assignment objectives..."
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  />
+                </>
+              )}
+            </form.Field>
+
+            <div className="grid grid-cols-1 gap-4 mb-4 sm:grid-cols-2 sm:items-start">
+              <div>
+                <form.Field name="template_repo">
+                  {(field) => (
+                    <TemplateField
+                      field={field}
+                      org={org}
+                      classroom={classroom}
+                    />
+                  )}
+                </form.Field>
+              </div>
+              <div>
+                <form.Field name="due_date">
+                  {(field) => (
+                    <>
+                      <label
+                        htmlFor={field.name}
+                        className="label font-bold mb-2"
+                      >
+                        Due Date ({tzShort})
+                      </label>
+                      <input
+                        id={field.name}
+                        name={field.name}
+                        type="datetime-local"
+                        className="input w-full"
+                        value={field.state.value}
+                        onBlur={field.handleBlur}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                      />
+                    </>
+                  )}
+                </form.Field>
+              </div>
+            </div>
+
+            <div>
+              <form.Field name="mode">
+                {(field) => (
+                  <>
+                    <div>
+                      <label className="label font-bold mb-2">
+                        Assignment Type
+                      </label>
+                    </div>
+                    <input
+                      type="radio"
+                      className="radio"
+                      name={field.name}
+                      value="individual"
+                      checked={field.state.value === "individual"}
+                      onBlur={field.handleBlur}
+                      onChange={() => field.handleChange("individual")}
+                    />
+                    <label className="label pl-2">Individual</label>
+                    <input
+                      type="radio"
+                      className="radio ml-6"
+                      name={field.name}
+                      value="group"
+                      checked={field.state.value === "group"}
+                      onBlur={field.handleBlur}
+                      onChange={() => field.handleChange("group")}
+                    />
+                    <label className="label pl-2">Group Project</label>
+                  </>
+                )}
+              </form.Field>
+            </div>
+
+            <form.Subscribe selector={(state) => state.values.mode}>
+              {(modeValue) =>
+                modeValue === "group" && (
+                  <div>
+                    <form.Field name="max_group_size">
+                      {(field) => (
+                        <>
+                          <div>
+                            <label className="label font-bold mb-2">
+                              Max Group Size
+                            </label>
+                          </div>
+                          <input
+                            id={field.name}
+                            name={field.name}
+                            type="number"
+                            className="input validator"
+                            placeholder="#"
+                            min={GROUP_SIZE_MIN}
+                            max={GROUP_SIZE_MAX}
+                            step="1"
+                            title={`Must be a whole number between ${GROUP_SIZE_MIN} and ${GROUP_SIZE_MAX}`}
+                            value={
+                              Number.isFinite(field.state.value)
+                                ? field.state.value
+                                : ""
+                            }
+                            onBlur={() => {
+                              // Snap to a valid whole number on blur so the CLI
+                              // never sees a non-integer or out-of-range size.
+                              const raw = field.state.value
+                              const next = Number.isFinite(raw)
+                                ? Math.min(
+                                    Math.max(Math.floor(raw), GROUP_SIZE_MIN),
+                                    GROUP_SIZE_MAX,
+                                  )
+                                : GROUP_SIZE_MIN
+                              if (next !== raw) field.handleChange(next)
+                              field.handleBlur()
+                            }}
+                            onChange={(e) =>
+                              field.handleChange(e.target.valueAsNumber)
+                            }
+                          />
+                        </>
+                      )}
+                    </form.Field>
+                  </div>
+                )
+              }
+            </form.Subscribe>
+
+            <form.Field name="feedback_pr">
+              {(field) => (
+                <div className="mt-4 flex items-start gap-3">
+                  <input
+                    id={field.name}
+                    type="checkbox"
+                    className="toggle toggle-primary mt-0.5"
+                    name={field.name}
+                    checked={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.checked)}
+                  />
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <label htmlFor={field.name} className="label font-bold">
+                        Feedback pull request
+                      </label>
+                      <span
+                        className={`badge badge-sm ${
+                          field.state.value
+                            ? "badge-success badge-soft"
+                            : "badge-ghost"
+                        }`}
+                      >
+                        {field.state.value ? "Enabled" : "Disabled"}
+                      </span>
+                    </div>
+                    <p className="text-sm text-base-content/60">
+                      Open a pull request per repo for inline review of each
+                      submission.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </form.Field>
+          </div>
+          <FormErrors form={form} />
+        </div>
+
+        <div className="card bg-base-100 w-full shadow-sm mb-6">
+          <div className="card-body">
+            <details className="group">
+              <summary className="cursor-pointer text-lg font-bold marker:content-none flex items-center gap-2">
+                <span className="transition-transform group-open:rotate-90">
+                  ▶
+                </span>
+                Advanced Settings
+              </summary>
+
+              <p className="label pt-2 pb-4">
+                Optional runtime overrides. Leave blank for the defaults
+                (ubuntu-latest + Python 3.12).
+              </p>
+
+              <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
+                <form.Field name="runs_on">
+                  {(field) => <RunnerField field={field} org={org} />}
+                </form.Field>
+
+                <form.Field name="container_image">
+                  {(field) => (
+                    <div>
+                      <label
+                        htmlFor={field.name}
+                        className="label block font-bold mb-1.5"
+                      >
+                        Docker Image
+                      </label>
+                      <input
+                        id={field.name}
+                        name={field.name}
+                        type="text"
+                        className="input w-full max-w-xs"
+                        placeholder="e.g. gcc:13"
+                        value={field.state.value}
+                        onBlur={normalizeOnBlur(field)}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                      />
+                      <p className="mt-1.5 text-sm text-base-content/60">
+                        Run the autograder inside this public image.
+                      </p>
+                    </div>
+                  )}
+                </form.Field>
+
+                <form.Subscribe
+                  selector={(state) => state.values.container_image}
+                >
+                  {(containerImage) =>
+                    containerImage.trim() ? (
+                      <form.Field name="container_user">
+                        {(field) => (
+                          <div>
+                            <label
+                              htmlFor={field.name}
+                              className="block font-bold mb-1.5"
+                            >
+                              Container User
+                            </label>
+                            <input
+                              id={field.name}
+                              name={field.name}
+                              type="text"
+                              className="input w-full max-w-xs"
+                              placeholder="e.g. root"
+                              value={field.state.value}
+                              onBlur={normalizeOnBlur(field)}
+                              onChange={(e) =>
+                                field.handleChange(e.target.value)
+                              }
+                            />
+                            <p className="mt-1.5 text-sm text-base-content/60">
+                              Use <code>root</code> if checkout fails with a
+                              permission error.
+                            </p>
+                          </div>
+                        )}
+                      </form.Field>
+                    ) : null
+                  }
+                </form.Subscribe>
+              </div>
+
+              <form.Subscribe
+                selector={(state) => [
+                  state.values.runs_on,
+                  state.values.container_image,
+                ]}
+              >
+                {([runsOn, containerImage]) => {
+                  const warning = containerRunnerWarning(runsOn, containerImage)
+                  return warning ? (
+                    <p
+                      role="alert"
+                      className="mt-3 flex items-center gap-1.5 text-sm text-error"
+                    >
+                      <AlertTriangle className="size-4 shrink-0" />
+                      {warning}
+                    </p>
+                  ) : null
+                }}
+              </form.Subscribe>
+
+              <form.Field name="setup_command">
+                {(field) => (
                   <div className="mt-4">
                     <label
                       htmlFor={field.name}
                       className="label block font-bold mb-1.5"
                     >
-                      Allowed files
+                      Setup Command
                     </label>
-                    <textarea
+                    <input
                       id={field.name}
                       name={field.name}
-                      className="textarea w-full font-mono"
-                      rows={4}
-                      spellCheck={false}
-                      placeholder={"*\n!hello.py"}
+                      type="text"
+                      className="input w-full"
+                      placeholder="e.g., gcc -o hello hello.c"
                       value={field.state.value}
-                      onBlur={field.handleBlur}
+                      onBlur={normalizeOnBlur(field)}
                       onChange={(e) => field.handleChange(e.target.value)}
                     />
                     <p className="mt-1.5 text-sm text-base-content/60">
-                      Ordered <code>.gitignore</code>-style patterns, one per
-                      line, defining which files belong to a submission (last
-                      match wins, <code>!</code> re-includes). E.g.{" "}
-                      <code>*</code> then <code>!hello.py</code> allows only{" "}
-                      <code>hello.py</code>. Leave blank to allow every file.
+                      Runs once before grading (e.g. to compile). Added as a
+                      leading 0-point autograding step named “setup”.
                     </p>
-                    {error ? (
-                      <p
-                        role="alert"
-                        className="mt-1.5 flex items-center gap-1.5 text-sm text-error"
+                  </div>
+                )}
+              </form.Field>
+
+              <form.Field name="allowed_files">
+                {(field) => {
+                  const patterns = parseAllowedFiles(field.state.value)
+                  const error = field.state.meta.errors[0] as string | undefined
+                  return (
+                    <div className="mt-4">
+                      <label
+                        htmlFor={field.name}
+                        className="label block font-bold mb-1.5"
                       >
-                        <AlertTriangle className="size-4 shrink-0" />
-                        {error}
+                        Allowed files
+                      </label>
+                      <textarea
+                        id={field.name}
+                        name={field.name}
+                        className="textarea w-full font-mono"
+                        rows={4}
+                        spellCheck={false}
+                        placeholder={"*\n!hello.py"}
+                        value={field.state.value}
+                        onBlur={field.handleBlur}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                      />
+                      <p className="mt-1.5 text-sm text-base-content/60">
+                        Ordered <code>.gitignore</code>-style patterns, one per
+                        line, defining which files belong to a submission (last
+                        match wins, <code>!</code> re-includes). E.g.{" "}
+                        <code>*</code> then <code>!hello.py</code> allows only{" "}
+                        <code>hello.py</code>. Leave blank to allow every file.
                       </p>
-                    ) : (
-                      patterns.length > 0 && (
-                        <p className="mt-1.5 text-xs text-base-content/50">
-                          {patterns.length} pattern
-                          {patterns.length === 1 ? "" : "s"}
+                      {error ? (
+                        <p
+                          role="alert"
+                          className="mt-1.5 flex items-center gap-1.5 text-sm text-error"
+                        >
+                          <AlertTriangle className="size-4 shrink-0" />
+                          {error}
                         </p>
-                      )
+                      ) : (
+                        patterns.length > 0 && (
+                          <p className="mt-1.5 text-xs text-base-content/50">
+                            {patterns.length} pattern
+                            {patterns.length === 1 ? "" : "s"}
+                          </p>
+                        )
+                      )}
+                    </div>
+                  )
+                }}
+              </form.Field>
+
+              <form.Field name="pass_threshold_enabled">
+                {(toggle) => (
+                  <div className="mt-4">
+                    <label className="label cursor-pointer justify-start gap-3 p-0 font-bold">
+                      <input
+                        type="checkbox"
+                        className="toggle toggle-sm"
+                        checked={toggle.state.value}
+                        onChange={(e) => toggle.handleChange(e.target.checked)}
+                      />
+                      Set a passing threshold
+                    </label>
+                    <p className="mt-1.5 text-sm text-base-content/60">
+                      Off by default. When on, the gradebook marks submissions
+                      passing/failing against the bar below (Passing rollup,
+                      score badges, passing/failing filter). A display threshold
+                      only — it does not change a student&apos;s actual score.
+                    </p>
+
+                    {toggle.state.value && (
+                      <form.Field name="pass_threshold">
+                        {(field) => {
+                          const error = field.state.meta.errors[0] as
+                            | string
+                            | undefined
+                          return (
+                            <div className="mt-3">
+                              <div className="flex items-center gap-2">
+                                <input
+                                  id={field.name}
+                                  name={field.name}
+                                  type="number"
+                                  inputMode="numeric"
+                                  min={PASS_THRESHOLD_MIN}
+                                  max={PASS_THRESHOLD_MAX}
+                                  step={1}
+                                  className="input w-28"
+                                  value={field.state.value}
+                                  onBlur={field.handleBlur}
+                                  onChange={(e) =>
+                                    field.handleChange(Number(e.target.value))
+                                  }
+                                />
+                                <span className="text-sm text-base-content/60">
+                                  % of max score to pass
+                                </span>
+                              </div>
+                              {error ? (
+                                <p
+                                  role="alert"
+                                  className="mt-1.5 flex items-center gap-1.5 text-sm text-error"
+                                >
+                                  <AlertTriangle className="size-4 shrink-0" />
+                                  {error}
+                                </p>
+                              ) : null}
+                            </div>
+                          )
+                        }}
+                      </form.Field>
                     )}
                   </div>
-                )
-              }}
-            </form.Field>
-
-            <form.Field name="pass_threshold_enabled">
-              {(toggle) => (
-                <div className="mt-4">
-                  <label className="label cursor-pointer justify-start gap-3 p-0 font-bold">
-                    <input
-                      type="checkbox"
-                      className="toggle toggle-sm"
-                      checked={toggle.state.value}
-                      onChange={(e) => toggle.handleChange(e.target.checked)}
-                    />
-                    Set a passing threshold
-                  </label>
-                  <p className="mt-1.5 text-sm text-base-content/60">
-                    Off by default. When on, the gradebook marks submissions
-                    passing/failing against the bar below (Passing rollup, score
-                    badges, passing/failing filter). A display threshold only —
-                    it does not change a student&apos;s actual score.
-                  </p>
-
-                  {toggle.state.value && (
-                    <form.Field name="pass_threshold">
-                      {(field) => {
-                        const error = field.state.meta.errors[0] as
-                          | string
-                          | undefined
-                        return (
-                          <div className="mt-3">
-                            <div className="flex items-center gap-2">
-                              <input
-                                id={field.name}
-                                name={field.name}
-                                type="number"
-                                inputMode="numeric"
-                                min={PASS_THRESHOLD_MIN}
-                                max={PASS_THRESHOLD_MAX}
-                                step={1}
-                                className="input w-28"
-                                value={field.state.value}
-                                onBlur={field.handleBlur}
-                                onChange={(e) =>
-                                  field.handleChange(Number(e.target.value))
-                                }
-                              />
-                              <span className="text-sm text-base-content/60">
-                                % of max score to pass
-                              </span>
-                            </div>
-                            {error ? (
-                              <p
-                                role="alert"
-                                className="mt-1.5 flex items-center gap-1.5 text-sm text-error"
-                              >
-                                <AlertTriangle className="size-4 shrink-0" />
-                                {error}
-                              </p>
-                            ) : null}
-                          </div>
-                        )
-                      }}
-                    </form.Field>
-                  )}
-                </div>
-              )}
-            </form.Field>
-          </details>
+                )}
+              </form.Field>
+            </details>
+          </div>
         </div>
-      </div>
 
-      <AutogradingTestsPane form={form} />
+        <AutogradingTestsPane form={form} />
+      </fieldset>
       <div className="divider" />
       <div className="card-actions justify-end p-2">
         {onCancel && (
@@ -920,37 +930,39 @@ const CreateAssignmentForm = ({
             onClick={onCancel}
             disabled={loading}
           >
-            Cancel
+            {readOnly ? "Back" : "Cancel"}
           </button>
         )}
-        <form.Subscribe
-          selector={(state) => [
-            state.canSubmit,
-            state.isSubmitting,
-            state.isDefaultValue,
-          ]}
-        >
-          {([canSubmit, isSubmitting, isDefaultValue]) => (
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={
-                !canSubmit ||
-                isSubmitting ||
-                loading ||
-                (edit && isDefaultValue)
-              }
-            >
-              {isSubmitting || loading ? (
-                <span className="loading loading-spinner" />
-              ) : edit ? (
-                "Save Changes"
-              ) : (
-                "Create Assignment"
-              )}
-            </button>
-          )}
-        </form.Subscribe>
+        {!readOnly && (
+          <form.Subscribe
+            selector={(state) => [
+              state.canSubmit,
+              state.isSubmitting,
+              state.isDefaultValue,
+            ]}
+          >
+            {([canSubmit, isSubmitting, isDefaultValue]) => (
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={
+                  !canSubmit ||
+                  isSubmitting ||
+                  loading ||
+                  (edit && isDefaultValue)
+                }
+              >
+                {isSubmitting || loading ? (
+                  <span className="loading loading-spinner" />
+                ) : edit ? (
+                  "Save Changes"
+                ) : (
+                  "Create Assignment"
+                )}
+              </button>
+            )}
+          </form.Subscribe>
+        )}
       </div>
     </form>
   )

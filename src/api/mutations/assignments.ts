@@ -2,7 +2,6 @@ import type { GitHubClient } from "@/hooks/github/client"
 import type { Assignment } from "@/types/classroom"
 import { GROUP_SIZE_MAX, GROUP_SIZE_MIN } from "@/types/classroom"
 import { PASS_THRESHOLD_MAX, PASS_THRESHOLD_MIN } from "@/types/classroom"
-import { isClassroomArchived } from "@/types/classroom"
 import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
 import { getUser } from "@/hooks/github/queries"
 import { GitHubAPIError } from "@/hooks/github/errors"
@@ -30,7 +29,11 @@ import {
   getAssignmentsFile,
   type AssignmentsFile,
 } from "../queries/assignments"
-import { withGitConflictRetry, type CreateClassroomResult } from "./classrooms"
+import {
+  withGitConflictRetry,
+  assertClassroomNotArchived,
+  type CreateClassroomResult,
+} from "./classrooms"
 import type { GitHubRepo } from "@/hooks/github/types"
 import {
   getBranchRefRepo,
@@ -754,27 +757,6 @@ async function tryGrantTeamTemplateRead(
 // be able to mutate an archived classroom. Reads classroom.json fresh and fails
 // closed before any commit. A genuinely teamless/legacy classroom (no `active`)
 // reads as active, so this never blocks normal use.
-async function assertClassroomNotArchived(
-  client: GitHubClient,
-  org: string,
-  classroom: string,
-) {
-  let classroomJson
-  try {
-    classroomJson = await getClassroomJson(client, { org, classroom })
-  } catch (err) {
-    // A missing classroom.json (pre-feature) can't be archived — don't block on
-    // a read failure that isn't a definitive "archived" signal.
-    if (err instanceof GitHubAPIError && err.isNotFound) return
-    throw err
-  }
-  if (isClassroomArchived(classroomJson)) {
-    throw new Error(
-      `Classroom "${classroom}" is archived — changes are disabled. Unarchive it in Classroom Settings first.`,
-    )
-  }
-}
-
 export async function createAssignment(
   client: GitHubClient,
   input: CreateAssignmentInput,
@@ -1332,7 +1314,12 @@ export async function deleteAssignment(
 ) {
   const { org, classroom, assignment: slug } = input
 
-  const ref = await getBranchRef(client, org)
+  // Refuse a delete into an archived classroom (write-path guard); run the
+  // check concurrently with the ref read.
+  const [, ref] = await Promise.all([
+    assertClassroomNotArchived(client, org, classroom),
+    getBranchRef(client, org),
+  ])
   const commit = await getCommit(client, org, ref.object.sha)
 
   const assignmentsFilePath = `${classroom}/assignments.json`

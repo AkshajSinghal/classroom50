@@ -14,6 +14,7 @@ import sodium from "libsodium-wrappers"
 import { getBranchRef, getClassroomJson, getCommit } from "@/api/github/queries"
 import type { CreateClassroomInput } from "@/api/mutations/classrooms"
 import type { OnboardingCleanupMode } from "@/types/classroom"
+import { isClassroomArchived } from "@/types/classroom"
 import { STUDENT_CSV_FIELDS } from "@/api/mutations/students"
 import { getRepo } from "./queries"
 
@@ -2231,6 +2232,14 @@ export async function editClassroom(
   if (current.short_name !== slug) {
     throw new Error(
       `classroom.json slug mismatch: expected ${current.short_name}, got ${slug}`,
+    )
+  }
+
+  // Archived classrooms are read-only — refuse a settings edit but let a
+  // lifecycle toggle through (active set), since unarchiving re-enables editing.
+  if (active === undefined && isClassroomArchived(current)) {
+    throw new Error(
+      `Classroom "${slug}" is archived — settings are read-only. Unarchive it first to make changes.`,
     )
   }
 

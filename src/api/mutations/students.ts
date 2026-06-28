@@ -14,7 +14,11 @@ import {
   removeUserFromTeam,
   updateRef,
 } from "@/hooks/github/mutations"
-import { withGitConflictRetry, type CreateClassroomResult } from "./classrooms"
+import {
+  withGitConflictRetry,
+  assertClassroomNotArchived,
+  type CreateClassroomResult,
+} from "./classrooms"
 import {
   getFileCommitAuthorIds,
   getRawFile,
@@ -181,6 +185,8 @@ export async function addStudentToClassroom(
     throw new Error("GitHub username is required")
   }
 
+  await assertClassroomNotArchived(client, input.org, input.classroom)
+
   const ref = await getBranchRef(client, input.org)
   const commit = await getCommit(client, input.org, ref.object.sha)
 
@@ -290,6 +296,8 @@ export async function addEmailInviteToClassroom(
   if (!normalizedEmail) {
     throw new Error("Email is required")
   }
+
+  await assertClassroomNotArchived(client, input.org, input.classroom)
 
   const ref = await getBranchRef(client, input.org)
   const commit = await getCommit(client, input.org, ref.object.sha)
@@ -443,6 +451,7 @@ export async function reconcileOnboarding(
   input: { org: string; classroom: string },
 ): Promise<ReconcileOnboardingResult> {
   const { org, classroom } = input
+  await assertClassroomNotArchived(client, org, classroom)
   const studentsFilePath = `${classroom}/students.csv`
 
   const result: ReconcileOnboardingResult = {
@@ -918,6 +927,7 @@ export async function enrollStudentInClassroom(
   input: AddStudentToClassroomInput,
 ) {
   const { org, classroom } = input
+  await assertClassroomNotArchived(client, org, classroom)
   // Resolve the classroom team (slug + id) once, concurrently with the commit.
   // Can reject on a transient read; attach a catch to avoid an unhandled rejection.
   const teamPromise = resolveClassroomTeam(client, org, classroom)
@@ -1025,6 +1035,8 @@ export async function addStudentsToClassroom(
   if (normalizedUsernames.length === 0) {
     throw new Error("At least one GitHub username is required")
   }
+
+  await assertClassroomNotArchived(client, input.org, input.classroom)
 
   input.onProgress?.({
     processed: 0,
@@ -1232,6 +1244,8 @@ export async function bulkEnrollStudentsInClassroom(
 ): Promise<BulkEnrollStudentsResult> {
   const { onProgress, ...bulkInput } = input
 
+  await assertClassroomNotArchived(client, bulkInput.org, bulkInput.classroom)
+
   const total = bulkInput.usernames.length
 
   onProgress?.({
@@ -1346,6 +1360,7 @@ export async function unenrollStudent(
   input: UnenrollStudentInput,
 ) {
   const { org, classroom, student: toRemoveStudent, removeFromOrg } = input
+  await assertClassroomNotArchived(client, org, classroom)
   const normalizedUsername = toRemoveStudent?.username.trim()
   const normalizedEmail = toRemoveStudent?.email?.trim()
 

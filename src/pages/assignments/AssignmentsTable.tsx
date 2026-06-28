@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router"
-import { Copy, Pencil, Trash2, UserRound, UsersRound } from "lucide-react"
+import { Copy, Eye, Pencil, Trash2, UserRound, UsersRound } from "lucide-react"
 
 import useGetScores from "@/hooks/useGetScores"
 import { formatDueDate } from "@/util/formatDate"
@@ -276,22 +276,27 @@ const AssignmentsTable = ({
                   })()}
                 </td>
                 <td>
+                  <Link
+                    className="btn btn-circle btn-sm btn-ghost"
+                    to="/$org/$classroom/assignments/$assignment/edit"
+                    params={{
+                      org,
+                      classroom,
+                      assignment: assignment.slug,
+                    }}
+                    title={archived ? "View assignment" : "Edit assignment"}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                    }}
+                  >
+                    {archived ? (
+                      <Eye className="size-4" />
+                    ) : (
+                      <Pencil className="size-4" />
+                    )}
+                  </Link>
                   {archived ? null : (
                     <>
-                      <Link
-                        className="btn btn-circle btn-sm btn-ghost"
-                        to="/$org/$classroom/assignments/$assignment/edit"
-                        params={{
-                          org,
-                          classroom,
-                          assignment: assignment.slug,
-                        }}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                        }}
-                      >
-                        <Pencil className="size-4" />
-                      </Link>
                       <ReuseAssignmentButton
                         org={org}
                         classroom={classroom}
