@@ -419,7 +419,14 @@ const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
                   }
                   title={isDefaultValue ? "No changes to save" : undefined}
                 >
-                  {isSubmitting ? "Saving..." : "Save Classroom"}
+                  {isSubmitting ? (
+                    <>
+                      <span className="loading loading-spinner loading-sm" />
+                      Saving...
+                    </>
+                  ) : (
+                    "Save Classroom"
+                  )}
                 </button>
               )}
             </form.Subscribe>

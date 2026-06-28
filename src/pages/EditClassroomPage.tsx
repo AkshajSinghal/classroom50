@@ -18,6 +18,7 @@ import {
 import { editClassroomWithConflictRetry } from "@/api/mutations/classrooms"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useToast } from "@/context/notifications/NotificationProvider"
+import { useSafeSubmit } from "@/hooks/useSafeSubmit"
 import RequireTeacher from "@/components/RequireTeacher"
 
 const EditClassroomContent = ({
@@ -30,6 +31,7 @@ const EditClassroomContent = ({
   const client = useGitHubClient()
   const queryClient = useQueryClient()
   const { notify } = useToast()
+  const runSave = useSafeSubmit()
   const { data: cl, isLoading: loadingClassroom } = useGetClassroom(
     org,
     classroom,
@@ -110,15 +112,17 @@ const EditClassroomContent = ({
         <div className="mb-8">
           <EditClassroomForm
             cl={cl}
-            onSubmit={(values) => {
-              editClassroomMutation.mutateAsync({
-                name: values.name,
-                slug: classroom,
-                org,
-                term: values.term,
-                onboarding_cleanup: values.onboarding_cleanup,
-              })
-            }}
+            onSubmit={(values) =>
+              runSave(() =>
+                editClassroomMutation.mutateAsync({
+                  name: values.name,
+                  slug: classroom,
+                  org,
+                  term: values.term,
+                  onboarding_cleanup: values.onboarding_cleanup,
+                }),
+              )
+            }
           />
         </div>
       </div>
