@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react"
-import { useParams } from "@tanstack/react-router"
+import { Link, useParams } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import {
   AlertTriangle,
@@ -226,9 +226,12 @@ const MemberDetail = ({
             ) : (
               <ul className="divide-y divide-base-300 rounded-box border border-base-300">
                 {row.classrooms.map((access) => (
-                  <li
+                  <Link
                     key={access.classroom}
-                    className="flex items-center justify-between px-3 py-2 text-sm"
+                    to="/$org/$classroom"
+                    params={{ org, classroom: access.classroom }}
+                    onClick={onClose}
+                    className="clickable-row group/cls flex items-center justify-between px-3 py-2 text-sm first:rounded-t-box last:rounded-b-box"
                   >
                     <span className="font-medium">
                       {access.classroom}
@@ -245,8 +248,9 @@ const MemberDetail = ({
                         </span>
                       ) : null}
                       {access.enrollment_status || "—"}
+                      <ChevronRight className="size-4 text-base-content/30 transition-transform duration-150 group-hover/cls:translate-x-0.5 group-hover/cls:text-base-content/60" />
                     </span>
-                  </li>
+                  </Link>
                 ))}
               </ul>
             )}
