@@ -184,9 +184,8 @@ type RepoWorkflowPermissions = {
 }
 
 // workflowPermissions: GET /repos/{org}/{repo}/actions/permissions/workflow —
-// enforced when the config repo's default workflow permission is "write" (the
-// classroom50 skeleton workflows need write to push scores / open Feedback
-// PRs). Mirrors the desired state set by setRepoWorkflowPermissions.
+// enforced when the default workflow permission is "write" (skeleton workflows
+// need write to push scores / open Feedback PRs).
 export async function checkWorkflowPermissions(
   client: GitHubClient,
   org: string,
@@ -227,13 +226,10 @@ function orgDefaultsBody(
   return body
 }
 
-// Read the org back and classify — the single source of truth for residual
-// state. A 200 on the PATCH is not proof the values stuck (enterprise-pinned
-// fields silently no-op), so the read-back is authoritative. A read failure is
-// NOT treated as success: it is reported as unverified (transient) so the
-// caller can surface "could not verify — retry" rather than a false "lockdown
-// applied". Distinguishing a transient read failure from a confirmed-enforced
-// read is what stops the lockdown reporting complete when it was never checked.
+// Read the org back and classify — the authoritative source of residual state,
+// since a 200 on the PATCH isn't proof the values stuck (enterprise-pinned
+// fields silently no-op). A read failure is reported as unverified (not
+// success), so the caller surfaces "could not verify — retry".
 async function verifyOrgDefaults(
   client: GitHubClient,
   org: string,
@@ -252,9 +248,7 @@ async function verifyOrgDefaults(
       unenforced: verdicts.filter((v) => !v.enforced).map((v) => v.setting),
     }
   } catch (err) {
-    // The read-back failed (5xx, network, rate limit, permission). Do not
-    // manufacture success — report it as unverified so the caller surfaces a
-    // retry rather than a false "lockdown applied".
+    // Read-back failed — don't manufacture success; report unverified.
     console.warn(`${org}: org member-default read-back failed`, err)
     return { ok: false, verified: false, unenforced: [] }
   }
@@ -310,8 +304,7 @@ export async function repairOrgDefaults(
     plan,
   )
   if (!verified) {
-    // The PATCH may have succeeded, but the authoritative read-back failed, so
-    // we cannot claim the lockdown is complete. Surface as transient/retry.
+    // Read-back failed, so we can't claim the lockdown is complete.
     return {
       ok: false,
       transient: true,
@@ -343,14 +336,9 @@ const REPO_CREATION_FIELDS = new Set([
 
 // Per-field fallback for when the combined PATCH is rejected. Sends each field
 // alone EXCEPT the entangled repo-creation booleans, which go in one grouped
-// sub-PATCH so GitHub can't reset the omitted ones. A 403/422 on a field is a
-// plan-gated rejection — skip it; the authoritative read-back in
-// repairOrgDefaults reports residual state. A secondary-rate-limit aborts.
-//
-// The contract is intentionally narrow: this helper only signals whether a
-// rate limit aborted it (`transient`). The verdict (ok / unenforced / message)
-// is produced solely by the shared verifyOrgDefaults read-back, so this helper
-// does not fabricate one.
+// sub-PATCH. A 403/422 on a field is a plan-gated rejection — skip it; a
+// rate-limit aborts. The contract is intentionally narrow — it only signals
+// whether a rate limit aborted; verifyOrgDefaults produces the actual verdict.
 async function repairOrgDefaultsPerField(
   client: GitHubClient,
   org: string,

@@ -1,10 +1,6 @@
-// Read-only org audit — the web mirror of the CLI's buildAuditReport, with one
-// deliberate divergence. It assembles the member-default classification (via
-// checkOrgDefaults) plus the per-concern check verdicts into a single report.
-// The CLI's three-state model is OK / WARN (complete but non-critical drift) /
-// FAIL; the GUI intentionally collapses WARN into FAIL — any drift, critical or
-// not, is treated as actionable (see deriveVerdict). So the verdict is two-state
-// here (ok / fail) by design; everything else mirrors the CLI.
+// Read-only org audit — the web mirror of the CLI's buildAuditReport.
+// Deliberate divergence: the CLI is three-state (OK / WARN / FAIL), but the GUI
+// collapses WARN into FAIL — any drift is treated as actionable (deriveVerdict).
 
 import type { GitHubClient } from "@/hooks/github/client"
 import {
@@ -102,10 +98,8 @@ function concernSettingsUrl(id: ConcernId, org: string): string {
   }
 }
 
-// In the GUI, any drift demands attention: a drifted concern or an unenforced
-// member-default (critical or not) fails the audit. This is intentionally
-// stricter than the CLI's three-state model (which warns on non-critical
-// drift) — the web treats every regression as actionable.
+// Any drift fails the audit — stricter than the CLI, which warns on
+// non-critical drift (see header).
 function deriveVerdict(
   readOk: boolean,
   lockdownComplete: boolean,
@@ -122,9 +116,8 @@ export async function buildOrgAuditReport(
   org: string,
   plan: string | undefined,
 ): Promise<OrgAuditReport> {
-  // All eight per-concern checks run in parallel — they're independent reads,
-  // none of them throw (each swallows its error into a verdict), and the final
-  // concern list is sorted by title regardless of resolution order.
+  // All eight checks run in parallel — independent reads, none throw (each
+  // swallows its error into a verdict).
   const [
     defaults,
     actions,
@@ -151,8 +144,6 @@ export async function buildOrgAuditReport(
       .filter((v) => !v.enforced)
       .map((v) => v.setting) ?? []
   const defaultVerdicts = defaults.classification?.verdicts ?? []
-  // Any unenforced member-default (not just critical) counts as incomplete —
-  // the GUI treats all drift as actionable.
   const lockdownComplete = readOk && unenforcedDefaults.length === 0
 
   const concerns: ConcernCheck[] = (
