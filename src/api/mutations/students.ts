@@ -105,7 +105,7 @@ type StudentCsvField = (typeof STUDENT_CSV_FIELDS)[number]
 
 export type StudentCsvRow = Record<StudentCsvField, string>
 
-function normalizeStudentRow(
+export function normalizeStudentRow(
   row: Partial<Record<StudentCsvField, unknown>>,
 ): StudentCsvRow {
   return {
@@ -124,16 +124,16 @@ function normalizeStudentRow(
   }
 }
 
-function splitGitHubDisplayName(name: string | null) {
-  if (!name?.trim()) {
-    return { first_name: "", last_name: "" }
-  }
-
-  const parts = name.trim().split(/\s+/)
-  const first_name = parts[0] ?? ""
-  const last_name = parts.slice(1).join(" ")
-
-  return { first_name, last_name }
+// Split a full name: first token is first_name, the remainder is last_name.
+// Empty/whitespace-safe. Accepts null (GitHub's display name may be null).
+// The single canonical implementation, re-exported from util/roster as
+// splitName for UI callers.
+export function splitName(name: string | null): {
+  first_name: string
+  last_name: string
+} {
+  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean)
+  return { first_name: parts.at(0) ?? "", last_name: parts.slice(1).join(" ") }
 }
 
 function parseStudentsCsv(csv: string): StudentCsvRow[] {
@@ -239,7 +239,7 @@ export async function addStudentToClassroom(
     throw new Error(`Student already exists: ${githubUser.login}`)
   }
 
-  const nameParts = splitGitHubDisplayName(githubUser.name)
+  const nameParts = splitName(githubUser.name)
 
   const studentEmail = input.email?.trim() ?? githubUser.email ?? ""
 
@@ -1548,7 +1548,7 @@ export async function addStudentsToClassroom(
         continue
       }
 
-      const nameParts = splitGitHubDisplayName(githubUser.name)
+      const nameParts = splitName(githubUser.name)
 
       const studentEmail = githubUser.email ?? ""
 
