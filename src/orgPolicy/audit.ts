@@ -1,9 +1,10 @@
-// Read-only org audit — the web mirror of the CLI's buildAuditReport +
-// OK/WARN/FAIL switch (classroom50-cli internal/audit/audit.go). Assembles the
-// member-default classification (via checkOrgDefaults) plus the per-concern
-// check verdicts into a single report. Verdict semantics match the CLI:
-// read failure or critical drift => fail; complete but non-critical drift =>
-// warn; everything enforced => ok. Unreadable manual items never fail.
+// Read-only org audit — the web mirror of the CLI's buildAuditReport, with one
+// deliberate divergence. It assembles the member-default classification (via
+// checkOrgDefaults) plus the per-concern check verdicts into a single report.
+// The CLI's three-state model is OK / WARN (complete but non-critical drift) /
+// FAIL; the GUI intentionally collapses WARN into FAIL — any drift, critical or
+// not, is treated as actionable (see deriveVerdict). So the verdict is two-state
+// here (ok / fail) by design; everything else mirrors the CLI.
 
 import type { GitHubClient } from "@/hooks/github/client"
 import {
@@ -13,6 +14,7 @@ import {
   checkOrgPrCreation,
   checkPages,
   checkReusableWorkflowAccess,
+  checkWorkflowPermissions,
   type CheckVerdict,
 } from "@/hooks/github/orgChecks"
 import { checkRulesets } from "@/hooks/github/rulesets"
@@ -136,6 +138,7 @@ export async function buildOrgAuditReport(
     actions,
     prCreation,
     branchProtection,
+    workflowPermissions,
     reusableAccess,
     pages,
     rulesets,
@@ -143,6 +146,7 @@ export async function buildOrgAuditReport(
     checkOrgActions(client, org),
     checkOrgPrCreation(client, org),
     checkBranchProtection(client, org),
+    checkWorkflowPermissions(client, org),
     checkReusableWorkflowAccess(client, org),
     checkPages(client, org),
     checkRulesets(client, org),
@@ -154,6 +158,7 @@ export async function buildOrgAuditReport(
       { id: "orgActions", verdict: actions },
       { id: "orgPrCreation", verdict: prCreation },
       { id: "branchProtection", verdict: branchProtection },
+      { id: "workflowPermissions", verdict: workflowPermissions },
       { id: "reusableWorkflowAccess", verdict: reusableAccess },
       { id: "pages", verdict: pages },
       { id: "rulesets", verdict: rulesets },

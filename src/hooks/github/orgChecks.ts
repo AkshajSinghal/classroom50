@@ -182,6 +182,34 @@ export async function checkPages(
   }
 }
 
+type RepoWorkflowPermissions = {
+  default_workflow_permissions?: "read" | "write"
+}
+
+// workflowPermissions: GET /repos/{org}/{repo}/actions/permissions/workflow —
+// enforced when the config repo's default workflow permission is "write" (the
+// classroom50 skeleton workflows need write to push scores / open Feedback
+// PRs). Mirrors the desired state set by setRepoWorkflowPermissions.
+export async function checkWorkflowPermissions(
+  client: GitHubClient,
+  org: string,
+  repo: string = CONFIG_REPO,
+): Promise<CheckVerdict> {
+  try {
+    const perms = await client.request<RepoWorkflowPermissions>(
+      `/repos/${org}/${repo}/actions/permissions/workflow`,
+    )
+    return {
+      state:
+        perms.default_workflow_permissions === "write"
+          ? "enforced"
+          : "unenforced",
+    }
+  } catch (err) {
+    return unreadableFrom(err)
+  }
+}
+
 export type OrgDefaultsRepairResult = {
   // ok mirrors the CLI's "lockdown complete" = no critical field unenforced.
   ok: boolean
@@ -204,22 +232,34 @@ function orgDefaultsBody(
 
 // Read the org back and classify — the single source of truth for residual
 // state. A 200 on the PATCH is not proof the values stuck (enterprise-pinned
-// fields silently no-op), so the read-back is authoritative. A read failure
-// does not manufacture a false checklist (mirrors the CLI: warn, treat as ok).
+// fields silently no-op), so the read-back is authoritative. A read failure is
+// NOT treated as success: it is reported as unverified (transient) so the
+// caller can surface "could not verify — retry" rather than a false "lockdown
+// applied". Distinguishing a transient read failure from a confirmed-enforced
+// read is what stops the lockdown reporting complete when it was never checked.
 async function verifyOrgDefaults(
   client: GitHubClient,
   org: string,
   plan: string | undefined,
-): Promise<{ ok: boolean; unenforced: MemberDefaultSetting[] }> {
+): Promise<{
+  ok: boolean
+  verified: boolean
+  unenforced: MemberDefaultSetting[]
+}> {
   try {
     const live = await client.request<Record<string, unknown>>(`/orgs/${org}`)
     const { verdicts, criticalMissed } = classifyDefaults(live, plan)
     return {
       ok: !criticalMissed,
+      verified: true,
       unenforced: verdicts.filter((v) => !v.enforced).map((v) => v.setting),
     }
-  } catch {
-    return { ok: true, unenforced: [] }
+  } catch (err) {
+    // The read-back failed (5xx, network, rate limit, permission). Do not
+    // manufacture success — report it as unverified so the caller surfaces a
+    // retry rather than a false "lockdown applied".
+    console.warn(`${org}: org member-default read-back failed`, err)
+    return { ok: false, verified: false, unenforced: [] }
   }
 }
 
@@ -254,13 +294,34 @@ export async function repairOrgDefaults(
       (err.status === 403 || err.status === 422)
     ) {
       const fallback = await repairOrgDefaultsPerField(client, org, settings)
-      if (fallback.transient) return fallback
+      if (fallback.transient) {
+        return {
+          ok: false,
+          transient: true,
+          unenforced: [],
+          message: `${org}: hit a rate limit applying org member defaults; retry shortly.`,
+        }
+      }
     } else {
       throw err
     }
   }
 
-  const { ok, unenforced } = await verifyOrgDefaults(client, org, plan)
+  const { ok, verified, unenforced } = await verifyOrgDefaults(
+    client,
+    org,
+    plan,
+  )
+  if (!verified) {
+    // The PATCH may have succeeded, but the authoritative read-back failed, so
+    // we cannot claim the lockdown is complete. Surface as transient/retry.
+    return {
+      ok: false,
+      transient: true,
+      unenforced: [],
+      message: `${org}: applied org member defaults but could not verify them (read-back failed); re-check shortly.`,
+    }
+  }
   return {
     ok,
     transient: false,
@@ -286,19 +347,19 @@ const REPO_CREATION_FIELDS = new Set([
 // Per-field fallback for when the combined PATCH is rejected. Sends each field
 // alone EXCEPT the entangled repo-creation booleans, which go in one grouped
 // sub-PATCH so GitHub can't reset the omitted ones. A 403/422 on a field is a
-// plan-gated rejection — skip it; the read-back reports residual state. A
-// secondary-rate-limit aborts.
+// plan-gated rejection — skip it; the authoritative read-back in
+// repairOrgDefaults reports residual state. A secondary-rate-limit aborts.
+//
+// The contract is intentionally narrow: this helper only signals whether a
+// rate limit aborted it (`transient`). The verdict (ok / unenforced / message)
+// is produced solely by the shared verifyOrgDefaults read-back, so this helper
+// does not fabricate one.
 async function repairOrgDefaultsPerField(
   client: GitHubClient,
   org: string,
   settings: MemberDefaultSetting[],
-): Promise<OrgDefaultsRepairResult> {
-  const rateLimitAbort = (): OrgDefaultsRepairResult => ({
-    ok: false,
-    transient: true,
-    unenforced: [],
-    message: `${org}: hit a rate limit applying org member defaults; retry shortly.`,
-  })
+): Promise<{ transient: boolean }> {
+  const rateLimitAbort = (): { transient: boolean } => ({ transient: true })
 
   // One grouped body for the entangled repo-creation booleans (in scope for
   // this plan), plus the remaining fields applied individually.
@@ -339,5 +400,5 @@ async function repairOrgDefaultsPerField(
     throw err
   }
 
-  return { ok: true, transient: false, unenforced: [], message: "" }
+  return { transient: false }
 }

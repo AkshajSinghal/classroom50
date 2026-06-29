@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 
 import { useGitHubClient } from "@/context/github/GitHubProvider"
@@ -34,10 +34,24 @@ const RerunOnboarding = ({ org }: { org: string }) => {
   const [steps, setSteps] =
     useState<Record<InitStepId, InitStepUpdate>>(initialInitSteps)
   const [started, setStarted] = useState(false)
+  const [failed, setFailed] = useState(false)
+
+  // Guard against setState after unmount: initClassroom50 runs ~10 sequential
+  // network steps firing onStepUpdate after each, and the user can navigate
+  // away mid-run. The network work itself isn't cancelable (no AbortSignal),
+  // but the guard stops setState churn against an unmounted tree.
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   const mutation = useMutation({
     mutationFn: async () => {
       setStarted(true)
+      setFailed(false)
       setSteps(initialInitSteps)
       return initClassroom50({
         client,
@@ -46,12 +60,23 @@ const RerunOnboarding = ({ org }: { org: string }) => {
         serviceToken: "",
         serviceAccountConfirmed: false,
         onStepUpdate: (update) => {
+          if (!mountedRef.current) return
           setSteps((prev) => applyStepUpdate(prev, update))
         },
       })
     },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: githubKeys.orgAudit(org) })
+    onSuccess: (data) => {
+      if (!mountedRef.current) return
+      // initClassroom50 resolves (does not throw) with status "error" when a
+      // prerequisite step fails. Surface the failed-run state instead of
+      // treating it as a clean success (mirrors OrgSetupPage's handling).
+      if (data && data.status === "error") {
+        setFailed(true)
+        return
+      }
+      void queryClient.invalidateQueries({
+        queryKey: githubKeys.orgAuditPrefix(org),
+      })
       void queryClient.invalidateQueries({ queryKey: ["orgs"] })
     },
   })
@@ -93,6 +118,12 @@ const RerunOnboarding = ({ org }: { org: string }) => {
       {started && (
         <div className={!isOwner ? "mt-4" : undefined}>
           <InitStepBoard steps={steps} />
+          {failed && (
+            <div className="mt-3 rounded-lg border border-error/30 bg-error/10 p-3 text-sm text-error">
+              Re-run setup did not complete — a required step failed. Review the
+              steps above, resolve the issue, and run it again.
+            </div>
+          )}
         </div>
       )}
     </SettingsSection>

@@ -13,7 +13,7 @@ import {
   ensureReusableWorkflowAccess,
   ensureWorkflowPermissions,
 } from "@/hooks/github/mutations"
-import { repairOrgDefaults } from "@/hooks/github/orgChecks"
+import { CONFIG_REPO, repairOrgDefaults } from "@/hooks/github/orgChecks"
 import { repairRulesets } from "@/hooks/github/rulesets"
 import type { ConcernId } from "./audit"
 
@@ -59,16 +59,16 @@ export async function repairConcern(
       await ensureOrgCanCreatePullRequests(client, org)
       return { unfixableFields: [] }
     case "branchProtection":
-      await ensureBranchProtection(client, org, "classroom50", "main")
+      await ensureBranchProtection(client, org, CONFIG_REPO, "main")
       return { unfixableFields: [] }
     case "workflowPermissions":
-      await ensureWorkflowPermissions(client, org, "classroom50")
+      await ensureWorkflowPermissions(client, org, CONFIG_REPO)
       return { unfixableFields: [] }
     case "reusableWorkflowAccess":
-      await ensureReusableWorkflowAccess(client, org, "classroom50")
+      await ensureReusableWorkflowAccess(client, org, CONFIG_REPO)
       return { unfixableFields: [] }
     case "pages":
-      await ensurePages(client, org, "classroom50")
+      await ensurePages(client, org, CONFIG_REPO)
       return { unfixableFields: [] }
     case "rulesets":
       await repairRulesets(client, org)

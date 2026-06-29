@@ -96,7 +96,13 @@ export const githubKeys = {
   serviceToken: (owner: string) =>
     [...githubKeys.all, "serviceToken", owner] as const,
 
-  orgAudit: (owner: string) => [...githubKeys.all, "orgAudit", owner] as const,
+  orgAudit: (owner: string, plan?: string) =>
+    [...githubKeys.all, "orgAudit", owner, plan ?? null] as const,
+
+  // Prefix matching every orgAudit entry for an org regardless of plan — use
+  // for invalidation so a refetch happens whatever plan the cached audit used.
+  orgAuditPrefix: (owner: string) =>
+    [...githubKeys.all, "orgAudit", owner] as const,
 
   releases: (owner: string, repo: string) =>
     [...githubKeys.all, "releases", owner, repo] as const,
