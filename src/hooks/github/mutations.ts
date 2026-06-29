@@ -17,7 +17,7 @@ import type { OnboardingCleanupMode } from "@/types/classroom"
 import { isClassroomArchived } from "@/types/classroom"
 import { STUDENT_CSV_FIELDS } from "@/api/mutations/students"
 import { getRepo } from "./queries"
-import { repairOrgDefaults } from "./orgChecks"
+import { CONFIG_REPO, repairOrgDefaults } from "./orgChecks"
 import { repairRulesets } from "./rulesets"
 
 const ASSIGNMENTS_TEMPLATE = {
@@ -934,7 +934,6 @@ const SKELETON_PATHS = [
 const DEFAULT_BRANCH_PLACEHOLDER = "{{DEFAULT_BRANCH}}"
 const FOUNDATION_BASE = "cli/gh-teacher/skeleton/dotgithub"
 const ORG_BASE = ".github"
-const CONFIG_REPO = "classroom50"
 const SKELETON_SOURCE_OWNER = "foundation50"
 const SKELETON_SOURCE_REPO = "classroom50"
 const SKELETON_SOURCE_REF = "main"

@@ -235,8 +235,8 @@ describe("buildOrgAuditReport", () => {
   it("emits a concern for every ConcernId (no concern silently dropped)", async () => {
     const report = await buildOrgAuditReport(makeClient(), "acme", "team")
     // Guards against a new ConcernId being wired into titles/repair but
-    // forgotten in buildOrgAuditReport's concerns array (as happened with
-    // workflowPermissions). Keep this list in sync with the ConcernId union.
+    // forgotten in buildOrgAuditReport's concerns array. Keep this list in
+    // sync with the ConcernId union.
     const expected: ConcernId[] = [
       "orgDefaults",
       "orgActions",
