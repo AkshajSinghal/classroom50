@@ -225,7 +225,7 @@ describe("repairOrgDefaults", () => {
     expect(getPatchCount()).toBe(1)
   })
 
-  it("does not manufacture a checklist when the read-back fails", async () => {
+  it("does not manufacture a checklist or false success when the read-back fails", async () => {
     const client: GitHubClient = {
       request: vi
         .fn()
@@ -236,7 +236,10 @@ describe("repairOrgDefaults", () => {
       requestRaw: () => Promise.reject(new Error("x")),
     }
     const result = await repairOrgDefaults(client, "acme", "team")
-    expect(result.ok).toBe(true)
+    // A failed read-back must NOT be reported as a completed lockdown: it is
+    // surfaced as transient (retry) with no fabricated drift checklist.
+    expect(result.ok).toBe(false)
+    expect(result.transient).toBe(true)
     expect(result.unenforced).toHaveLength(0)
   })
 })

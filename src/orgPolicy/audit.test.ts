@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { buildOrgAuditReport } from "./audit"
+import type { ConcernId } from "./audit"
 import { memberDefaultSettings } from "./desiredState"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import {
@@ -229,5 +230,24 @@ describe("buildOrgAuditReport", () => {
     const titles = report.concerns.map((c) => c.title)
     const sorted = [...titles].sort((a, b) => a.localeCompare(b))
     expect(titles).toEqual(sorted)
+  })
+
+  it("emits a concern for every ConcernId (no concern silently dropped)", async () => {
+    const report = await buildOrgAuditReport(makeClient(), "acme", "team")
+    // Guards against a new ConcernId being wired into titles/repair but
+    // forgotten in buildOrgAuditReport's concerns array (as happened with
+    // workflowPermissions). Keep this list in sync with the ConcernId union.
+    const expected: ConcernId[] = [
+      "orgDefaults",
+      "orgActions",
+      "orgPrCreation",
+      "branchProtection",
+      "workflowPermissions",
+      "reusableWorkflowAccess",
+      "pages",
+      "rulesets",
+    ]
+    expect(new Set(report.concerns.map((c) => c.id))).toEqual(new Set(expected))
+    expect(report.concerns).toHaveLength(expected.length)
   })
 })

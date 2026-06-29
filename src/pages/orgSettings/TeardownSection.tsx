@@ -10,6 +10,7 @@ import {
   executeTeardown,
   planTeardown,
   TeardownMarkerError,
+  TeardownRateLimitError,
   TeardownScopeError,
   type TeardownPlan,
 } from "@/api/mutations/teardown"
@@ -55,19 +56,34 @@ const TeardownSection = ({ org }: { org: string }) => {
     },
     onSuccess: (result) => {
       setOpen(false)
-      setDone(
-        result
-          ? `Deleted ${result.deleted.length} repositor${result.deleted.length === 1 ? "y" : "ies"}.`
-          : null,
-      )
+      if (!result) {
+        setDone(null)
+      } else if (result.failed.length > 0) {
+        // Partial success: some repos were deleted, others could not be. The
+        // marker is preserved on any failure, so teardown remains re-runnable.
+        setDone(
+          `Deleted ${result.deleted.length} repositor${result.deleted.length === 1 ? "y" : "ies"}; ` +
+            `${result.failed.length} could not be deleted. Re-run teardown to finish.`,
+        )
+      } else {
+        setDone(
+          `Deleted ${result.deleted.length} repositor${result.deleted.length === 1 ? "y" : "ies"}.`,
+        )
+      }
       void queryClient.invalidateQueries({ queryKey: ["orgs"] })
     },
     onError: (err) => {
-      setError(
-        err instanceof TeardownScopeError
-          ? err.message
-          : "Teardown failed. Some repositories may not have been deleted.",
-      )
+      if (err instanceof TeardownScopeError) {
+        setError(err.message)
+      } else if (err instanceof TeardownRateLimitError) {
+        setError(err.message)
+        // Some repos may already be gone; refresh the org view.
+        void queryClient.invalidateQueries({ queryKey: ["orgs"] })
+      } else {
+        setError(
+          "Teardown failed. Some repositories may not have been deleted.",
+        )
+      }
     },
   })
 

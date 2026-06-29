@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import {
   TeardownMarkerError,
+  TeardownRateLimitError,
   TeardownScopeError,
   executeTeardown,
   planTeardown,
@@ -47,10 +48,48 @@ function forbidden(): GitHubAPIError {
   })
 }
 
+// A secondary-rate-limit 403: same status as the scope wall, but carries
+// rate-limit signal (retryAfter / remaining:0) so isRateLimited is true.
+function rateLimited403(): GitHubAPIError {
+  return new GitHubAPIError({
+    status: 403,
+    url: "x",
+    message: "Forbidden (secondary rate limit)",
+    body: null,
+    rateLimit: {
+      limit: null,
+      remaining: 0,
+      used: null,
+      reset: null,
+      resource: null,
+      retryAfter: 0,
+    },
+  })
+}
+
+function serverError(): GitHubAPIError {
+  return new GitHubAPIError({
+    status: 500,
+    url: "x",
+    message: "Server Error",
+    body: null,
+    rateLimit: {
+      limit: null,
+      remaining: null,
+      used: null,
+      reset: null,
+      resource: null,
+      retryAfter: null,
+    },
+  })
+}
+
 type Opts = {
   markerExists: boolean
   repos: string[]
   deleteForbidden?: boolean
+  // Repos that fail every DELETE with the given error kind.
+  failRepos?: Record<string, "rate-limit" | "scope" | "server">
 }
 
 function makeClient(opts: Opts) {
@@ -77,6 +116,10 @@ function makeClient(opts: Opts) {
       if (method === "DELETE") {
         if (opts.deleteForbidden) return Promise.reject(forbidden())
         const repo = path.split("/").pop() ?? ""
+        const kind = opts.failRepos?.[repo]
+        if (kind === "rate-limit") return Promise.reject(rateLimited403())
+        if (kind === "scope") return Promise.reject(forbidden())
+        if (kind === "server") return Promise.reject(serverError())
         deletes.push(repo)
         return Promise.resolve(undefined)
       }
@@ -144,5 +187,80 @@ describe("executeTeardown", () => {
     const result = await executeTeardown(client, plan)
     expect(result.deleted).toEqual(["classroom50"])
     expect(deletes).toEqual(["classroom50"])
+  })
+
+  it("treats a secondary-rate-limit 403 as retryable, not the scope wall", async () => {
+    // A repo that always rate-limits (403 + retryAfter) exhausts retries; it
+    // must surface as TeardownRateLimitError, never TeardownScopeError.
+    const { client } = makeClient({
+      markerExists: true,
+      repos: ["classroom50", "cs101-hw1-alice"],
+      failRepos: { "cs101-hw1-alice": "rate-limit" },
+    })
+    const plan = await planTeardown(client, "acme")
+    await expect(executeTeardown(client, plan)).rejects.toBeInstanceOf(
+      TeardownRateLimitError,
+    )
+  })
+
+  it("preserves the marker when a non-marker delete fails (re-runnable)", async () => {
+    // A non-marker repo fails with a non-403 (500). The marker must NOT be
+    // deleted, so a re-run still passes the marker gate.
+    const { client, deletes } = makeClient({
+      markerExists: true,
+      repos: ["classroom50", "cs101-hw1-alice", "cs101-hw1-bob"],
+      failRepos: { "cs101-hw1-alice": "server" },
+    })
+    const plan = await planTeardown(client, "acme")
+    const result = await executeTeardown(client, plan)
+    expect(result.failed).toContain("cs101-hw1-alice")
+    // Marker was preserved (never deleted) because a non-marker delete failed.
+    expect(deletes).not.toContain("classroom50")
+    expect(result.deleted).not.toContain("classroom50")
+  })
+
+  it("retries a transient delete failure and recovers", async () => {
+    // First DELETE on the repo fails transiently (500), the retry succeeds.
+    let aliceAttempts = 0
+    const deletes: string[] = []
+    const request = vi
+      .fn()
+      .mockImplementation((path: string, options?: { method?: string }) => {
+        const method = options?.method ?? "GET"
+        if (method === "GET" && /\/repos\/[^/]+\/classroom50$/.test(path)) {
+          return Promise.resolve({ name: "classroom50" })
+        }
+        if (
+          method === "GET" &&
+          path.includes("/orgs/") &&
+          path.includes("/repos")
+        ) {
+          return Promise.resolve(
+            ["classroom50", "cs101-hw1-alice"].map((name) => ({ name })),
+          )
+        }
+        if (method === "DELETE") {
+          const repo = path.split("/").pop() ?? ""
+          if (repo === "cs101-hw1-alice" && aliceAttempts === 0) {
+            aliceAttempts++
+            return Promise.reject(serverError())
+          }
+          deletes.push(repo)
+          return Promise.resolve(undefined)
+        }
+        return Promise.reject(new Error(`unexpected: ${method} ${path}`))
+      })
+    const client: GitHubClient = {
+      request: request as unknown as GitHubClient["request"],
+      requestRaw: () => Promise.reject(new Error("unexpected requestRaw")),
+    }
+    const plan = await planTeardown(client, "acme")
+    const result = await executeTeardown(client, plan)
+    expect(result.failed).toHaveLength(0)
+    expect(result.deleted).toEqual(
+      expect.arrayContaining(["cs101-hw1-alice", "classroom50"]),
+    )
+    // Marker still deleted last after the retry recovery.
+    expect(deletes[deletes.length - 1]).toBe("classroom50")
   })
 })

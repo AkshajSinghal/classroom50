@@ -380,7 +380,7 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
         })
       }
       void queryClient.invalidateQueries({
-        queryKey: githubKeys.orgAudit(org),
+        queryKey: githubKeys.orgAuditPrefix(org),
       })
     },
   })
@@ -410,7 +410,7 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
           className="btn btn-sm btn-ghost"
           onClick={() => {
             void queryClient.invalidateQueries({
-              queryKey: githubKeys.orgAudit(org),
+              queryKey: githubKeys.orgAuditPrefix(org),
             })
             void refetch()
           }}

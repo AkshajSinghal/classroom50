@@ -10,7 +10,7 @@ import { buildOrgAuditReport } from "@/orgPolicy/audit"
 const useGetOrgAudit = (org: string, plan: string | undefined) => {
   const client = useGitHubClient()
   return useQuery({
-    queryKey: githubKeys.orgAudit(org),
+    queryKey: githubKeys.orgAudit(org, plan),
     queryFn: () => buildOrgAuditReport(client, org, plan),
     enabled: Boolean(org) && Boolean(plan),
     staleTime: 5 * 60 * 1000,
