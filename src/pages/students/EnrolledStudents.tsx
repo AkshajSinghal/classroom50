@@ -11,7 +11,13 @@ import {
   UserCheck,
 } from "lucide-react"
 
-import { getName, getInitials, isSameGitHubUser } from "@/util/students"
+import {
+  getName,
+  getInitials,
+  isSameGitHubUser,
+  nameFromParts,
+  initialsFromParts,
+} from "@/util/students"
 import { formatInvitedAt } from "@/util/formatDate"
 import Avatar from "@/components/avatar"
 import type { Student } from "@/types/classroom"
@@ -35,6 +41,7 @@ import { useUpdateRosterCache } from "@/hooks/useGetStudents"
 import useRosterStatus from "@/hooks/useRosterStatus"
 import { useGitHubViewer } from "@/hooks/github/hooks"
 import { type InviteStatus, memberIdSet } from "@/util/inviteStatus"
+import type { OnboardingSelfReport } from "@/util/inviteStatus"
 import {
   applyReconciledToRoster,
   removeFromRoster,
@@ -49,11 +56,13 @@ const EditStudentButton = ({
   org,
   classroom,
   student,
+  selfReport,
   onSaved,
 }: {
   org: string
   classroom: string
   student: Student
+  selfReport?: OnboardingSelfReport
   onSaved: (updated: StudentCsvRow) => void
 }) => {
   const [open, setOpen] = useState(false)
@@ -75,6 +84,7 @@ const EditStudentButton = ({
         org={org}
         classroom={classroom}
         student={student}
+        selfReport={selfReport}
         open={open}
         onClose={() => setOpen(false)}
         onSaved={(updated) => {
@@ -709,12 +719,28 @@ const EnrolledStudents = ({
         ? formatInvitedAt(statusEntry?.invitedAt)
         : null
     const isSelf = isSameGitHubUser(viewer, student)
-    // Email-only rows have no username yet; show the email so the row is
-    // identifiable before reconciliation.
-    const displayName = student.username
+    // CSV is authoritative for the displayed name; when a not-yet-enrolled row
+    // has no name on the CSV, fall back to the student's onboarding self-report
+    // so the row reads as a person rather than a bare email. Username rows pull
+    // their name from the roster (getName), email-only rows from the email.
+    const selfReport = statusEntry?.selfReport
+    const csvName = student.username
       ? getName(student.username, students)
-      : student.email
-    const displayHandle = student.username || student.email
+      : nameFromParts(student.first_name, student.last_name)
+    const displayName =
+      csvName ||
+      nameFromParts(selfReport?.first_name, selfReport?.last_name) ||
+      student.email
+    const displayHandle =
+      student.username || selfReport?.github_username || student.email
+    const csvInitials = student.username
+      ? getInitials(student.username, students)
+      : initialsFromParts(student.first_name, student.last_name)
+    const displayInitials =
+      csvInitials ||
+      initialsFromParts(selfReport?.first_name, selfReport?.last_name) ||
+      student.email[0]?.toUpperCase() ||
+      "?"
 
     return (
       <li
@@ -726,11 +752,7 @@ const EnrolledStudents = ({
             name={displayName}
             github={displayHandle}
             subtitle={displayHandle ? `@${displayHandle}` : undefined}
-            initials={
-              student.username
-                ? getInitials(student.username, students)
-                : (student.email[0]?.toUpperCase() ?? "?")
-            }
+            initials={displayInitials}
           />
           {student.section?.trim() ? (
             <span className="badge badge-sm badge-ghost mt-1">
@@ -803,6 +825,7 @@ const EnrolledStudents = ({
             org={org}
             classroom={classroom}
             student={student}
+            selfReport={selfReport}
             onSaved={(updated) => {
               // Replace the edited row in the cached roster (see
               // useUpdateRosterCache). studentKey is stable across any permitted

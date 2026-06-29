@@ -11,12 +11,29 @@ export type InviteStatus =
   | "removed"
   | "none"
 
+// A student's onboarding self-report, parsed from the onboarding repo's YAML.
+// github_id/github_username are GitHub-attested; email and the names are claimed
+// by the student. The match keys (github_id/email) classify "ready"; the names
+// let the teacher roster backfill a CSV row missing first/last name before
+// enrollment is confirmed. Names are optional for back-compat with pre-name
+// payloads.
+export type OnboardingSelfReport = {
+  github_id: string
+  email: string
+  first_name?: string
+  last_name?: string
+  github_username?: string
+}
+
 export type StudentInviteStatus = {
   status: InviteStatus
   // Invitation id for an "expired" student, used to cancel before resend.
   invitationId?: number
   // The matched invitation's created_at, for "Invited <when>".
   invitedAt?: string
+  // The onboarding self-report this row matched (by github_id, else email),
+  // when one exists. Present for "ready" rows; the edit modal reads its names.
+  selfReport?: OnboardingSelfReport
 }
 
 const lower = (value: string | null | undefined) => (value ?? "").toLowerCase()
@@ -36,21 +53,22 @@ export function buildInviteStatusLookup(
   members: GitHubUser[],
   pendingInvitations: GitHubOrgInvitation[],
   failedInvitations: GitHubOrgInvitation[],
-  onboardedReports: { github_id: string; email: string }[] = [],
+  onboardedReports: OnboardingSelfReport[] = [],
 ) {
   const memberIds = memberIdSet(members)
   const memberLogins = new Set(members.map((member) => lower(member.login)))
 
   // Self-reports indexed by both keys a row can match on: github_id (username-
   // invited rows) and normalized email (email-invited rows, no github_id yet).
-  const onboardedIds = new Set(
-    onboardedReports.map((report) => report.github_id.trim()).filter(Boolean),
-  )
-  const onboardedEmails = new Set(
-    onboardedReports
-      .map((report) => normalizeEmail(report.email))
-      .filter(Boolean),
-  )
+  // Keep the full report on each index so a matched row can read its names.
+  const reportById = new Map<string, OnboardingSelfReport>()
+  const reportByEmail = new Map<string, OnboardingSelfReport>()
+  for (const report of onboardedReports) {
+    const id = report.github_id.trim()
+    const email = normalizeEmail(report.email)
+    if (id && !reportById.has(id)) reportById.set(id, report)
+    if (email && !reportByEmail.has(email)) reportByEmail.set(email, report)
+  }
 
   const pendingByLogin = new Map<string, GitHubOrgInvitation>()
   const pendingByEmail = new Map<string, GitHubOrgInvitation>()
@@ -92,11 +110,11 @@ export function buildInviteStatusLookup(
     // Otherwise surface a still-pending/expired GitHub invite for resend, else
     // "onboarding" (invited, nothing to confirm yet).
     if (enrollment === "invited") {
-      const hasOnboarded =
-        (Boolean(githubId) && onboardedIds.has(githubId)) ||
-        (Boolean(email) && onboardedEmails.has(email))
-      if (hasOnboarded) {
-        return { status: "ready" }
+      const matchedReport =
+        (githubId ? reportById.get(githubId) : undefined) ??
+        (email ? reportByEmail.get(email) : undefined)
+      if (matchedReport) {
+        return { status: "ready", selfReport: matchedReport }
       }
 
       const pendingInvite =

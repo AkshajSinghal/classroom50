@@ -2071,6 +2071,22 @@ export async function updateStudent(
     )
   }
 
+  // Before enrollment is confirmed, the email is part of the identity that
+  // onboarding/reconcile binds (email-based match key). Letting the teacher
+  // override it pre-enrollment could break that match, so refuse any email
+  // change until the row is enrolled. The UI also locks the field; this is the
+  // server-side backstop. A legacy row ("") with a github_id is treated as
+  // enrolled (matches the inviteStatus classifier).
+  const isEnrolled =
+    existing.enrollment_status === "enrolled" ||
+    (existing.enrollment_status !== "invited" && Boolean(existing.github_id))
+  if (emailChanged && !isEnrolled) {
+    throw new Error(
+      "Can't change the email before enrollment is confirmed: it's part of " +
+        "the identity onboarding binds. Confirm enrollment first, then edit.",
+    )
+  }
+
   // Guard against editing an email into one already held by ANOTHER row
   // (case-insensitive). The target row matching its own current email is fine.
   if (nextEmail) {

@@ -1,7 +1,7 @@
 import { Mail, UserRound, Users } from "lucide-react"
 import { revalidateLogic, useForm } from "@tanstack/react-form"
 import { useMutation } from "@tanstack/react-query"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import GitHub from "@/assets/github.svg?react"
 import { updateStudentWithConflictRetry } from "@/api/mutations/students"
@@ -11,12 +11,17 @@ import { useSafeSubmit } from "@/hooks/useSafeSubmit"
 import { isValidEmail } from "@/util/onboarding"
 import { studentKey } from "@/util/roster"
 import type { Student } from "@/types/classroom"
+import type { OnboardingSelfReport } from "@/util/inviteStatus"
 import type { StudentCsvRow } from "@/api/mutations/students"
 
 type EditStudentProps = {
   org: string
   classroom: string
   student: Student
+  // The student's onboarding self-report, when they've onboarded but aren't
+  // enrolled yet. Used to backfill a CSV row missing first/last name; never
+  // overrides a value the CSV already has (the CSV stays authoritative).
+  selfReport?: OnboardingSelfReport
   open: boolean
   onClose: () => void
   onSaved: (updated: StudentCsvRow) => void
@@ -29,13 +34,25 @@ type EditStudentFormValues = {
   section: string
 }
 
+// CSV is authoritative, but a not-yet-enrolled student's onboarding self-report
+// can fill a blank first/last name so the teacher sees the student's claimed
+// name. Trim-blank CSV values fall back to the report; the report never
+// overrides a present CSV value.
+const resolveName = (csvValue?: string, reportValue?: string): string => {
+  const csv = csvValue?.trim()
+  if (csv) return csv
+  return reportValue?.trim() ?? ""
+}
+
 // Edit modal for a roster row's teacher-facing fields. Identity (username,
-// github_id) is shown read-only — it's bound by onboarding/reconcile, not the
-// teacher — and only first/last name, email, and section are editable.
+// github_id, email) is shown read-only until the student is enrolled — it's
+// bound by onboarding/reconcile, not the teacher — and first/last name and
+// section stay editable. Once enrolled, the email becomes editable too.
 const EditStudent = ({
   org,
   classroom,
   student,
+  selfReport,
   open,
   onClose,
   onSaved,
@@ -47,10 +64,23 @@ const EditStudent = ({
 
   const displayHandle = student.username || student.email
   const isEnrolled = student.enrollment_status === "enrolled"
-  // An email-only row (no username, no github_id) is keyed by its email, so the
-  // email can't be changed here — doing so would re-key or drop the row. Show it
-  // read-only with an explanation (the mutation also enforces this).
-  const emailLocked = !student.username && !student.github_id
+  // Identity (github username/id and email) is bound by onboarding/reconcile and
+  // must not be overridden by the teacher before enrollment is confirmed —
+  // otherwise an edit could break the match a later reconcile relies on. An
+  // email-only row (no username, no github_id) is keyed by its email, so even
+  // when "enrolled" the email can't be changed here without re-keying the row.
+  // Both cases lock the email field (the mutation also enforces this).
+  const emailLocked = !isEnrolled || (!student.username && !student.github_id)
+
+  const defaults = useCallback(
+    (): EditStudentFormValues => ({
+      first_name: resolveName(student.first_name, selfReport?.first_name),
+      last_name: resolveName(student.last_name, selfReport?.last_name),
+      email: student.email ?? "",
+      section: student.section ?? "",
+    }),
+    [student, selfReport],
+  )
 
   const updateMutation = useMutation({
     mutationFn: (value: EditStudentFormValues) =>
@@ -68,12 +98,7 @@ const EditStudent = ({
   })
 
   const form = useForm({
-    defaultValues: {
-      first_name: student.first_name ?? "",
-      last_name: student.last_name ?? "",
-      email: student.email ?? "",
-      section: student.section ?? "",
-    } satisfies EditStudentFormValues,
+    defaultValues: defaults(),
     // Validate on submit, then re-validate on change so a corrected field clears
     // its error and the button recovers (mirrors AddStudent).
     validationLogic: revalidateLogic(),
@@ -112,18 +137,13 @@ const EditStudent = ({
     if (!dialog) return
     if (open && !dialog.open) {
       setError(null)
-      form.reset({
-        first_name: student.first_name ?? "",
-        last_name: student.last_name ?? "",
-        email: student.email ?? "",
-        section: student.section ?? "",
-      })
+      form.reset(defaults())
       dialog.showModal()
     }
     if (!open && dialog.open) {
       dialog.close()
     }
-  }, [open, form, student])
+  }, [open, form, defaults])
 
   const submitting = form.state.isSubmitting
 
@@ -205,6 +225,14 @@ const EditStudent = ({
                   isEnrolled &&
                   field.state.value.trim().toLowerCase() !==
                     (student.email ?? "").trim().toLowerCase()
+                const emailHelp =
+                  emailLocked && !isEnrolled
+                    ? "This student isn't enrolled yet. Their email is part of the identity that onboarding confirms, so it can't be changed until enrollment is confirmed."
+                    : emailLocked
+                      ? "This student has no GitHub identity yet, so their email is their only identifier and can't be changed here. Unenroll and re-add them to change it."
+                      : emailChangedWhileEnrolled
+                        ? "This student is already enrolled. Changing their email won't re-bind their confirmed GitHub identity; it only affects future email-based matching."
+                        : null
                 return (
                   <div>
                     <div className="flex items-center">
@@ -226,17 +254,9 @@ const EditStudent = ({
                         {String(field.state.meta.errors[0] ?? "")}
                       </p>
                     )}
-                    {emailLocked ? (
+                    {emailHelp ? (
                       <p className="mt-1 text-xs text-base-content/60">
-                        This student has no GitHub identity yet, so their email
-                        is their only identifier and can&apos;t be changed here.
-                        Unenroll and re-add them to change it.
-                      </p>
-                    ) : emailChangedWhileEnrolled ? (
-                      <p className="mt-1 text-xs text-base-content/60">
-                        This student is already enrolled. Changing their email
-                        won&apos;t re-bind their confirmed GitHub identity; it
-                        only affects future email-based matching.
+                        {emailHelp}
                       </p>
                     ) : null}
                   </div>
