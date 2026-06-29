@@ -90,7 +90,13 @@ describe("aggregateOrgMembers (#76)", () => {
   it("aggregates archived classrooms and marks their access archived", () => {
     const rows = aggregateOrgMembers(
       [member(42, "alice")],
-      [roster("cs-old", [student({ username: "alice", github_id: "42" })], true)],
+      [
+        roster(
+          "cs-old",
+          [student({ username: "alice", github_id: "42" })],
+          true,
+        ),
+      ],
     )
     expect(rows[0].classrooms[0].archived).toBe(true)
   })

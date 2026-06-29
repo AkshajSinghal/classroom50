@@ -954,9 +954,7 @@ describe("unenrollStudent — classroom-scoped, no active-member org removal (#7
             })
           }
           if (path === "/user" || path.startsWith("/users/")) {
-            return Promise.resolve(
-              opts.viewer ?? { login: "teacher", id: 999 },
-            )
+            return Promise.resolve(opts.viewer ?? { login: "teacher", id: 999 })
           }
           // Org membership: GET returns state; DELETE is the removal/cancel we
           // assert on. Team memberships also hit /memberships/ but include
