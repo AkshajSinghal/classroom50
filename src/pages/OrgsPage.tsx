@@ -5,43 +5,9 @@ import Drawer, {
 } from "@/components/drawer"
 import type { Classroom50OrgSummary } from "@/hooks/github/queries"
 import useGetOrgs from "@/hooks/useGetOrgs"
-import useGetOrgAudit from "@/hooks/useGetOrgAudit"
-import useGetOrgPlanDetails from "@/hooks/useGetOrgPlanDetails"
 import { useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import {
-  AlertTriangle,
-  ExternalLink,
-  Info,
-  Lock,
-  RefreshCw,
-  XCircle,
-} from "lucide-react"
-
-// Lazily audits a ready org (admin only) and flags policy drift. A "ready" org
-// can still have regressed branch protection / member policy / rulesets; this
-// surfaces that on the card without changing the coarse ready status. Failure
-// to audit is silent — the badge just doesn't render.
-function DriftBadge({ org }: { org: string }) {
-  const { data: planDetails } = useGetOrgPlanDetails(org)
-  const { data: report } = useGetOrgAudit(org, planDetails?.plan.name)
-
-  if (!report || report.verdict === "ok") return null
-
-  const isFail = report.verdict === "fail"
-  return (
-    <span
-      className={`badge gap-1 text-xs ${isFail ? "badge-error" : "badge-warning"}`}
-    >
-      {isFail ? (
-        <XCircle className="size-3" />
-      ) : (
-        <AlertTriangle className="size-3" />
-      )}
-      {isFail ? "Policy incomplete" : "Policy drift"}
-    </span>
-  )
-}
+import { ExternalLink, Info, Lock, RefreshCw } from "lucide-react"
 
 function MissingOrgNotice({
   refreshing,
@@ -115,15 +81,16 @@ function OrgCard({
   const isReady = classroom50.status === "ready"
   const needsSetup = classroom50.status === "needs_setup"
   const noAccess = classroom50.status === "no_access"
-  const hasServiceToken = classroom50.serviceToken?.status === "present"
   const isAdmin = membership.role === "admin"
   const isActiveMember = membership.state === "active"
 
   // A student is an active member who can't read the classroom50 config repo
   // (hence no_access). That's the normal student state, not a dead end: they
-  // can still open the org to reach their own assignment repos. Only a teacher
-  // (admin) needs the config repo + service token wired up before "Open".
-  const canOpen = isAdmin ? isReady && hasServiceToken : isActiveMember
+  // can still open the org to reach their own assignment repos. A teacher
+  // (admin) opens any ready org; the service-token / policy preflight runs
+  // inside the org (ClassesPage), not here — checking every org in the list
+  // would fan out far too many GitHub API calls.
+  const canOpen = isAdmin ? isReady : isActiveMember
 
   return (
     <div className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
@@ -148,15 +115,6 @@ function OrgCard({
                   {membership.role === "admin" ? "Teacher" : "Student"}
                 </span>
               )}
-
-              {!needsSetup && !hasServiceToken && isAdmin && (
-                <span className="badge badge-warning gap-1 text-xs">
-                  <AlertTriangle className="size-3" />
-                  Needs service token
-                </span>
-              )}
-
-              {isReady && isAdmin && <DriftBadge org={org.login} />}
 
               {noAccess && isAdmin && (
                 <span className="badge badge-neutral gap-1">
@@ -186,16 +144,6 @@ function OrgCard({
               className="btn btn-warning btn-sm"
             >
               Set Up
-            </Link>
-          )}
-
-          {!needsSetup && !hasServiceToken && isAdmin && (
-            <Link
-              to="/$org/settings"
-              params={{ org: org.login }}
-              className="btn btn-warning btn-sm"
-            >
-              Complete Setup
             </Link>
           )}
 
