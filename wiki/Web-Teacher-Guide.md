@@ -219,4 +219,12 @@ In the screenshot above, we can see that as a teacher, once you've created an as
 
 ![View of accepting an assignment as a student](images/web_accept_assignment.png)
 
+Once your student has accepted the assignment, they will be given a repo named `<CLASSROOM>-<ASSIGNMENT>-<USERNAME>` to which they can then submit their assignment through either the CLI or by committing directly. Submitting an assignment in this way will trigger an autograding workflow that ultimately produces a relase for this repository with a `result.json` file, which the score collection workflow that teachers can choose to run manually (the default for which is an automatic run daily) will aggregate into a `scores.json` file within the `classroom50/<CLASSROOM>` classroom folder.
+
+![View of assignment acceptance success](images/web_accept_assignment_success.png)
+
+## Viewing Submissions
+
+
+
 # Editing Classroom Settings
