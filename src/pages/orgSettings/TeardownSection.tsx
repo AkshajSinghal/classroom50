@@ -13,6 +13,7 @@ import {
   TeardownScopeError,
   type TeardownPlan,
 } from "@/api/mutations/teardown"
+import SettingsSection from "./SettingsSection"
 
 // Teardown / org reset: deletes ALL repos in the org (mirroring the CLI's
 // `gh teacher teardown`), marker-gated and behind a typed-org-name
@@ -71,45 +72,42 @@ const TeardownSection = ({ org }: { org: string }) => {
   })
 
   return (
-    <section className="mt-8 rounded-2xl border border-error/30 bg-error/5 p-6">
-      <div className="flex items-start gap-3">
-        <TriangleAlert className="mt-0.5 size-5 shrink-0 text-error" />
-        <div className="flex-1">
-          <h2 className="text-lg font-semibold text-error">Danger zone</h2>
-          <p className="mt-1 text-sm text-base-content/70">
-            Tear down this organization by deleting <strong>every</strong>{" "}
-            repository in it, including the <code>classroom50</code> config
-            repo. This is irreversible.
-          </p>
-
-          {error && (
-            <div className="mt-3 rounded-lg border border-error/30 bg-error/10 p-3 text-sm text-error">
-              {error}
-            </div>
-          )}
-          {done && <p className="mt-3 text-sm text-success">{done}</p>}
-
-          <button
-            type="button"
-            className="btn btn-error btn-sm mt-4"
-            disabled={!isOwner || openMutation.isPending}
-            title={
-              isOwner ? undefined : "Requires organization owner permissions"
-            }
-            onClick={() => {
-              if (!openMutation.isPending) openMutation.mutate()
-            }}
-          >
-            {openMutation.isPending ? "Preparing…" : "Tear down organization"}
-          </button>
-
-          {!isOwner && (
-            <p className="mt-2 text-xs text-base-content/50">
-              Teardown requires organization owner permissions.
-            </p>
-          )}
+    <SettingsSection
+      tone="danger"
+      title="Danger zone"
+      titleAdornment={<TriangleAlert className="size-5 text-error" />}
+      description={
+        <>
+          Tear down this organization by deleting <strong>every</strong>{" "}
+          repository in it, including the <code>classroom50</code> config repo.
+          This is irreversible.
+        </>
+      }
+    >
+      {error && (
+        <div className="rounded-lg border border-error/30 bg-error/10 p-3 text-sm text-error">
+          {error}
         </div>
-      </div>
+      )}
+      {done && <p className="text-sm text-success">{done}</p>}
+
+      <button
+        type="button"
+        className={`btn btn-error btn-sm ${error || done ? "mt-4" : ""}`}
+        disabled={!isOwner || openMutation.isPending}
+        title={isOwner ? undefined : "Requires organization owner permissions"}
+        onClick={() => {
+          if (!openMutation.isPending) openMutation.mutate()
+        }}
+      >
+        {openMutation.isPending ? "Preparing…" : "Tear down organization"}
+      </button>
+
+      {!isOwner && (
+        <p className="mt-2 text-xs text-base-content/50">
+          Teardown requires organization owner permissions.
+        </p>
+      )}
 
       <ConfirmModal
         open={open}
@@ -145,7 +143,7 @@ const TeardownSection = ({ org }: { org: string }) => {
         }}
         onClose={() => setOpen(false)}
       />
-    </section>
+    </SettingsSection>
   )
 }
 

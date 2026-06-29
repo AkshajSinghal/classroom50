@@ -16,6 +16,7 @@ import {
   applyStepUpdate,
   initialInitSteps,
 } from "./initStepBoard"
+import SettingsSection from "./SettingsSection"
 
 // Re-run onboarding from Org Settings: re-invokes the idempotent
 // initClassroom50 to re-apply the full lockdown, rulesets, and repo settings.
@@ -56,15 +57,10 @@ const RerunOnboarding = ({ org }: { org: string }) => {
   })
 
   return (
-    <section className="mt-8 rounded-2xl border border-base-300 bg-base-100 p-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-semibold">Re-run setup</h2>
-          <p className="mt-1 text-sm text-base-content/60">
-            Re-apply every Classroom 50 organization setting. Safe to run any
-            time — it only changes settings that have drifted.
-          </p>
-        </div>
+    <SettingsSection
+      title="Re-run setup"
+      description="Re-apply every Classroom 50 organization setting. Safe to run any time — it only changes settings that have drifted."
+      action={
         <button
           type="button"
           className="btn btn-primary btn-sm"
@@ -85,21 +81,21 @@ const RerunOnboarding = ({ org }: { org: string }) => {
             "Re-run setup"
           )}
         </button>
-      </div>
-
+      }
+    >
       {!isOwner && (
-        <div className="mt-4 rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-base-content/70">
+        <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-base-content/70">
           Re-running setup requires organization owner permissions. Ask an org
           owner to run it.
         </div>
       )}
 
       {started && (
-        <div className="mt-4">
+        <div className={!isOwner ? "mt-4" : undefined}>
           <InitStepBoard steps={steps} />
         </div>
       )}
-    </section>
+    </SettingsSection>
   )
 }
 
