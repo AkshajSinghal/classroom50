@@ -27,10 +27,8 @@ export type OrgMembersOverview = {
 }
 
 // Aggregate the org's members against every classroom roster: dedupe students,
-// match them to live members, classify discrepancies, and surface per-student
-// classroom access (#76). Composes the paged member list, the classroom dir
-// list, and a per-classroom fan-out of classroom.json (archived flag) +
-// students.csv, then runs the pure aggregateOrgMembers.
+// match to live members, classify discrepancies, surface per-student classroom
+// access (#76).
 const useOrgMembersOverview = (org: string | undefined): OrgMembersOverview => {
   const client = useGitHubClient()
 
@@ -42,13 +40,10 @@ const useOrgMembersOverview = (org: string | undefined): OrgMembersOverview => {
   })
 
   const { classes } = useGetClasses(org)
-  // Use `path` (not `name`) to key the per-classroom file queries, matching
-  // ClassesPage's useGetClassroom/useGetStudents exactly so these reads hit the
-  // same react-query cache (warm when the teacher has visited the classes list)
-  // rather than issuing duplicate requests.
+  // Key by `path` (not `name`) to match useGetClassroom/useGetStudents so these
+  // reads hit the same react-query cache instead of duplicating requests.
   const classroomNames = useMemo(() => classes.map((c) => c.path), [classes])
 
-  // classroom.json per classroom (archived flag). Shares useGetClassroom's key.
   const metaQueries = useQueries({
     queries: classroomNames.map((name) => ({
       ...jsonFileQuery<Classroom>(
@@ -61,7 +56,6 @@ const useOrgMembersOverview = (org: string | undefined): OrgMembersOverview => {
     })),
   })
 
-  // students.csv per classroom. Shares useGetStudents' key + toStudent mapping.
   const rosterQueries = useQueries({
     queries: classroomNames.map((name) => ({
       ...csvFileQuery<Student>(
