@@ -228,3 +228,14 @@ Once your student has accepted the assignment, they will be given a repo named `
 Assuming you have students who have accepted the assignment, the next important puzzle piece is aggregating the submissions themselves. Scores are aggregated together rather than being done per individual student submission; teachers can choose to just allow the default nightly collection workflow to trigger, or they can trigger a manual workflow run for submission collection at any time by clicking "Collect now" at the top of the [submissions page](#viewing-and-collecting-submissions); additionally, teachers can click "View workflow" if they're interested in seeing the Actions run of the workflow in more detail. The following shows an example of what actual submissions for the assignment might look like:
 
 ![View of existing assignment page with some submissions](images/web_viewing_assignment_submissions.png)
+
+As you can see, we have a few important pieces of data we can now view:
+
+- **Submitted**: The number of submissions / the number of students enrolled in the course.
+- **Class Average**: The average grade of the students who have submitted thus far.
+- **Passing**: The number of students who are passing the assignment, as well as the number who are failing.
+- **Accepted**: The number of submissions that have been accepted (one per student).
+
+> For larger classes, Classroom 50 offers some useful sorting and filtering options just below, including a search box; a series of semantic filters such as "Submitted", "On Time", and more; a filter for passing or failing grades, and a filter for "Accepted" versus "Not accepted". In addition, there are options available for sorting, such as by alphabetical order or submission date.
+
+Each submission row itself contains not only the most recent submission for the student (or group) submitting, but also an itemized list of all submissions in total in case viewing said history is useful (by default sorted by most recent, reverse chronological order). The score is of course shown, as well as the date submitted, and buttons to view the repository itself, commit for the submission, Pull Request (or "Review"), and the release created for the submission (or "Details").
