@@ -1,13 +1,25 @@
 // Org teardown — the web mirror of the CLI's `gh teacher teardown` (delete
 // every repo in the org, marker-gated, marker deleted last). Mirrors the CLI's
 // scope decision (ALL org repos, not a leaky managed-only filter) and its
-// safety model. Destructive and irreversible — the caller gates it behind a
-// typed-org-name ConfirmModal.
+// safety model. It also removes the per-classroom team of every classroom in
+// the org's classroom.json so repo deletion doesn't leave those teams orphaned.
+// Destructive and irreversible — the caller gates it behind a typed-org-name
+// ConfirmModal that lists exactly what will be deleted.
 
 import type { GitHubClient } from "@/hooks/github/client"
+import { getClassroomJson } from "@/api/github/queries"
 import { GitHubAPIError } from "@/hooks/github/errors"
-import { deleteRepo } from "@/hooks/github/mutations"
-import { getOrgRepos, getRepo, sleep } from "@/hooks/github/queries"
+import {
+  deleteClassroomTeam,
+  deleteRepo,
+  type ClassroomTeamRef,
+} from "@/hooks/github/mutations"
+import {
+  getOrgRepos,
+  getRepo,
+  listClassroomDirs,
+  sleep,
+} from "@/hooks/github/queries"
 import { CONFIG_REPO } from "@/hooks/github/orgChecks"
 import { mapWithConcurrency } from "@/util/concurrency"
 
@@ -43,11 +55,53 @@ export class TeardownRateLimitError extends Error {
 export type TeardownPlan = {
   org: string
   repoNames: string[]
+  // Per-classroom teams to delete, resolved from each classroom's classroom.json
+  // (deduped by slug). Surfaced so the confirm UI can list exactly what's
+  // removed. Only teams a classroom actually links to are deleted — a manually
+  // created team is never touched, even if it shares the classroom50- naming.
+  teams: ClassroomTeamRef[]
 }
 
-// Enumerate the deletion plan: every repo in the org, with the marker repo
-// ordered last so an interrupted run leaves the marker behind (re-runnable).
-// Refuses an org without the classroom50 marker repo.
+// Read each classroom's classroom.json and collect its team ref, deduped by
+// slug. Per-classroom reads are best-effort: a classroom with no team block
+// (pre-feature) or an unreadable classroom.json simply contributes no ref, so a
+// single bad file never blocks the rest of teardown. classroom.json lives in
+// the marker repo, so this must run before the marker is deleted.
+async function collectClassroomTeams(
+  client: GitHubClient,
+  org: string,
+): Promise<ClassroomTeamRef[]> {
+  let dirs: { name: string }[]
+  try {
+    dirs = await listClassroomDirs(client, org)
+  } catch {
+    // No readable classroom dirs (e.g. marker already partially gone) — nothing
+    // to resolve; let the repo flow proceed.
+    return []
+  }
+
+  const bySlug = new Map<string, ClassroomTeamRef>()
+  await mapWithConcurrency(dirs, 8, async (dir) => {
+    try {
+      const json = await getClassroomJson(client, { org, classroom: dir.name })
+      if (json.team?.slug) {
+        bySlug.set(json.team.slug, {
+          id: json.team.id,
+          slug: json.team.slug,
+        })
+      }
+    } catch {
+      // Missing/unreadable classroom.json or no team block: contributes nothing.
+    }
+  })
+
+  return [...bySlug.values()]
+}
+
+// Enumerate the deletion plan: every repo in the org (marker ordered last so an
+// interrupted run leaves the marker behind, re-runnable) plus the per-classroom
+// teams resolved from classroom.json. Refuses an org without the classroom50
+// marker repo.
 export async function planTeardown(
   client: GitHubClient,
   org: string,
@@ -62,13 +116,18 @@ export async function planTeardown(
   const repos = await getOrgRepos(client, org)
   const names = (repos ?? []).map((r) => r.name)
   const nonMarker = names.filter((n) => n !== CONFIG_REPO)
+  const teams = await collectClassroomTeams(client, org)
   // Marker last so a partial run stays re-runnable.
-  return { org, repoNames: [...nonMarker, CONFIG_REPO] }
+  return { org, repoNames: [...nonMarker, CONFIG_REPO], teams }
 }
 
 export type TeardownResult = {
   deleted: string[]
   failed: string[]
+  // Per-classroom team slugs removed during this run.
+  teamsDeleted: string[]
+  // Team slugs that could not be deleted (run stays re-runnable).
+  teamsFailed: string[]
 }
 
 const MAX_DELETE_ATTEMPTS = 4
@@ -114,6 +173,65 @@ async function deleteRepoWithRetry(
     }
   }
   return lastWasRateLimit ? "rate-limited" : "failed"
+}
+
+// Delete one classroom team (by its persisted { id, slug }), retrying transient
+// failures the same way repo deletes do. Uses deleteClassroomTeam, which
+// confirms the live team's id matches the persisted id before deleting (so a
+// reused slug isn't clobbered) and treats 404 as already-gone. A scope/
+// permission 403 or an id mismatch is unretryable: it's recorded as failed
+// without spinning on retries.
+async function deleteClassroomTeamWithRetry(
+  client: GitHubClient,
+  org: string,
+  team: ClassroomTeamRef,
+): Promise<DeleteOutcome> {
+  let lastWasRateLimit = false
+  for (let attempt = 0; attempt < MAX_DELETE_ATTEMPTS; attempt++) {
+    try {
+      await deleteClassroomTeam(client, org, team)
+      return "deleted"
+    } catch (err) {
+      const isRateLimited = err instanceof GitHubAPIError && err.isRateLimited
+      lastWasRateLimit = isRateLimited
+      // A scope 403 (forbidden, not a rate limit) or a non-API error (id
+      // mismatch guard) won't succeed on retry — record it and stop.
+      if (!(err instanceof GitHubAPIError)) return "failed"
+      if (err.isForbidden && !isRateLimited) return "failed"
+      const isLastAttempt = attempt === MAX_DELETE_ATTEMPTS - 1
+      if (isLastAttempt) return isRateLimited ? "rate-limited" : "failed"
+
+      const retryAfterMs =
+        err.rateLimit.retryAfter !== null ? err.rateLimit.retryAfter * 1000 : 0
+      const backoffMs = Math.min(8000, 500 * 2 ** attempt)
+      const jitterMs = Math.floor(Math.random() * 250)
+      await sleep(Math.max(retryAfterMs, backoffMs) + jitterMs)
+    }
+  }
+  return lastWasRateLimit ? "rate-limited" : "failed"
+}
+
+// Delete the per-classroom teams resolved from classroom.json. Deletes are
+// best-effort: a failure is recorded but never aborts teardown, mirroring the
+// repo flow's re-runnable contract.
+async function deleteClassroomTeams(
+  client: GitHubClient,
+  org: string,
+  teams: ClassroomTeamRef[],
+): Promise<{ teamsDeleted: string[]; teamsFailed: string[] }> {
+  const teamsDeleted: string[] = []
+  const teamsFailed: string[] = []
+
+  await mapWithConcurrency(teams, 4, async (team) => {
+    const outcome = await deleteClassroomTeamWithRetry(client, org, team)
+    if (outcome === "deleted") {
+      teamsDeleted.push(team.slug)
+    } else {
+      teamsFailed.push(team.slug)
+    }
+  })
+
+  return { teamsDeleted, teamsFailed }
 }
 
 // Execute the teardown plan with bounded concurrency, marker last. A scope 403
@@ -170,6 +288,17 @@ export async function executeTeardown(
 
   abortIfBlocked()
 
+  // Remove the per-classroom teams. Refs are re-resolved from classroom.json
+  // here (not taken from the possibly-stale plan), and BEFORE the marker repo
+  // is deleted — classroom.json lives in the marker repo, so reading it after
+  // would be impossible. Best-effort: a team failure never blocks the marker.
+  const teamRefs = await collectClassroomTeams(client, plan.org)
+  const { teamsDeleted, teamsFailed } = await deleteClassroomTeams(
+    client,
+    plan.org,
+    teamRefs,
+  )
+
   // Marker deleted only on a fully-successful run; otherwise it's left behind so
   // planTeardown's gate still passes and the run stays re-runnable.
   if (failed.length === 0) {
@@ -179,5 +308,5 @@ export async function executeTeardown(
     abortIfBlocked()
   }
 
-  return { deleted, failed }
+  return { deleted, failed, teamsDeleted, teamsFailed }
 }

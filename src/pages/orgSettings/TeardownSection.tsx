@@ -58,16 +58,31 @@ const TeardownSection = ({ org }: { org: string }) => {
       setOpen(false)
       if (!result) {
         setDone(null)
-      } else if (result.failed.length > 0) {
-        // Partial success — the marker is preserved, so teardown is re-runnable.
-        setDone(
-          `Deleted ${result.deleted.length} repositor${result.deleted.length === 1 ? "y" : "ies"}; ` +
-            `${result.failed.length} could not be deleted. Re-run teardown to finish.`,
-        )
       } else {
-        setDone(
-          `Deleted ${result.deleted.length} repositor${result.deleted.length === 1 ? "y" : "ies"}.`,
-        )
+        const repos = `${result.deleted.length} repositor${result.deleted.length === 1 ? "y" : "ies"}`
+        const teams =
+          result.teamsDeleted.length > 0
+            ? ` and ${result.teamsDeleted.length} classroom team${result.teamsDeleted.length === 1 ? "" : "s"}`
+            : ""
+        const anyFailed =
+          result.failed.length > 0 || result.teamsFailed.length > 0
+        if (anyFailed) {
+          // Partial success — the marker is preserved, so teardown is re-runnable.
+          const failedRepos =
+            result.failed.length > 0
+              ? `${result.failed.length} repositor${result.failed.length === 1 ? "y" : "ies"}`
+              : ""
+          const failedTeams =
+            result.teamsFailed.length > 0
+              ? `${result.teamsFailed.length} team${result.teamsFailed.length === 1 ? "" : "s"}`
+              : ""
+          const failedParts = [failedRepos, failedTeams].filter(Boolean)
+          setDone(
+            `Deleted ${repos}${teams}; ${failedParts.join(" and ")} could not be deleted. Re-run teardown to finish.`,
+          )
+        } else {
+          setDone(`Deleted ${repos}${teams}.`)
+        }
       }
       void queryClient.invalidateQueries({ queryKey: ["orgs"] })
     },
@@ -94,8 +109,8 @@ const TeardownSection = ({ org }: { org: string }) => {
       description={
         <>
           Tear down this organization by deleting <strong>every</strong>{" "}
-          repository in it, including the <code>classroom50</code> config repo.
-          This is irreversible.
+          repository in it, including the <code>classroom50</code> config repo,
+          and removing the GitHub team of every classroom. This is irreversible.
         </>
       }
     >
@@ -129,7 +144,7 @@ const TeardownSection = ({ org }: { org: string }) => {
         dangerous
         needsConfirm
         confirmText={org}
-        confirmLabel="Delete all repositories"
+        confirmLabel="Delete all resources"
         title="Delete every repository in this org?"
         description={
           <div className="space-y-2 text-sm">
@@ -137,15 +152,39 @@ const TeardownSection = ({ org }: { org: string }) => {
               This will permanently delete{" "}
               <strong>{plan?.repoNames.length ?? 0}</strong> repositories in{" "}
               <span className="font-mono">{org}</span>, including the{" "}
-              <code>classroom50</code> config repo (deleted last). This cannot
-              be undone.
+              <code>classroom50</code> config repo (deleted last)
+              {plan && plan.teams.length > 0 ? (
+                <>
+                  , and remove{" "}
+                  <strong>{plan.teams.length}</strong> classroom team
+                  {plan.teams.length === 1 ? "" : "s"}
+                </>
+              ) : null}
+              . This cannot be undone.
             </p>
             {plan && plan.repoNames.length > 0 && (
-              <ul className="max-h-40 overflow-auto rounded border border-base-300 bg-base-100 p-2 font-mono text-xs">
-                {plan.repoNames.map((name) => (
-                  <li key={name}>{name}</li>
-                ))}
-              </ul>
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-base-content/70">
+                  Repositories
+                </p>
+                <ul className="max-h-40 overflow-auto rounded border border-base-300 bg-base-100 p-2 font-mono text-xs">
+                  {plan.repoNames.map((name) => (
+                    <li key={name}>{name}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {plan && plan.teams.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-base-content/70">
+                  Classroom teams
+                </p>
+                <ul className="max-h-40 overflow-auto rounded border border-base-300 bg-base-100 p-2 font-mono text-xs">
+                  {plan.teams.map((team) => (
+                    <li key={team.slug}>{team.slug}</li>
+                  ))}
+                </ul>
+              </div>
             )}
             <p>
               Type <span className="font-mono font-semibold">{org}</span> to

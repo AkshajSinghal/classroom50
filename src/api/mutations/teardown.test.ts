@@ -12,7 +12,10 @@ import type { GitHubClient } from "@/hooks/github/client"
 
 // Teardown mirrors the CLI: marker-gated (refuse orgs without classroom50),
 // delete ALL org repos, marker deleted last (re-runnable), 403 = scope wall.
-// The fake client serves the marker probe + repo list and records DELETEs.
+// It also deletes the per-classroom team of every classroom in classroom.json
+// (only teams a classroom links to — never a stray classroom50-* team). The
+// fake client serves the marker probe, repo list, classroom dir listing,
+// per-classroom classroom.json, and the team id-match GET + DELETE.
 
 function notFound(): GitHubAPIError {
   return new GitHubAPIError({
@@ -84,20 +87,44 @@ function serverError(): GitHubAPIError {
   })
 }
 
+// One classroom directory in the classroom50 config repo. `team` is the ref
+// persisted in its classroom.json (omit for a pre-feature/teamless classroom).
+type ClassroomFixture = {
+  dir: string
+  team?: { id: number; slug: string }
+}
+
 type Opts = {
   markerExists: boolean
   repos: string[]
   deleteForbidden?: boolean
   // Repos that fail every DELETE with the given error kind.
   failRepos?: Record<string, "rate-limit" | "scope" | "server">
+  // Classrooms present under classroom50/ (with optional team ref).
+  classrooms?: ClassroomFixture[]
+  // Team slugs whose DELETE fails with the given error kind.
+  failTeams?: Record<string, "rate-limit" | "scope" | "server" | "not-found">
+  // Team slugs whose id-match GET reports a different live id (reused slug).
+  teamIdMismatch?: Record<string, number>
 }
 
 function makeClient(opts: Opts) {
   const deletes: string[] = []
+  const teamDeletes: string[] = []
+  const classrooms = opts.classrooms ?? []
+
   const request = vi
     .fn()
     .mockImplementation((path: string, options?: { method?: string }) => {
       const method = options?.method ?? "GET"
+      // Team id-match probe (deleteClassroomTeam confirms the live id).
+      const teamMatch = path.match(/\/orgs\/[^/]+\/teams\/([^/]+)$/)
+      if (method === "GET" && teamMatch) {
+        const slug = teamMatch[1]
+        const recorded = classrooms.find((c) => c.team?.slug === slug)?.team
+        const liveId = opts.teamIdMismatch?.[slug] ?? recorded?.id ?? 1
+        return Promise.resolve({ id: liveId })
+      }
       // Marker probe / single-repo GET.
       if (method === "GET" && /\/repos\/[^/]+\/classroom50$/.test(path)) {
         return opts.markerExists
@@ -111,6 +138,17 @@ function makeClient(opts: Opts) {
         path.includes("/repos")
       ) {
         return Promise.resolve(opts.repos.map((name) => ({ name })))
+      }
+      // Team delete.
+      if (method === "DELETE" && teamMatch) {
+        const slug = teamMatch[1]
+        const kind = opts.failTeams?.[slug]
+        if (kind === "not-found") return Promise.reject(notFound())
+        if (kind === "rate-limit") return Promise.reject(rateLimited403())
+        if (kind === "scope") return Promise.reject(forbidden())
+        if (kind === "server") return Promise.reject(serverError())
+        teamDeletes.push(slug)
+        return Promise.resolve(undefined)
       }
       // Repo delete.
       if (method === "DELETE") {
@@ -126,11 +164,42 @@ function makeClient(opts: Opts) {
       return Promise.reject(new Error(`unexpected: ${method} ${path}`))
     })
 
+  // listClassroomDirs + getClassroomJson go through requestRaw.
+  const requestRaw = vi.fn().mockImplementation((path: string) => {
+    // Per-classroom classroom.json.
+    const jsonMatch = path.match(
+      /\/repos\/[^/]+\/classroom50\/contents\/([^/]+)\/classroom\.json/,
+    )
+    if (jsonMatch) {
+      const dir = jsonMatch[1]
+      const found = classrooms.find((c) => c.dir === dir)
+      if (!found) return Promise.reject(notFound())
+      const body: Record<string, unknown> = {
+        path: dir,
+        term: "2026",
+        name: dir,
+        short_name: dir,
+        org: "acme",
+      }
+      if (found.team) body.team = found.team
+      return Promise.resolve(JSON.stringify(body))
+    }
+    // Root contents listing (classroom dirs).
+    if (/\/repos\/[^/]+\/classroom50\/contents\//.test(path)) {
+      const listing = [
+        { type: "dir", name: ".github", path: ".github" },
+        ...classrooms.map((c) => ({ type: "dir", name: c.dir, path: c.dir })),
+      ]
+      return Promise.resolve(JSON.stringify(listing))
+    }
+    return Promise.reject(new Error(`unexpected requestRaw: ${path}`))
+  })
+
   const client: GitHubClient = {
     request: request as unknown as GitHubClient["request"],
-    requestRaw: () => Promise.reject(new Error("unexpected requestRaw")),
+    requestRaw: requestRaw as unknown as GitHubClient["requestRaw"],
   }
-  return { client, deletes }
+  return { client, deletes, teamDeletes }
 }
 
 describe("planTeardown", () => {
@@ -149,6 +218,23 @@ describe("planTeardown", () => {
     const plan = await planTeardown(client, "acme")
     expect(plan.repoNames[plan.repoNames.length - 1]).toBe("classroom50")
     expect(plan.repoNames).toHaveLength(3)
+  })
+
+  it("collects each classroom's team ref (deduped, teamless skipped)", async () => {
+    const { client } = makeClient({
+      markerExists: true,
+      repos: ["classroom50"],
+      classrooms: [
+        { dir: "cs101", team: { id: 11, slug: "classroom50-cs101" } },
+        { dir: "math200", team: { id: 22, slug: "classroom50-math200" } },
+        { dir: "legacy" }, // no team block
+      ],
+    })
+    const plan = await planTeardown(client, "acme")
+    expect(plan.teams.map((t) => t.slug).sort()).toEqual([
+      "classroom50-cs101",
+      "classroom50-math200",
+    ])
   })
 })
 
@@ -250,9 +336,18 @@ describe("executeTeardown", () => {
         }
         return Promise.reject(new Error(`unexpected: ${method} ${path}`))
       })
+    const requestRaw = vi.fn().mockImplementation((path: string) => {
+      // No classrooms: empty dir listing.
+      if (/\/repos\/[^/]+\/classroom50\/contents\//.test(path)) {
+        return Promise.resolve(
+          JSON.stringify([{ type: "dir", name: ".github", path: ".github" }]),
+        )
+      }
+      return Promise.reject(new Error(`unexpected requestRaw: ${path}`))
+    })
     const client: GitHubClient = {
       request: request as unknown as GitHubClient["request"],
-      requestRaw: () => Promise.reject(new Error("unexpected requestRaw")),
+      requestRaw: requestRaw as unknown as GitHubClient["requestRaw"],
     }
     const plan = await planTeardown(client, "acme")
     expect(plan.repoNames).not.toContain("cs101-hw1-late")
@@ -299,9 +394,17 @@ describe("executeTeardown", () => {
         }
         return Promise.reject(new Error(`unexpected: ${method} ${path}`))
       })
+    const requestRaw = vi.fn().mockImplementation((path: string) => {
+      if (/\/repos\/[^/]+\/classroom50\/contents\//.test(path)) {
+        return Promise.resolve(
+          JSON.stringify([{ type: "dir", name: ".github", path: ".github" }]),
+        )
+      }
+      return Promise.reject(new Error(`unexpected requestRaw: ${path}`))
+    })
     const client: GitHubClient = {
       request: request as unknown as GitHubClient["request"],
-      requestRaw: () => Promise.reject(new Error("unexpected requestRaw")),
+      requestRaw: requestRaw as unknown as GitHubClient["requestRaw"],
     }
     const plan = await planTeardown(client, "acme")
     const result = await executeTeardown(client, plan)
@@ -311,5 +414,106 @@ describe("executeTeardown", () => {
     )
     // Marker still deleted last after the retry recovery.
     expect(deletes[deletes.length - 1]).toBe("classroom50")
+  })
+
+  it("deletes only the teams classrooms link to in classroom.json", async () => {
+    const { client, teamDeletes } = makeClient({
+      markerExists: true,
+      repos: ["classroom50", "cs101-hw1-alice"],
+      classrooms: [
+        { dir: "cs101", team: { id: 11, slug: "classroom50-cs101" } },
+        { dir: "math200", team: { id: 22, slug: "classroom50-math200" } },
+        { dir: "legacy" },
+      ],
+    })
+    const plan = await planTeardown(client, "acme")
+    const result = await executeTeardown(client, plan)
+    expect(result.teamsDeleted.sort()).toEqual([
+      "classroom50-cs101",
+      "classroom50-math200",
+    ])
+    expect(result.teamsFailed).toHaveLength(0)
+    expect(teamDeletes.sort()).toEqual([
+      "classroom50-cs101",
+      "classroom50-math200",
+    ])
+  })
+
+  it("does not touch teams that no classroom links to", async () => {
+    // Even though a classroom50-stray team could exist in the org, teardown
+    // only deletes teams resolved from classroom.json.
+    const { client, teamDeletes } = makeClient({
+      markerExists: true,
+      repos: ["classroom50"],
+      classrooms: [{ dir: "cs101", team: { id: 11, slug: "classroom50-cs101" } }],
+    })
+    const plan = await planTeardown(client, "acme")
+    const result = await executeTeardown(client, plan)
+    expect(result.teamsDeleted).toEqual(["classroom50-cs101"])
+    expect(teamDeletes).toEqual(["classroom50-cs101"])
+  })
+
+  it("treats an already-gone team (404) as deleted", async () => {
+    const { client } = makeClient({
+      markerExists: true,
+      repos: ["classroom50"],
+      classrooms: [{ dir: "cs101", team: { id: 11, slug: "classroom50-cs101" } }],
+      failTeams: { "classroom50-cs101": "not-found" },
+    })
+    const plan = await planTeardown(client, "acme")
+    const result = await executeTeardown(client, plan)
+    expect(result.teamsDeleted).toEqual(["classroom50-cs101"])
+    expect(result.teamsFailed).toHaveLength(0)
+  })
+
+  it("records a team that fails to delete without aborting teardown", async () => {
+    // A team that always fails (500) exhausts retries and lands in teamsFailed,
+    // but repos (including the marker) are still deleted — teardown is not
+    // blocked by a team failure.
+    const { client, deletes } = makeClient({
+      markerExists: true,
+      repos: ["classroom50", "cs101-hw1-alice"],
+      classrooms: [{ dir: "cs101", team: { id: 11, slug: "classroom50-cs101" } }],
+      failTeams: { "classroom50-cs101": "server" },
+    })
+    const plan = await planTeardown(client, "acme")
+    const result = await executeTeardown(client, plan)
+    expect(result.teamsFailed).toEqual(["classroom50-cs101"])
+    expect(result.teamsDeleted).toHaveLength(0)
+    // Repos, including the marker, were still deleted.
+    expect(deletes).toContain("classroom50")
+    expect(result.failed).toHaveLength(0)
+  })
+
+  it("refuses to delete a team whose live id no longer matches (reused slug)", async () => {
+    // The slug now points at a different team (different id) than the one this
+    // classroom recorded — deleteClassroomTeam refuses, and it lands in
+    // teamsFailed without clobbering the unrelated team.
+    const { client, teamDeletes } = makeClient({
+      markerExists: true,
+      repos: ["classroom50"],
+      classrooms: [{ dir: "cs101", team: { id: 11, slug: "classroom50-cs101" } }],
+      teamIdMismatch: { "classroom50-cs101": 999 },
+    })
+    const plan = await planTeardown(client, "acme")
+    const result = await executeTeardown(client, plan)
+    expect(result.teamsFailed).toEqual(["classroom50-cs101"])
+    expect(result.teamsDeleted).toHaveLength(0)
+    expect(teamDeletes).not.toContain("classroom50-cs101")
+  })
+
+  it("does not delete teams when a repo scope wall aborts the run", async () => {
+    const { client, teamDeletes } = makeClient({
+      markerExists: true,
+      repos: ["classroom50", "cs101-hw1-alice"],
+      classrooms: [{ dir: "cs101", team: { id: 11, slug: "classroom50-cs101" } }],
+      deleteForbidden: true,
+    })
+    const plan = await planTeardown(client, "acme")
+    await expect(executeTeardown(client, plan)).rejects.toBeInstanceOf(
+      TeardownScopeError,
+    )
+    // The run aborts before team deletion runs.
+    expect(teamDeletes).toHaveLength(0)
   })
 })
