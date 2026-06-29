@@ -36,10 +36,9 @@ const RerunOnboarding = ({ org }: { org: string }) => {
   const [started, setStarted] = useState(false)
   const [failed, setFailed] = useState(false)
 
-  // Guard against setState after unmount: initClassroom50 runs ~10 sequential
-  // network steps firing onStepUpdate after each, and the user can navigate
-  // away mid-run. The network work itself isn't cancelable (no AbortSignal),
-  // but the guard stops setState churn against an unmounted tree.
+  // Guard setState after unmount: init fires onStepUpdate across ~10 sequential
+  // steps and the user can navigate away mid-run. The network work itself isn't
+  // cancelable (no AbortSignal); the guard just stops the setState churn.
   const mountedRef = useRef(true)
   useEffect(() => {
     mountedRef.current = true
@@ -65,9 +64,8 @@ const RerunOnboarding = ({ org }: { org: string }) => {
     },
     onSuccess: (data) => {
       if (!mountedRef.current) return
-      // initClassroom50 resolves (does not throw) with status "error" when a
-      // prerequisite step fails. Surface the failed-run state instead of
-      // treating it as a clean success (mirrors OrgSetupPage's handling).
+      // init resolves (not throws) with status "error" on a prerequisite
+      // failure; surface it instead of treating it as a clean success.
       if (data && data.status === "error") {
         setFailed(true)
         return

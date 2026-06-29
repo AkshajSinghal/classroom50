@@ -6,14 +6,9 @@ import useGetOrgAudit from "@/hooks/useGetOrgAudit"
 import useGetOrgPlanDetails from "@/hooks/useGetOrgPlanDetails"
 
 // Teacher preflight banner shown when an org is opened. The service-token and
-// policy checks live HERE (one org at a time) rather than on the org list,
-// which would fan out these reads across every org the user can see.
-//
-// One aggregated "preflight check" banner names every failing category rather
-// than surfacing them one at a time; the org settings page is the source of
-// truth for the per-item detail. Every category here is a hard failure (a
-// missing token or any policy drift), so the banner is always an error.
-// Renders nothing while loading or when all checks pass.
+// policy checks live here (one org at a time) rather than on the org list,
+// which would fan these reads out across every org. One aggregated banner names
+// every failing category; the org settings page holds the per-item detail.
 const OrgPreflightNotice = ({ org }: { org: string }) => {
   const { data: tokenStatus, isPending: tokenPending } =
     useGetServiceTokenStatus(org)
@@ -24,14 +19,9 @@ const OrgPreflightNotice = ({ org }: { org: string }) => {
     planDetails?.plan.name,
   )
 
-  // Both checks resolve at different times. Rendering before all of them
-  // settle makes the banner rewrite itself mid-flight ("An issue was found…" →
-  // "Issues were found…"), so stay invisible until everything is known. We
-  // render nothing (not a spinner) while checking: a healthy org should never
-  // flash a placeholder — the banner only ever appears in its final state when
-  // there's an actual problem. The audit query stays pending until the plan
-  // loads (it's gated on it), so auditPending also covers the plan dependency;
-  // planPending is included for the brief window before the audit is enabled.
+  // Stay invisible until every input settles, so the banner doesn't rewrite
+  // itself mid-flight or flash a placeholder on a healthy org. The audit query
+  // is gated on the plan, so auditPending also covers the plan dependency.
   const checking = tokenPending || planPending || auditPending
 
   if (checking) return null
@@ -39,9 +29,8 @@ const OrgPreflightNotice = ({ org }: { org: string }) => {
   const tokenMissing = tokenStatus?.status === "missing"
   const policyFail = audit?.verdict === "fail"
 
-  // Each failing check contributes a named category. Both current categories are
-  // hard failures (a missing token or any policy drift), so the banner is always
-  // an error; it just names every failing category at once.
+  // Both categories are hard failures, so the banner is always an error; it
+  // just names every failing one at once.
   const failing: string[] = []
   if (tokenMissing) failing.push("service token")
   if (policyFail) failing.push("organization policy")

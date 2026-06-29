@@ -25,10 +25,8 @@ export class TeardownMarkerError extends Error {
   }
 }
 
-// A secondary rate limit (a 403 carrying Retry-After / x-ratelimit-remaining:0)
-// aborted the run. Distinct from TeardownScopeError so the UI can offer a retry
-// instead of telling the owner to re-authenticate with a scope they already
-// hold. Carries the partial progress so the UI can report what was deleted.
+// A secondary rate limit aborted the run. Distinct from TeardownScopeError so
+// the UI can offer a retry, and carries partial progress for reporting.
 export class TeardownRateLimitError extends Error {
   deleted: string[]
   failed: string[]
@@ -80,14 +78,9 @@ const DELETE_SCOPE_MESSAGE =
 
 type DeleteOutcome = "deleted" | "rate-limited" | "failed"
 
-// Delete one repo, retrying transient failures (secondary rate limits, 5xx)
-// with exponential backoff + jitter so a throttle self-heals instead of
-// dropping the repo. Honors Retry-After when GitHub provides it. Returns
-// "deleted" on success, "rate-limited" when retries were exhausted on a
-// throttle (the caller surfaces a retryable error), or "failed" when retries
-// were exhausted on another transient error (5xx). A genuine delete_repo-scope
-// 403 (a 403 that is NOT a rate limit) is unretryable and rethrown so the
-// caller can surface the scope wall.
+// Delete one repo, retrying transient failures (rate limits, 5xx) with
+// exponential backoff + jitter, honoring Retry-After. A scope 403 (not a rate
+// limit) is unretryable and rethrown so the caller can surface the scope wall.
 async function deleteRepoWithRetry(
   client: GitHubClient,
   org: string,
@@ -123,13 +116,10 @@ async function deleteRepoWithRetry(
   return lastWasRateLimit ? "rate-limited" : "failed"
 }
 
-// Execute the teardown plan: delete each repo with bounded concurrency to
-// respect secondary rate limits, marker last (the plan already orders it).
-// A genuine delete_repo-scope 403 is surfaced as an actionable
-// TeardownScopeError; a secondary rate limit (also a 403, but transient) is
-// surfaced as a retryable TeardownRateLimitError carrying partial progress.
-// The marker repo is deleted only when every non-marker delete succeeded, so a
-// partial failure leaves the marker behind and the run stays re-runnable.
+// Execute the teardown plan with bounded concurrency, marker last. A scope 403
+// surfaces TeardownScopeError; a rate-limit 403 surfaces a retryable
+// TeardownRateLimitError. The marker is deleted only when every non-marker
+// delete succeeded, so a partial failure stays re-runnable.
 export async function executeTeardown(
   client: GitHubClient,
   plan: TeardownPlan,
@@ -151,9 +141,8 @@ export async function executeTeardown(
       if (outcome === "deleted") {
         deleted.push(repo)
       } else {
-        // Retries exhausted. A throttle is surfaced as retryable; any other
-        // transient failure (5xx) is recorded in `failed` so the marker is
-        // preserved and the run stays re-runnable.
+        // Retries exhausted: a throttle is retryable; other transient failures
+        // (5xx) go to `failed` so the marker is preserved (re-runnable).
         if (outcome === "rate-limited") rateLimited = true
         failed.push(repo)
       }
@@ -168,9 +157,8 @@ export async function executeTeardown(
 
   await mapWithConcurrency(nonMarker, 4, tryDelete)
 
-  // After each delete phase: a genuine scope 403 is unrecoverable; a transient
-  // throttle is retryable. Both abort before touching anything further so the
-  // run stays re-runnable.
+  // A scope 403 is unrecoverable; a throttle is retryable. Both abort before
+  // the marker so the run stays re-runnable.
   const abortIfBlocked = () => {
     if (scopeWall) throw new TeardownScopeError(DELETE_SCOPE_MESSAGE)
     if (rateLimited) throw new TeardownRateLimitError(deleted, failed)
@@ -178,9 +166,8 @@ export async function executeTeardown(
 
   abortIfBlocked()
 
-  // Only delete the marker when every non-marker repo was deleted. Leaving the
-  // marker behind on any failure keeps planTeardown's marker gate passing so a
-  // re-run can finish the job (the documented re-runnable invariant).
+  // Marker deleted only on a fully-successful run; otherwise it's left behind so
+  // planTeardown's gate still passes and the run stays re-runnable.
   if (failed.length === 0) {
     for (const repo of marker) {
       await tryDelete(repo)

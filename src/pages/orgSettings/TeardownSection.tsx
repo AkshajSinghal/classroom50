@@ -59,8 +59,7 @@ const TeardownSection = ({ org }: { org: string }) => {
       if (!result) {
         setDone(null)
       } else if (result.failed.length > 0) {
-        // Partial success: some repos were deleted, others could not be. The
-        // marker is preserved on any failure, so teardown remains re-runnable.
+        // Partial success — the marker is preserved, so teardown is re-runnable.
         setDone(
           `Deleted ${result.deleted.length} repositor${result.deleted.length === 1 ? "y" : "ies"}; ` +
             `${result.failed.length} could not be deleted. Re-run teardown to finish.`,
