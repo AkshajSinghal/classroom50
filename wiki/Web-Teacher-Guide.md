@@ -240,6 +240,10 @@ As you can see, we have a few important pieces of data we can now view:
 
 Each submission row itself contains not only the most recent submission for the student (or group) submitting, but also an itemized list of all submissions in total in case viewing said history is useful (by default sorted by most recent, reverse chronological order). The score is of course shown, as well as the date submitted, and buttons to view the repository itself, commit for the submission, Pull Request (or "Review"), and the release created for the submission (or "Details").
 
+### Downloading Scores
+
+For teachers interested in downloading all submissions as once, the top-right **Download Scores (CSV)** button allows for an easy one-click option to gather all submissions into a comma-separated list for processing in external programs or importing into Excel or Google Sheets.
+
 # Editing Assignments and Classrooms
 
 As shown on the lefthand drawer menu in the screenshot above, there's an option when viewing an assignment to visit "Assignment Settings"; clicking this will open the same form used when [creating an assignment](#creating-an-assignment), though with all fields pre-populated with the pre-existing data for the assignment. Similarly, one can edit classrooms themselves by clicking the "Settings" button in the lefthand drawer when viewing a classroom, which will take them to the [form for creating a classroom](#creating-a-classroom), with the data similarly pre-filled.
