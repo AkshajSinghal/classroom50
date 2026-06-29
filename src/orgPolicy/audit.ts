@@ -122,7 +122,29 @@ export async function buildOrgAuditReport(
   org: string,
   plan: string | undefined,
 ): Promise<OrgAuditReport> {
-  const defaults = await checkOrgDefaults(client, org, plan)
+  // All eight per-concern checks run in parallel — they're independent reads,
+  // none of them throw (each swallows its error into a verdict), and the final
+  // concern list is sorted by title regardless of resolution order.
+  const [
+    defaults,
+    actions,
+    prCreation,
+    branchProtection,
+    workflowPermissions,
+    reusableAccess,
+    pages,
+    rulesets,
+  ] = await Promise.all([
+    checkOrgDefaults(client, org, plan),
+    checkOrgActions(client, org),
+    checkOrgPrCreation(client, org),
+    checkBranchProtection(client, org),
+    checkWorkflowPermissions(client, org),
+    checkReusableWorkflowAccess(client, org),
+    checkPages(client, org),
+    checkRulesets(client, org),
+  ])
+
   const readOk = defaults.verdict.state !== "unreadable"
   const unenforcedDefaults =
     defaults.classification?.verdicts
@@ -132,25 +154,6 @@ export async function buildOrgAuditReport(
   // Any unenforced member-default (not just critical) counts as incomplete —
   // the GUI treats all drift as actionable.
   const lockdownComplete = readOk && unenforcedDefaults.length === 0
-
-  // Per-concern checks run in parallel — they're independent reads.
-  const [
-    actions,
-    prCreation,
-    branchProtection,
-    workflowPermissions,
-    reusableAccess,
-    pages,
-    rulesets,
-  ] = await Promise.all([
-    checkOrgActions(client, org),
-    checkOrgPrCreation(client, org),
-    checkBranchProtection(client, org),
-    checkWorkflowPermissions(client, org),
-    checkReusableWorkflowAccess(client, org),
-    checkPages(client, org),
-    checkRulesets(client, org),
-  ])
 
   const concerns: ConcernCheck[] = (
     [

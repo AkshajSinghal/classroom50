@@ -7,7 +7,7 @@
 import type { GitHubClient } from "@/hooks/github/client"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import { deleteRepo } from "@/hooks/github/mutations"
-import { getOrgRepos, getRepo } from "@/hooks/github/queries"
+import { getOrgRepos, getRepo, sleep } from "@/hooks/github/queries"
 import { CONFIG_REPO } from "@/hooks/github/orgChecks"
 import { mapWithConcurrency } from "@/util/concurrency"
 
@@ -75,6 +75,9 @@ export type TeardownResult = {
 
 const MAX_DELETE_ATTEMPTS = 4
 
+const DELETE_SCOPE_MESSAGE =
+  "Deleting repositories was forbidden (403). Teardown needs the `delete_repo` OAuth scope, which is not granted by default. Re-authenticate with that scope, or archive repositories instead."
+
 type DeleteOutcome = "deleted" | "rate-limited" | "failed"
 
 // Delete one repo, retrying transient failures (secondary rate limits, 5xx)
@@ -114,9 +117,7 @@ async function deleteRepoWithRetry(
           : 0
       const backoffMs = Math.min(8000, 500 * 2 ** attempt)
       const jitterMs = Math.floor(Math.random() * 250)
-      await new Promise((resolve) =>
-        setTimeout(resolve, Math.max(retryAfterMs, backoffMs) + jitterMs),
-      )
+      await sleep(Math.max(retryAfterMs, backoffMs) + jitterMs)
     }
   }
   return lastWasRateLimit ? "rate-limited" : "failed"
@@ -167,17 +168,15 @@ export async function executeTeardown(
 
   await mapWithConcurrency(nonMarker, 4, tryDelete)
 
-  if (scopeWall) {
-    throw new TeardownScopeError(
-      "Deleting repositories was forbidden (403). Teardown needs the `delete_repo` OAuth scope, which is not granted by default. Re-authenticate with that scope, or archive repositories instead.",
-    )
+  // After each delete phase: a genuine scope 403 is unrecoverable; a transient
+  // throttle is retryable. Both abort before touching anything further so the
+  // run stays re-runnable.
+  const abortIfBlocked = () => {
+    if (scopeWall) throw new TeardownScopeError(DELETE_SCOPE_MESSAGE)
+    if (rateLimited) throw new TeardownRateLimitError(deleted, failed)
   }
 
-  // A transient throttle exhausted retries: abort before touching the marker so
-  // the run stays re-runnable, and surface the partial progress.
-  if (rateLimited) {
-    throw new TeardownRateLimitError(deleted, failed)
-  }
+  abortIfBlocked()
 
   // Only delete the marker when every non-marker repo was deleted. Leaving the
   // marker behind on any failure keeps planTeardown's marker gate passing so a
@@ -186,14 +185,7 @@ export async function executeTeardown(
     for (const repo of marker) {
       await tryDelete(repo)
     }
-    if (scopeWall) {
-      throw new TeardownScopeError(
-        "Deleting repositories was forbidden (403). Teardown needs the `delete_repo` OAuth scope, which is not granted by default. Re-authenticate with that scope, or archive repositories instead.",
-      )
-    }
-    if (rateLimited) {
-      throw new TeardownRateLimitError(deleted, failed)
-    }
+    abortIfBlocked()
   }
 
   return { deleted, failed }
