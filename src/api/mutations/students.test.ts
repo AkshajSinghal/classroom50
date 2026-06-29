@@ -646,6 +646,55 @@ describe("updateStudent — edit a roster row's teacher-facing fields in place (
     expect(committed.content).toBeNull()
   })
 
+  it("rejects changing the email before enrollment is confirmed (invited row with a github_id)", async () => {
+    // dave: invited (not enrolled) but already has a github_id + username, so
+    // the email-only guard doesn't apply — the pre-enrollment lock must.
+    const daveRow =
+      "dave,Dave,D,dave@x.edu,,77,invited,github,davehash,tok-4,2026-01-01T00:00:00Z,\n"
+    const { client, committed } = makeClient({ startingCsv: HEADER + daveRow })
+
+    await expect(
+      updateStudent(client, {
+        org: "acme",
+        classroom: "cs101",
+        key: "77",
+        patch: {
+          first_name: "Dave",
+          last_name: "D",
+          email: "dave.new@x.edu",
+          section: "",
+        },
+      }),
+    ).rejects.toThrow(/before enrollment is confirmed/i)
+    expect(committed.content).toBeNull()
+  })
+
+  it("allows editing name/section (email unchanged) on an unenrolled row", async () => {
+    const daveRow =
+      "dave,Dave,D,dave@x.edu,,77,invited,github,davehash,tok-4,2026-01-01T00:00:00Z,\n"
+    const { client, committed } = makeClient({ startingCsv: HEADER + daveRow })
+
+    await updateStudent(client, {
+      org: "acme",
+      classroom: "cs101",
+      key: "77",
+      patch: {
+        first_name: "David",
+        last_name: "Davies",
+        email: "dave@x.edu", // unchanged
+        section: "Period 3",
+      },
+    })
+
+    const dave = rowsFromCsv(committed.content!).find(
+      (r) => r.github_id === "77",
+    )
+    expect(dave?.first_name).toBe("David")
+    expect(dave?.last_name).toBe("Davies")
+    expect(dave?.section).toBe("Period 3")
+    expect(dave?.enrollment_status).toBe("invited")
+  })
+
   it("preserves the canonical column order and drops no other rows", async () => {
     const { client, committed } = makeClient({
       startingCsv: HEADER + aliceRow + bobRow,
