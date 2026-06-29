@@ -33,6 +33,7 @@ import { parseOnboardingYaml, type OnboardingYaml } from "@/util/yaml"
 import { mapWithConcurrency } from "@/util/concurrency"
 import type { GetAssignmentsFileInput } from "@/api/queries/assignments"
 import type { OrgRunner, OrgRunnersResult } from "@/util/runners"
+import type { OnboardingSelfReport } from "@/util/inviteStatus"
 
 export const githubKeys = {
   all: ["github"] as const,
@@ -1041,7 +1042,7 @@ export async function listOnboardingSelfReports(
   client: GitHubClient,
   org: string,
   classroom: string,
-): Promise<{ github_id: string; email: string }[]> {
+): Promise<OnboardingSelfReport[]> {
   const repos = (await listOnboardingRepos(client, org)).filter(
     (repo) => !repo.archived,
   )
@@ -1062,12 +1063,15 @@ export async function listOnboardingSelfReports(
       }
     },
   )
-  const reports: { github_id: string; email: string }[] = []
+  const reports: OnboardingSelfReport[] = []
   for (const payload of payloads) {
     if (payload && payload.classroom === classroom) {
       reports.push({
         github_id: String(payload.github_id),
         email: payload.email,
+        first_name: payload.first_name,
+        last_name: payload.last_name,
+        github_username: payload.github_username,
       })
     }
   }

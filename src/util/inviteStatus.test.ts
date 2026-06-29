@@ -123,11 +123,31 @@ describe("buildInviteStatusLookup", () => {
       [],
       [],
       [],
-      [{ github_id: "583231", email: "octocat@example.com" }],
+      [
+        {
+          github_id: "583231",
+          email: "octocat@example.com",
+          github_username: "octocat",
+        },
+      ],
     )
     expect(lookup(student({ enrollment_status: "invited" })).status).toBe(
       "ready",
     )
+  })
+
+  it("surfaces the matched onboarding self-report on a 'ready' row", () => {
+    const report = {
+      github_id: "583231",
+      email: "octocat@example.com",
+      first_name: "Mona",
+      last_name: "Lisa",
+      github_username: "octocat",
+    }
+    const lookup = buildInviteStatusLookup([], [], [], [report])
+    const result = lookup(student({ enrollment_status: "invited" }))
+    expect(result.status).toBe("ready")
+    expect(result.selfReport).toEqual(report)
   })
 
   it("classifies an email-invited row (no github_id) as 'ready' when a report matches by email", () => {
@@ -135,7 +155,13 @@ describe("buildInviteStatusLookup", () => {
       [],
       [],
       [],
-      [{ github_id: "999", email: "Octocat@Example.com" }],
+      [
+        {
+          github_id: "999",
+          email: "Octocat@Example.com",
+          github_username: "octocat",
+        },
+      ],
     )
     const emailRow = student({
       username: "",
@@ -150,7 +176,13 @@ describe("buildInviteStatusLookup", () => {
       [],
       [],
       [],
-      [{ github_id: "111", email: "someone-else@example.com" }],
+      [
+        {
+          github_id: "111",
+          email: "someone-else@example.com",
+          github_username: "someone-else",
+        },
+      ],
     )
     const emailRow = student({
       username: "",

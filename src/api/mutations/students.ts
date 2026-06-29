@@ -31,7 +31,7 @@ import {
 import { getAuthenticatedUser } from "@/api/queries/users"
 import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
 import { GitHubAPIError } from "@/hooks/github/errors"
-import { isSameGitHubUser } from "@/util/students"
+import { isEnrolledRow, isSameGitHubUser } from "@/util/students"
 import {
   emailHash,
   generateInviteToken,
@@ -2068,6 +2068,18 @@ export async function updateStudent(
       "Can't change the email for this student: they have no GitHub username " +
         "or id, so their email is their only identifier. Unenroll and re-add " +
         "them to change it.",
+    )
+  }
+
+  // Before enrollment is confirmed, the email is part of the identity that
+  // onboarding/reconcile binds (email-based match key). Letting the teacher
+  // override it pre-enrollment could break that match, so refuse any email
+  // change until the row is enrolled. The UI locks the field too (shared
+  // isEnrolledRow predicate); this is the server-side backstop.
+  if (emailChanged && !isEnrolledRow(existing)) {
+    throw new Error(
+      "Can't change the email before enrollment is confirmed: it's part of " +
+        "the identity onboarding binds. Confirm enrollment first, then edit.",
     )
   }
 
