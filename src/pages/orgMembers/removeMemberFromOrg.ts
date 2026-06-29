@@ -28,10 +28,9 @@ const rowToStudent = (row: OrgMemberRow): Student => ({
 })
 
 // Remove a student from the org without leaving any roster inconsistent (#76):
-// unenroll them from every classroom they're on FIRST, then remove the org
-// membership LAST. A per-classroom unenroll failure is surfaced as a warning and
-// does not abort the others or the final removal — the org DELETE running last
-// means a partial failure never strips membership while rosters stay populated.
+// unenroll from every classroom FIRST, then remove org membership LAST, so a
+// partial failure never strips membership while rosters still list the student.
+// Per-classroom failures are non-fatal warnings.
 export async function removeMemberFromOrg(
   client: GitHubClient,
   input: { org: string; row: OrgMemberRow },

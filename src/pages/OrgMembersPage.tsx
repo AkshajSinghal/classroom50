@@ -32,10 +32,8 @@ import { removeMemberFromOrg } from "@/pages/orgMembers/removeMemberFromOrg"
 import { inviteMemberToOrg } from "@/pages/orgMembers/inviteMemberToOrg"
 import type { GitHubClient } from "@/hooks/github/client"
 
-// Shared invite-by-id flow for both the inline row button and the detail
-// drawer: call inviteMemberToOrg, toast the resolved (or fallback) handle, and
-// run the caller's onDone refresh. Throwing is handled here so both call sites
-// only manage their own in-flight flag.
+// Shared invite flow for the inline button and the detail drawer. Errors are
+// toasted here so both call sites only track their own in-flight flag.
 const runInviteMember = async (
   client: GitHubClient,
   org: string,
@@ -62,6 +60,10 @@ const runInviteMember = async (
     })
   }
 }
+
+// First initial of a row's best display string, for the avatar fallback.
+const initialsFor = (row: OrgMemberRow) =>
+  (row.name || row.username || row.email || "?")[0]?.toUpperCase() ?? "?"
 
 // GitHub identity line: makes it explicit these are GitHub members by showing
 // the @username and the immutable numeric GitHub id together.
@@ -192,7 +194,7 @@ const MemberDetail = ({
           <Avatar
             name={row.name || label}
             github={row.username}
-            initials={(row.name || label || "?")[0]?.toUpperCase() ?? "?"}
+            initials={initialsFor(row)}
             subtitle={<GitHubIdentity row={row} />}
           />
 
@@ -203,7 +205,6 @@ const MemberDetail = ({
             ) : null}
           </div>
 
-          {/* Manage org membership directly on GitHub. */}
           <a
             href={`https://github.com/orgs/${org}/people${
               row.username ? `?query=${encodeURIComponent(row.username)}` : ""
@@ -416,7 +417,10 @@ const OrgMembersPage = () => {
     )
   }, [rows, query])
 
-  const selected = rows.find((row) => row.key === selectedKey) ?? null
+  const selected = useMemo(
+    () => rows.find((row) => row.key === selectedKey) ?? null,
+    [rows, selectedKey],
+  )
   const discrepancyCount = useMemo(
     () =>
       rows.filter((row) => row.classification === "on-roster-not-member")
@@ -515,12 +519,7 @@ const OrgMembersPage = () => {
                         <Avatar
                           name={row.name || row.username || row.email}
                           github={row.username}
-                          initials={
-                            (row.name ||
-                              row.username ||
-                              row.email ||
-                              "?")[0]?.toUpperCase() ?? "?"
-                          }
+                          initials={initialsFor(row)}
                           subtitle={<GitHubIdentity row={row} />}
                         />
                       </div>

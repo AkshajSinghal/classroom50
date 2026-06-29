@@ -1940,14 +1940,11 @@ export async function unenrollStudent(
     }
   }
 
-  // pending invite -> always cancel (a not-yet-accepted invitee has no
-  // cross-classroom membership to protect). An ACTIVE member is NEVER removed
-  // here: unenroll is classroom-scoped, and org-wide removal would leave any
-  // other roster the student is on showing them as still enrolled. Org removal
-  // lives on the org Members page, where the full footprint is visible.
-  // Resolve org state defensively: a reject here would otherwise throw AFTER
-  // the roster commit landed, defeating the "commit landed -> downstream
-  // non-fatal" guarantee and discarding accumulated warnings.
+  // Cancel a pending invite (a not-yet-accepted invitee has no cross-classroom
+  // footprint). An ACTIVE member is never removed here — unenroll is
+  // classroom-scoped; org removal lives on the Members page.
+  // Resolve defensively: a reject after the roster commit landed would discard
+  // accumulated warnings and break the "commit landed -> non-fatal" guarantee.
   const orgState = await orgStatePromise.catch(() => null)
 
   // Never cancel the signed-in teacher's own invite (a teacher mid-enrollment).

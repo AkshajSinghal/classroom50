@@ -89,7 +89,6 @@ export function aggregateOrgMembers(
       const existing = byKey.get(key)
       if (existing) {
         existing.classrooms.push(access)
-        // Backfill identity/name from whichever row carries it.
         if (!existing.username && student.username)
           existing.username = student.username
         if (!existing.github_id && student.github_id)
