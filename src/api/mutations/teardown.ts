@@ -286,8 +286,6 @@ async function deleteClassroomTeams(
     if (outcome === "deleted") {
       teamsDeleted.push(team.slug)
     } else {
-      // A throttle or a transient 5xx exhaustion may succeed on a re-run, so
-      // keep the marker; a permanent refusal will not, so let the marker go.
       if (outcome === "rate-limited" || outcome === "transient-failed") {
         teamsRecoverable = true
       }
@@ -353,34 +351,28 @@ export async function executeTeardown(
 
   abortIfBlocked()
 
-  // Remove the per-classroom teams. Refs are re-resolved from classroom.json
-  // here (not taken from the possibly-stale plan), and BEFORE the marker repo
-  // is deleted — classroom.json lives in the marker repo, so reading it after
-  // would be impossible. Best-effort: a team failure never blocks the marker.
-  const teamRefs = await collectClassroomTeams(client, plan.org)
+  // Remove the per-classroom teams BEFORE the marker repo is deleted —
+  // classroom.json (the team-ref source) lives in the marker repo, so reading
+  // it after would be impossible. `current.teams` was resolved fresh by the
+  // re-enumerating planTeardown above (not the possibly-stale modal plan).
+  // Best-effort: a team failure never blocks the marker.
   const { teamsDeleted, teamsFailed, teamsRecoverable } =
-    await deleteClassroomTeams(client, plan.org, teamRefs)
-
-  // A recoverable team failure (throttle or transient 5xx) can succeed on a
-  // re-run, so treat it like a repo throttle: retain the marker (skip the block
-  // below) so classroom.json survives and a re-run can re-resolve and finish
-  // the team. A *permanent* team refusal (reused-slug id mismatch, scope 403)
-  // is accepted as best-effort and does NOT retain the marker — see below.
-  if (teamsRecoverable) rateLimited = true
+    await deleteClassroomTeams(client, plan.org, current.teams)
 
   // Marker deleted only on a fully-successful run; otherwise it's left behind so
-  // planTeardown's gate still passes and the run stays re-runnable. Gated on
-  // repo `failed` and a *recoverable* team failure only: a permanent team
-  // refusal does not retain the marker (a reused-slug id mismatch would
-  // otherwise wedge teardown forever, since a re-run repeats the refusal).
+  // planTeardown's gate still passes and the run stays re-runnable. A
+  // *recoverable* team failure (throttle or transient 5xx) retains the marker
+  // too, so a re-run can re-resolve classroom.json and finish the team; a
+  // *permanent* refusal (reused-slug id mismatch, scope 403) does not — a re-run
+  // would just repeat it and wedge teardown forever.
+  const retainMarker = failed.length > 0 || rateLimited || teamsRecoverable
   let markerDeleted = false
-  if (failed.length === 0 && !rateLimited) {
+  if (!retainMarker) {
     for (const repo of marker) {
       await tryDelete(repo)
     }
     abortIfBlocked()
-    // tryDelete records the marker in `deleted` on success; reflect that.
-    markerDeleted = marker.every((repo) => deleted.includes(repo))
+    markerDeleted = deleted.includes(CONFIG_REPO)
   }
 
   return { deleted, failed, teamsDeleted, teamsFailed, markerDeleted }
