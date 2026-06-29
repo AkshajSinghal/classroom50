@@ -5,7 +5,9 @@ import {
   TeardownRateLimitError,
   TeardownScopeError,
   executeTeardown,
+  formatTeardownResult,
   planTeardown,
+  type TeardownResult,
 } from "./teardown"
 import { GitHubAPIError } from "@/hooks/github/errors"
 import type { GitHubClient } from "@/hooks/github/client"
@@ -466,10 +468,10 @@ describe("executeTeardown", () => {
     expect(result.teamsFailed).toHaveLength(0)
   })
 
-  it("records a team that fails to delete without aborting teardown", async () => {
-    // A team that always fails (500) exhausts retries and lands in teamsFailed,
-    // but repos (including the marker) are still deleted — teardown is not
-    // blocked by a team failure.
+  it("retains the marker when a team delete fails transiently (5xx), so a re-run can finish it", async () => {
+    // A transient 5xx team failure is recoverable: the marker repo (which holds
+    // classroom.json, the team-ref source) is preserved so a re-run can
+    // re-resolve and finish the team, rather than orphaning it.
     const { client, deletes } = makeClient({
       markerExists: true,
       repos: ["classroom50", "cs101-hw1-alice"],
@@ -480,16 +482,18 @@ describe("executeTeardown", () => {
     const result = await executeTeardown(client, plan)
     expect(result.teamsFailed).toEqual(["classroom50-cs101"])
     expect(result.teamsDeleted).toHaveLength(0)
-    // Repos, including the marker, were still deleted.
-    expect(deletes).toContain("classroom50")
     expect(result.failed).toHaveLength(0)
+    // Non-marker repos deleted, but the marker is retained (recoverable).
+    expect(deletes).toContain("cs101-hw1-alice")
+    expect(deletes).not.toContain("classroom50")
+    expect(result.markerDeleted).toBe(false)
   })
 
   it("retains the marker when a team delete is throttled (recoverable, re-runnable)", async () => {
-    // A rate-limited team delete is recoverable, unlike a hard failure: the
-    // marker repo (which holds classroom.json) is preserved so a re-run can
-    // re-resolve and finish the throttled team. Without this the team would be
-    // silently orphaned once the marker — its only ref source — was gone.
+    // A rate-limited team delete is recoverable, like a transient 5xx: the
+    // marker is preserved so a re-run can re-resolve and finish the throttled
+    // team. Without this the team would be silently orphaned once the marker —
+    // its only ref source — was gone.
     const { client, deletes } = makeClient({
       markerExists: true,
       repos: ["classroom50", "cs101-hw1-alice"],
@@ -500,10 +504,10 @@ describe("executeTeardown", () => {
     const result = await executeTeardown(client, plan)
     expect(result.teamsFailed).toEqual(["classroom50-cs101"])
     expect(result.teamsDeleted).toHaveLength(0)
-    // Non-marker repos still deleted, but the marker is preserved (re-runnable).
     expect(result.failed).toHaveLength(0)
     expect(deletes).toContain("cs101-hw1-alice")
     expect(deletes).not.toContain("classroom50")
+    expect(result.markerDeleted).toBe(false)
   })
 
   it("ignores a team ref outside the classroom50- namespace or without a positive id", async () => {
@@ -529,9 +533,11 @@ describe("executeTeardown", () => {
 
   it("refuses to delete a team whose live id no longer matches (reused slug)", async () => {
     // The slug now points at a different team (different id) than the one this
-    // classroom recorded — deleteClassroomTeam refuses, and it lands in
-    // teamsFailed without clobbering the unrelated team.
-    const { client, teamDeletes } = makeClient({
+    // classroom recorded — deleteClassroomTeam refuses with a TeamIdMismatchError,
+    // it lands in teamsFailed without clobbering the unrelated team, and because
+    // the refusal is PERMANENT (a re-run repeats it) the marker is still deleted
+    // so teardown isn't wedged forever.
+    const { client, teamDeletes, deletes } = makeClient({
       markerExists: true,
       repos: ["classroom50"],
       classrooms: [{ dir: "cs101", team: { id: 11, slug: "classroom50-cs101" } }],
@@ -542,6 +548,9 @@ describe("executeTeardown", () => {
     expect(result.teamsFailed).toEqual(["classroom50-cs101"])
     expect(result.teamsDeleted).toHaveLength(0)
     expect(teamDeletes).not.toContain("classroom50-cs101")
+    // Permanent refusal does not retain the marker.
+    expect(deletes).toContain("classroom50")
+    expect(result.markerDeleted).toBe(true)
   })
 
   it("does not delete teams when a repo scope wall aborts the run", async () => {
@@ -557,5 +566,95 @@ describe("executeTeardown", () => {
     )
     // The run aborts before team deletion runs.
     expect(teamDeletes).toHaveLength(0)
+  })
+})
+
+describe("formatTeardownResult", () => {
+  const base: TeardownResult = {
+    deleted: [],
+    failed: [],
+    teamsDeleted: [],
+    teamsFailed: [],
+    markerDeleted: true,
+  }
+  const url = "https://github.com/orgs/acme/teams"
+
+  it("reports a clean run with repos and teams", () => {
+    expect(
+      formatTeardownResult(
+        {
+          ...base,
+          deleted: ["a", "b", "classroom50"],
+          teamsDeleted: ["classroom50-cs101"],
+        },
+        url,
+      ),
+    ).toBe("Deleted 3 repositories and 1 classroom team.")
+  })
+
+  it("uses singular nouns for a one-repo, no-team run", () => {
+    expect(
+      formatTeardownResult({ ...base, deleted: ["classroom50"] }, url),
+    ).toBe("Deleted 1 repository.")
+  })
+
+  it("tells the user to re-run when a repo failed (marker retained)", () => {
+    expect(
+      formatTeardownResult(
+        { ...base, deleted: ["a"], failed: ["b"], markerDeleted: false },
+        url,
+      ),
+    ).toBe(
+      "Deleted 1 repository; 1 repository could not be deleted. Re-run teardown to finish.",
+    )
+  })
+
+  it("tells the user to remove teams by hand when only teams failed and the marker is gone", () => {
+    expect(
+      formatTeardownResult(
+        {
+          ...base,
+          deleted: ["a", "classroom50"],
+          teamsFailed: ["classroom50-cs101", "classroom50-math200"],
+          markerDeleted: true,
+        },
+        url,
+      ),
+    ).toBe(
+      `Deleted 2 repositories; 2 teams could not be deleted. Remove the leftover teams by hand at ${url}.`,
+    )
+  })
+
+  it("re-runs (not by-hand) when teams failed but were recoverable so the marker was retained", () => {
+    expect(
+      formatTeardownResult(
+        {
+          ...base,
+          deleted: ["a"],
+          teamsFailed: ["classroom50-cs101"],
+          markerDeleted: false,
+        },
+        url,
+      ),
+    ).toBe(
+      "Deleted 1 repository; 1 team could not be deleted. Re-run teardown to finish.",
+    )
+  })
+
+  it("joins failed repos and teams with 'and'", () => {
+    expect(
+      formatTeardownResult(
+        {
+          ...base,
+          deleted: ["a"],
+          failed: ["b"],
+          teamsFailed: ["classroom50-cs101"],
+          markerDeleted: false,
+        },
+        url,
+      ),
+    ).toBe(
+      "Deleted 1 repository; 1 repository and 1 team could not be deleted. Re-run teardown to finish.",
+    )
   })
 })

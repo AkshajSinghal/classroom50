@@ -8,6 +8,7 @@ import { useSafeSubmit } from "@/hooks/useSafeSubmit"
 import useGetOrgMembership from "@/hooks/useGetOrgMembership"
 import {
   executeTeardown,
+  formatTeardownResult,
   planTeardown,
   TeardownMarkerError,
   TeardownRateLimitError,
@@ -59,38 +60,12 @@ const TeardownSection = ({ org }: { org: string }) => {
       if (!result) {
         setDone(null)
       } else {
-        const repos = `${result.deleted.length} repositor${result.deleted.length === 1 ? "y" : "ies"}`
-        const teams =
-          result.teamsDeleted.length > 0
-            ? ` and ${result.teamsDeleted.length} classroom team${result.teamsDeleted.length === 1 ? "" : "s"}`
-            : ""
-        const anyFailed =
-          result.failed.length > 0 || result.teamsFailed.length > 0
-        if (anyFailed) {
-          const failedRepos =
-            result.failed.length > 0
-              ? `${result.failed.length} repositor${result.failed.length === 1 ? "y" : "ies"}`
-              : ""
-          const failedTeams =
-            result.teamsFailed.length > 0
-              ? `${result.teamsFailed.length} team${result.teamsFailed.length === 1 ? "" : "s"}`
-              : ""
-          const failedParts = [failedRepos, failedTeams].filter(Boolean)
-          // When a repo failed the marker is preserved, so a re-run finishes the
-          // job. When only teams failed, the marker (which holds classroom.json,
-          // the team-ref source) has already been deleted on this run, so a
-          // re-run would just refuse on the missing marker — the leftover teams
-          // must be removed by hand instead.
-          const remedy =
-            result.failed.length > 0
-              ? "Re-run teardown to finish."
-              : `Remove the leftover team${result.teamsFailed.length === 1 ? "" : "s"} by hand at https://github.com/orgs/${org}/teams.`
-          setDone(
-            `Deleted ${repos}${teams}; ${failedParts.join(" and ")} could not be deleted. ${remedy}`,
-          )
-        } else {
-          setDone(`Deleted ${repos}${teams}.`)
-        }
+        setDone(
+          formatTeardownResult(
+            result,
+            `https://github.com/orgs/${org}/teams`,
+          ),
+        )
       }
       void queryClient.invalidateQueries({ queryKey: ["orgs"] })
     },
