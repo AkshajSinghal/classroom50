@@ -57,8 +57,6 @@ const RerunOnboarding = ({ org }: { org: string }) => {
         client,
         org,
         plan: planDetails?.plan.name,
-        serviceToken: "",
-        serviceAccountConfirmed: false,
         onStepUpdate: (update) => {
           if (!mountedRef.current) return
           setSteps((prev) => applyStepUpdate(prev, update))

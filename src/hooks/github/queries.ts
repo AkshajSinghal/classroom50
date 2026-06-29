@@ -855,7 +855,6 @@ export type Classroom50OrgSummary = {
 
   classroom50: {
     status: Classroom50Status
-    serviceToken: ServiceTokenStatus | null
     canAccessRepo: boolean
     canInitialize: boolean
     pagesUrl: string
@@ -875,7 +874,6 @@ export async function getClassroom50OrgSummary(
   const org = membership.organization
 
   let canAccessRepo = false
-  const serviceToken: ServiceTokenStatus | null = null
   let status: Classroom50Status
 
   try {
@@ -918,7 +916,6 @@ export async function getClassroom50OrgSummary(
     classroom50: {
       status,
       canAccessRepo,
-      serviceToken,
       canInitialize:
         membership.state === "active" && membership.role === "admin",
       pagesUrl: `https://${org.login}.github.io/classroom50/`,

@@ -25,7 +25,7 @@ import {
   type MemberDefaultSetting,
 } from "./desiredState"
 
-export type AuditVerdict = "ok" | "warn" | "fail"
+export type AuditVerdict = "ok" | "fail"
 
 export type ConcernId =
   | "orgDefaults"

@@ -46,9 +46,7 @@ export async function checkOrgDefaults(
   try {
     const live = await client.request<Record<string, unknown>>(`/orgs/${org}`)
     const classification = classifyDefaults(live, plan)
-    const allEnforced =
-      !classification.criticalMissed &&
-      classification.verdicts.every((v) => v.enforced)
+    const allEnforced = classification.verdicts.every((v) => v.enforced)
     const state: CheckState = allEnforced ? "enforced" : "unenforced"
     return { verdict: { state }, classification }
   } catch (err) {
