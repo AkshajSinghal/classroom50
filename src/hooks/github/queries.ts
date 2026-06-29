@@ -131,6 +131,14 @@ export function getUser(client: GitHubClient, username: string) {
   return client.request<GitHubUser>(`/users/${username}`)
 }
 
+// Resolve a user by their immutable numeric account id (GET /user/{id}). The
+// stored CSV username can be stale if the student renamed their GitHub account,
+// but the id never changes — so this returns their CURRENT login. Used when
+// re-inviting a roster student whose username may have drifted.
+export function getUserById(client: GitHubClient, id: number | string) {
+  return client.request<GitHubUser>(`/user/${id}`)
+}
+
 export function getUserQuery(client: GitHubClient, username: string) {
   return queryOptions({
     queryKey: githubKeys.user(username),
