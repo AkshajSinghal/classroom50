@@ -1,7 +1,14 @@
 import { useMemo, useState } from "react"
 import { useParams } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
-import { AlertTriangle, Info, X } from "lucide-react"
+import {
+  AlertTriangle,
+  ChevronRight,
+  ExternalLink,
+  Info,
+  UserPlus,
+  X,
+} from "lucide-react"
 
 import Drawer, {
   DrawerContent,
@@ -10,6 +17,7 @@ import Drawer, {
 } from "@/components/drawer"
 import RequireTeacher from "@/components/RequireTeacher"
 import Avatar from "@/components/avatar"
+import GitHub from "@/assets/github.svg?react"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useToast } from "@/context/notifications/NotificationProvider"
 import { useGitHubViewer } from "@/hooks/github/hooks"
@@ -17,6 +25,23 @@ import { githubKeys, invalidateInviteQueries } from "@/hooks/github/queries"
 import useOrgMembersOverview from "@/hooks/useOrgMembersOverview"
 import type { OrgMemberRow } from "@/util/orgMembers"
 import { removeMemberFromOrg } from "@/pages/orgMembers/removeMemberFromOrg"
+import { inviteMemberToOrg } from "@/pages/orgMembers/inviteMemberToOrg"
+
+// GitHub identity line: makes it explicit these are GitHub members by showing
+// the @username and the immutable numeric GitHub id together.
+const GitHubIdentity = ({ row }: { row: OrgMemberRow }) => (
+  <span className="inline-flex items-center gap-1.5 text-xs text-base-content/50">
+    <GitHub className="size-3.5 opacity-50" />
+    {row.username ? (
+      <span className="font-mono">@{row.username}</span>
+    ) : (
+      <span className="italic">no GitHub username</span>
+    )}
+    {row.github_id ? (
+      <span className="text-base-content/40">· id {row.github_id}</span>
+    ) : null}
+  </span>
+)
 
 const ClassificationBadge = ({ row }: { row: OrgMemberRow }) => {
   if (row.classification === "on-roster-not-member") {
@@ -53,7 +78,32 @@ const MemberDetail = ({
   const { notify } = useToast()
   const [confirming, setConfirming] = useState(false)
   const [working, setWorking] = useState(false)
+  const [inviting, setInviting] = useState(false)
   const label = row.username || row.email
+
+  const handleInvite = async () => {
+    if (inviting) return
+    setInviting(true)
+    try {
+      const result = await inviteMemberToOrg(client, { org, row })
+      const who = result.currentUsername ? `@${result.currentUsername}` : label
+      notify({
+        tone: "success",
+        durationMs: 6000,
+        message: `Invited ${who} to the ${org} organization.`,
+      })
+      onRemoved()
+    } catch (err) {
+      notify({
+        tone: "error",
+        message: `Couldn't invite ${label}: ${
+          err instanceof Error ? err.message : "something went wrong"
+        }`,
+      })
+    } finally {
+      setInviting(false)
+    }
+  }
 
   const handleRemove = async () => {
     if (working) return
@@ -118,7 +168,7 @@ const MemberDetail = ({
             name={row.name || label}
             github={row.username}
             initials={(row.name || label || "?")[0]?.toUpperCase() ?? "?"}
-            subtitle={row.username ? `@${row.username}` : row.email}
+            subtitle={<GitHubIdentity row={row} />}
           />
 
           <div className="flex items-center gap-2">
@@ -127,6 +177,19 @@ const MemberDetail = ({
               <span className="text-sm text-base-content/60">{row.email}</span>
             ) : null}
           </div>
+
+          {/* Manage org membership directly on GitHub. */}
+          <a
+            href={`https://github.com/orgs/${org}/people${
+              row.username ? `?query=${encodeURIComponent(row.username)}` : ""
+            }`}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex w-fit items-center gap-1 text-sm text-primary hover:underline"
+          >
+            <ExternalLink className="size-3.5" />
+            Manage on GitHub
+          </a>
 
           <div>
             <h3 className="mb-2 text-sm font-semibold">Classroom access</h3>
@@ -169,10 +232,43 @@ const MemberDetail = ({
               the organization here.
             </div>
           ) : !row.isMember ? (
-            <div className="rounded-box border border-base-300 bg-base-200/50 p-4 text-sm text-base-content/70">
-              This student is on a roster but is not an organization member.
-              Re-invite them from their classroom&apos;s Students page.
-            </div>
+            row.github_id ? (
+              <div className="rounded-box border border-warning/30 bg-warning/5 p-4 text-sm">
+                <p className="text-base-content/80">
+                  {label} is on a classroom roster but is{" "}
+                  <span className="font-semibold">
+                    not an organization member
+                  </span>
+                  . Invite them to restore their access. The invite is sent to
+                  their GitHub account by id, so it works even if their username
+                  changed.
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm mt-3"
+                  disabled={inviting}
+                  onClick={() => void handleInvite()}
+                >
+                  {inviting ? (
+                    <>
+                      <span className="loading loading-spinner loading-xs" />
+                      Inviting...
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="size-4" />
+                      Invite to organization
+                    </>
+                  )}
+                </button>
+              </div>
+            ) : (
+              <div className="rounded-box border border-base-300 bg-base-200/50 p-4 text-sm text-base-content/70">
+                This student is on a roster but is not an organization member.
+                They have no GitHub id on file yet, so invite them from their
+                classroom&apos;s Students page.
+              </div>
+            )
           ) : confirming ? (
             <div className="rounded-box border border-error/30 bg-error/5 p-4 text-sm">
               <p className="text-base-content/80">
@@ -238,11 +334,48 @@ const MemberDetail = ({
 
 const OrgMembersPage = () => {
   const { org } = useParams({ strict: false })
+  const client = useGitHubClient()
+  const { notify } = useToast()
   const queryClient = useQueryClient()
   const { data: viewer } = useGitHubViewer()
   const { rows, isLoading, isError, notes } = useOrgMembersOverview(org)
   const [query, setQuery] = useState("")
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  const [invitingKey, setInvitingKey] = useState<string | null>(null)
+
+  const refresh = () => {
+    if (!org) return
+    queryClient.invalidateQueries({ queryKey: githubKeys.orgMembers(org) })
+    invalidateInviteQueries(queryClient, org)
+  }
+
+  // Inline row invite for an on-roster non-member (mirrors the detail-drawer
+  // action). Invites by github_id so a stale username doesn't matter.
+  const handleQuickInvite = async (row: OrgMemberRow) => {
+    if (!org || invitingKey) return
+    setInvitingKey(row.key)
+    try {
+      const result = await inviteMemberToOrg(client, { org, row })
+      const who = result.currentUsername
+        ? `@${result.currentUsername}`
+        : row.username || row.email
+      notify({
+        tone: "success",
+        durationMs: 6000,
+        message: `Invited ${who} to the ${org} organization.`,
+      })
+      refresh()
+    } catch (err) {
+      notify({
+        tone: "error",
+        message: `Couldn't invite ${row.username || row.email}: ${
+          err instanceof Error ? err.message : "something went wrong"
+        }`,
+      })
+    } finally {
+      setInvitingKey(null)
+    }
+  }
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -273,10 +406,19 @@ const OrgMembersPage = () => {
             <div>
               <h1 className="text-2xl font-bold tracking-tight">Members</h1>
               <p className="mt-1 text-sm text-base-content/60">
-                Everyone in{" "}
-                <span className="font-mono font-semibold">{org}</span> and the
-                classrooms they belong to.
+                Everyone in the{" "}
+                <span className="font-mono font-semibold">{org}</span> GitHub
+                organization and the classrooms they belong to.
               </p>
+              <a
+                href={`https://github.com/orgs/${org}/people`}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-2 inline-flex items-center gap-1 text-sm text-primary hover:underline"
+              >
+                <ExternalLink className="size-3.5" />
+                Manage organization members on GitHub
+              </a>
             </div>
 
             {notes.length > 0 ? (
@@ -323,35 +465,61 @@ const OrgMembersPage = () => {
               ) : (
                 <ul className="divide-y divide-base-300">
                   {filtered.map((row) => (
-                    <li key={row.key} className="px-6 py-4">
-                      <button
-                        type="button"
-                        className="flex w-full items-center justify-between gap-4 text-left"
-                        onClick={() => setSelectedKey(row.key)}
-                      >
-                        <div className="min-w-0 flex-1">
-                          <Avatar
-                            name={row.name || row.username || row.email}
-                            github={row.username}
-                            initials={
-                              (row.name ||
-                                row.username ||
-                                row.email ||
-                                "?")[0]?.toUpperCase() ?? "?"
-                            }
-                            subtitle={
-                              row.username ? `@${row.username}` : row.email
-                            }
-                          />
-                        </div>
-                        <div className="flex shrink-0 items-center gap-3">
-                          <span className="hidden text-xs text-base-content/50 sm:inline">
-                            {row.classrooms.length} classroom
-                            {row.classrooms.length === 1 ? "" : "s"}
-                          </span>
-                          <ClassificationBadge row={row} />
-                        </div>
-                      </button>
+                    <li
+                      key={row.key}
+                      className="clickable-row group/row flex items-center justify-between gap-4 px-6 py-4"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setSelectedKey(row.key)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault()
+                          setSelectedKey(row.key)
+                        }
+                      }}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <Avatar
+                          name={row.name || row.username || row.email}
+                          github={row.username}
+                          initials={
+                            (row.name ||
+                              row.username ||
+                              row.email ||
+                              "?")[0]?.toUpperCase() ?? "?"
+                          }
+                          subtitle={<GitHubIdentity row={row} />}
+                        />
+                      </div>
+                      <div className="flex shrink-0 items-center gap-3">
+                        {row.classification === "on-roster-not-member" &&
+                        row.github_id ? (
+                          <button
+                            type="button"
+                            className="btn btn-xs btn-primary"
+                            disabled={invitingKey === row.key}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              void handleQuickInvite(row)
+                            }}
+                          >
+                            {invitingKey === row.key ? (
+                              <span className="loading loading-spinner loading-xs" />
+                            ) : (
+                              <>
+                                <UserPlus className="size-3.5" />
+                                Invite
+                              </>
+                            )}
+                          </button>
+                        ) : null}
+                        <span className="hidden text-xs text-base-content/50 sm:inline">
+                          {row.classrooms.length} classroom
+                          {row.classrooms.length === 1 ? "" : "s"}
+                        </span>
+                        <ClassificationBadge row={row} />
+                        <ChevronRight className="size-4 text-base-content/30 transition-transform duration-150 group-hover/row:translate-x-0.5 group-hover/row:text-base-content/60" />
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -370,10 +538,7 @@ const OrgMembersPage = () => {
           onClose={() => setSelectedKey(null)}
           onRemoved={() => {
             setSelectedKey(null)
-            queryClient.invalidateQueries({
-              queryKey: githubKeys.orgMembers(org),
-            })
-            invalidateInviteQueries(queryClient, org)
+            refresh()
           }}
         />
       ) : null}
