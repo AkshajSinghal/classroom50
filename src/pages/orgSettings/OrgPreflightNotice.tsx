@@ -27,20 +27,15 @@ const OrgPreflightNotice = ({ org }: { org: string }) => {
 
   // Both checks resolve at different times. Rendering before all of them
   // settle makes the banner rewrite itself mid-flight ("An issue was found…" →
-  // "Issues were found…"), so hold a quiet loading state until everything is
-  // known. The audit query stays pending until the plan loads (it's gated on
-  // it), so auditPending also covers the plan dependency; planPending is
-  // included for the brief window before the audit query is enabled.
+  // "Issues were found…"), so stay invisible until everything is known. We
+  // render nothing (not a spinner) while checking: a healthy org should never
+  // flash a placeholder — the banner only ever appears in its final state when
+  // there's an actual problem. The audit query stays pending until the plan
+  // loads (it's gated on it), so auditPending also covers the plan dependency;
+  // planPending is included for the brief window before the audit is enabled.
   const checking = tokenPending || planPending || auditPending
 
-  if (checking) {
-    return (
-      <div className="mb-6 flex items-center gap-2 text-sm text-base-content/50">
-        <span className="loading loading-spinner loading-sm" />
-        Checking organization setup…
-      </div>
-    )
-  }
+  if (checking) return null
 
   const tokenMissing = tokenStatus?.status === "missing"
   const policyFail = audit?.verdict === "fail"
