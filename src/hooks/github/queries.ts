@@ -869,7 +869,7 @@ export async function getClassroom50OrgSummary(
   const org = membership.organization
 
   let canAccessRepo = false
-  let serviceToken: ServiceTokenStatus | null = null
+  const serviceToken: ServiceTokenStatus | null = null
   let status: Classroom50Status
 
   try {
@@ -877,7 +877,11 @@ export async function getClassroom50OrgSummary(
     canAccessRepo = true
     status = "ready"
 
-    serviceToken = await getServiceTokenStatus(client, org.login)
+    // The service-token read is deliberately NOT done here: this summary runs
+    // for every org the user can see, and reading the token per org fans out
+    // an extra GitHub API call across potentially many orgs. The token (and
+    // the full policy audit) is checked only when a specific org is opened
+    // (the teacher preflight on ClassesPage).
   } catch (error) {
     if (error instanceof GitHubAPIError && error.status === 404) {
       canAccessRepo = false
