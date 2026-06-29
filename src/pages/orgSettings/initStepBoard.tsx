@@ -1,6 +1,11 @@
 import { AlertCircle, AlertTriangle, CheckCircle } from "lucide-react"
+import type { ReactNode } from "react"
 
-import type { InitStepId, InitStepUpdate } from "@/hooks/github/mutations"
+import type {
+  InitStepId,
+  InitStepStatus,
+  InitStepUpdate,
+} from "@/hooks/github/mutations"
 
 // Shared init "badge board" used by both the onboarding wizard (OrgSetupPage)
 // and the re-run action on the Org Settings page. One source of truth for the
@@ -77,6 +82,24 @@ export function applyStepUpdate(
   }
 }
 
+const STATUS_BADGE_CLASS: Record<InitStepStatus, string> = {
+  complete: "badge-success",
+  warning: "badge-warning",
+  error: "badge-error",
+  pending: "badge-neutral badge-ghost",
+  running: "badge-neutral badge-ghost",
+  skipped: "badge-neutral badge-ghost",
+}
+
+const STATUS_ICON: Record<InitStepStatus, ReactNode> = {
+  complete: <CheckCircle className="size-4" />,
+  warning: <AlertCircle className="size-4" />,
+  error: <AlertTriangle className="size-4" />,
+  running: <span className="loading loading-spinner size-4" />,
+  pending: null,
+  skipped: null,
+}
+
 export const InitStep = ({
   title,
   description,
@@ -85,18 +108,9 @@ export const InitStep = ({
 }: {
   title: string
   description?: string
-  status: "pending" | "running" | "complete" | "warning" | "error" | "skipped"
+  status: InitStepStatus
   message?: string
 }) => {
-  const badgeClass =
-    status === "complete"
-      ? "badge-success"
-      : status === "warning"
-        ? "badge-warning"
-        : status === "error"
-          ? "badge-error"
-          : "badge-neutral badge-ghost"
-
   return (
     <div className="flex items-start justify-between gap-4 rounded-xl border border-base-300 bg-base-100 p-4">
       <div>
@@ -105,15 +119,8 @@ export const InitStep = ({
           {message || description}
         </p>
       </div>
-      <span className={`badge ${badgeClass}`}>
-        {status === "complete" ? <CheckCircle className="size-4" /> : <></>}
-        {status === "warning" ? <AlertCircle className="size-4" /> : <></>}
-        {status === "running" ? (
-          <span className="loading loading-spinner size-4" />
-        ) : (
-          <></>
-        )}
-        {status === "error" ? <AlertTriangle className="size-4" /> : <></>}
+      <span className={`badge ${STATUS_BADGE_CLASS[status]}`}>
+        {STATUS_ICON[status]}
       </span>
     </div>
   )

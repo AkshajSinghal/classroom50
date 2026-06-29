@@ -141,8 +141,6 @@ const OrgSetupPage = () => {
         client: githubClient,
         org,
         plan: orgPlanDetails?.plan.name,
-        serviceToken: "",
-        serviceAccountConfirmed: false,
         onStepUpdate: (update) => {
           setSteps((steps) => applyStepUpdate(steps, update))
         },

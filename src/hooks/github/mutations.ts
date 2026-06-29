@@ -864,7 +864,7 @@ async function tryStep<T>({
   }
 }
 
-type InitStepStatus =
+export type InitStepStatus =
   | "pending"
   | "running"
   | "complete"
@@ -1961,8 +1961,6 @@ export async function initClassroom50({
   client: GitHubClient
   org: string
   plan?: string
-  serviceToken?: string
-  serviceAccountConfirmed: boolean
   onStepUpdate: (update: InitStepUpdate) => void
 }) {
   const results: Partial<Record<InitStepId, unknown>> = {}

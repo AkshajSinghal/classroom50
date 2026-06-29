@@ -47,12 +47,6 @@ const VERDICT_BANNER: Record<
     iconClassName: "text-success",
     title: "Org policy verified",
   },
-  warn: {
-    className: "border-warning/30 bg-warning/10",
-    Icon: TriangleAlert,
-    iconClassName: "text-warning",
-    title: "Org policy OK, but some settings drifted",
-  },
   fail: {
     className: "border-error/30 bg-error/10",
     Icon: XCircle,
@@ -365,7 +359,6 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
     data: report,
     isLoading,
     isError,
-    refetch,
   } = useGetOrgAudit(org, planDetails?.plan.name)
 
   const fixMutation = useMutation({
@@ -412,7 +405,6 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
             void queryClient.invalidateQueries({
               queryKey: githubKeys.orgAuditPrefix(org),
             })
-            void refetch()
           }}
         >
           Re-check
