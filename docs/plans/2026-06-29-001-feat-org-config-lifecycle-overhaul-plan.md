@@ -75,7 +75,7 @@ The CLI solved "don't let apply and verify drift" with one shared desired-state 
 **Outside this product's identity**
 
 - Per-classroom config (`classroom.json` / `assignments.json` / `students.csv` / `scores.json`) — classroom-level, owned elsewhere.
-- The broader settings *surfaces* tracked in #9; this issue owns the org-policy enforce + audit + drift lifecycle and the org-settings centralization.
+- The broader settings _surfaces_ tracked in #9; this issue owns the org-policy enforce + audit + drift lifecycle and the org-settings centralization.
 
 ### Dependencies
 
@@ -329,13 +329,13 @@ Phase order is A → B → C → D, with the seam and refactor first because eve
 
 ## Verification Contract
 
-| Gate | Command | Applies to | Done signal |
-|---|---|---|---|
-| Types | `npm run typecheck` | all units | no TS errors |
-| Lint | `npm run lint` | all units | no eslint errors |
-| Format | `npm run format:check` | all units | prettier clean |
-| Unit tests | `npm test` | U1–U9 | all vitest specs pass, incl. new specs |
-| Full check | `npm run check` | per-unit gate before landing | tsc + eslint + prettier + vitest all pass |
+| Gate       | Command                | Applies to                   | Done signal                               |
+| ---------- | ---------------------- | ---------------------------- | ----------------------------------------- |
+| Types      | `npm run typecheck`    | all units                    | no TS errors                              |
+| Lint       | `npm run lint`         | all units                    | no eslint errors                          |
+| Format     | `npm run format:check` | all units                    | prettier clean                            |
+| Unit tests | `npm test`             | U1–U9                        | all vitest specs pass, incl. new specs    |
+| Full check | `npm run check`        | per-unit gate before landing | tsc + eslint + prettier + vitest all pass |
 
 Behavioral parity checks (manual, against a disposable org):
 

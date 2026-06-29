@@ -69,7 +69,10 @@ export function classroomRulesetBodies(): OrgRulesetBody[] {
       target: "branch",
       enforcement: "active",
       conditions: {
-        ref_name: { include: [`refs/heads/${FEEDBACK_BASE_BRANCH}`], exclude: [] },
+        ref_name: {
+          include: [`refs/heads/${FEEDBACK_BASE_BRANCH}`],
+          exclude: [],
+        },
         repository_name: ALL_REPOS,
       },
       bypass_actors: ADMIN_BYPASS,

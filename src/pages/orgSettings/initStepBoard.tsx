@@ -25,13 +25,21 @@ export const initialInitSteps: Record<InitStepId, InitStepUpdate> = {
     status: "pending",
     title: "Organization safety defaults",
   },
-  orgActions: { id: "orgActions", status: "pending", title: "Actions permissions" },
+  orgActions: {
+    id: "orgActions",
+    status: "pending",
+    title: "Actions permissions",
+  },
   orgPrCreation: {
     id: "orgPrCreation",
     status: "pending",
     title: "Actions pull request creation",
   },
-  configRepo: { id: "configRepo", status: "pending", title: "Config repository" },
+  configRepo: {
+    id: "configRepo",
+    status: "pending",
+    title: "Config repository",
+  },
   skeleton: { id: "skeleton", status: "pending", title: "Skeleton files" },
   branchProtection: {
     id: "branchProtection",

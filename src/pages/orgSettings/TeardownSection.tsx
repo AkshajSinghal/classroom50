@@ -78,8 +78,8 @@ const TeardownSection = ({ org }: { org: string }) => {
           <h2 className="text-lg font-semibold text-error">Danger zone</h2>
           <p className="mt-1 text-sm text-base-content/70">
             Tear down this organization by deleting <strong>every</strong>{" "}
-            repository in it, including the <code>classroom50</code> config repo.
-            This is irreversible.
+            repository in it, including the <code>classroom50</code> config
+            repo. This is irreversible.
           </p>
 
           {error && (
@@ -87,9 +87,7 @@ const TeardownSection = ({ org }: { org: string }) => {
               {error}
             </div>
           )}
-          {done && (
-            <p className="mt-3 text-sm text-success">{done}</p>
-          )}
+          {done && <p className="mt-3 text-sm text-success">{done}</p>}
 
           <button
             type="button"
@@ -126,8 +124,8 @@ const TeardownSection = ({ org }: { org: string }) => {
               This will permanently delete{" "}
               <strong>{plan?.repoNames.length ?? 0}</strong> repositories in{" "}
               <span className="font-mono">{org}</span>, including the{" "}
-              <code>classroom50</code> config repo (deleted last). This cannot be
-              undone.
+              <code>classroom50</code> config repo (deleted last). This cannot
+              be undone.
             </p>
             {plan && plan.repoNames.length > 0 && (
               <ul className="max-h-40 overflow-auto rounded border border-base-300 bg-base-100 p-2 font-mono text-xs">

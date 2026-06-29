@@ -66,7 +66,11 @@ function makeClient(opts: Opts) {
           : Promise.reject(notFound())
       }
       // Org repo list (paginated).
-      if (method === "GET" && path.includes("/orgs/") && path.includes("/repos")) {
+      if (
+        method === "GET" &&
+        path.includes("/orgs/") &&
+        path.includes("/repos")
+      ) {
         return Promise.resolve(opts.repos.map((name) => ({ name })))
       }
       // Repo delete.
