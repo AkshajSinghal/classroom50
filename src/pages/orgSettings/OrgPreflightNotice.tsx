@@ -16,9 +16,31 @@ import useGetOrgPlanDetails from "@/hooks/useGetOrgPlanDetails"
 // drift is a softer warning. Renders nothing while loading or when all checks
 // pass.
 const OrgPreflightNotice = ({ org }: { org: string }) => {
-  const { data: tokenStatus } = useGetServiceTokenStatus(org)
-  const { data: planDetails } = useGetOrgPlanDetails(org)
-  const { data: audit } = useGetOrgAudit(org, planDetails?.plan.name)
+  const { data: tokenStatus, isPending: tokenPending } =
+    useGetServiceTokenStatus(org)
+  const { data: planDetails, isPending: planPending } =
+    useGetOrgPlanDetails(org)
+  const { data: audit, isPending: auditPending } = useGetOrgAudit(
+    org,
+    planDetails?.plan.name,
+  )
+
+  // Both checks resolve at different times. Rendering before all of them
+  // settle makes the banner rewrite itself mid-flight ("An issue was found…" →
+  // "Issues were found…"), so hold a quiet loading state until everything is
+  // known. The audit query stays pending until the plan loads (it's gated on
+  // it), so auditPending also covers the plan dependency; planPending is
+  // included for the brief window before the audit query is enabled.
+  const checking = tokenPending || planPending || auditPending
+
+  if (checking) {
+    return (
+      <div className="mb-6 flex items-center gap-2 text-sm text-base-content/50">
+        <span className="loading loading-spinner loading-sm" />
+        Checking organization setup…
+      </div>
+    )
+  }
 
   const tokenMissing = tokenStatus?.status === "missing"
   const policyFail = audit?.verdict === "fail"
