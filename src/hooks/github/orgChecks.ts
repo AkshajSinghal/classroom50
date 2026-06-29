@@ -1,5 +1,5 @@
 // Read-only org/repo policy checks — the non-mutating half of the
-// check*/repair* split (plan U2). The audit (useGetOrgAudit) and the
+// check*/repair* split. The audit (useGetOrgAudit) and the
 // centralized Org Settings page consume these to render drift verdicts
 // without writing. Each check tolerates 404/403 with a verdict rather than
 // throwing, so a single unreadable concern never breaks the whole audit.
