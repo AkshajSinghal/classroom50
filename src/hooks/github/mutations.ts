@@ -823,12 +823,7 @@ async function tryStep<T>({
 
     onStepUpdate?.({
       id,
-      status:
-        maybeStatus === "warning"
-          ? "warning"
-          : maybeStatus === "complete"
-            ? "complete"
-            : "complete",
+      status: maybeStatus === "warning" ? "warning" : "complete",
       data: result,
       message:
         typeof result === "object" &&
