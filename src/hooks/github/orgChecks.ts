@@ -368,11 +368,6 @@ const REPO_CREATION_FIELDS = new Set([
 
 // Per-field fallback for when the combined PATCH is rejected. Sends each field
 // alone EXCEPT the entangled repo-creation booleans, which go in one grouped
-// sub-PATCH. A 403/422 on a field is a plan-gated rejection — skip it; a
-// rate-limit aborts. The contract is intentionally narrow — it only signals
-// whether a rate limit aborted; verifyOrgDefaults produces the actual verdict.
-// Per-field fallback for when the combined PATCH is rejected. Sends each field
-// alone EXCEPT the entangled repo-creation booleans, which go in one grouped
 // sub-PATCH. Records fields the API rejected (403/422) — plan-gated, not
 // enterprise no-ops; a rate limit aborts. verifyOrgDefaults gives the drift
 // verdict.

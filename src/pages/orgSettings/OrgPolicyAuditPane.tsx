@@ -392,7 +392,7 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
             title="GitHub plan — determines which policies are in scope (Enterprise unlocks additional member-privilege fields)"
           >
             <GitHub className="size-3" />
-            {planDetails.plan?.name} plan
+            {planDetails.plan.name} plan
           </span>
         )
       }
