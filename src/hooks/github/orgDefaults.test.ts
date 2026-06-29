@@ -59,24 +59,32 @@ function makeClient(opts: ClientOpts) {
 
   const request = vi
     .fn()
-    .mockImplementation((path: string, options?: { method?: string; body?: Record<string, unknown> }) => {
-      if (path === "/orgs/acme" && (!options || options.method === "GET" || !options.method)) {
-        return Promise.resolve(opts.readback)
-      }
-      if (path === "/orgs/acme" && options?.method === "PATCH") {
-        patchCount += 1
-        const body = options.body ?? {}
-        patchBodies.push(body)
-        const keys = Object.keys(body)
-        // A single-key body is a per-field PATCH; multi-key is the combined one.
-        if (keys.length === 1) {
-          const handler = opts.perField?.[keys[0]]
-          return handler ? handler() : Promise.resolve({})
+    .mockImplementation(
+      (
+        path: string,
+        options?: { method?: string; body?: Record<string, unknown> },
+      ) => {
+        if (
+          path === "/orgs/acme" &&
+          (!options || options.method === "GET" || !options.method)
+        ) {
+          return Promise.resolve(opts.readback)
         }
-        return opts.combinedPatch ? opts.combinedPatch() : Promise.resolve({})
-      }
-      return Promise.reject(new Error(`unexpected: ${path}`))
-    })
+        if (path === "/orgs/acme" && options?.method === "PATCH") {
+          patchCount += 1
+          const body = options.body ?? {}
+          patchBodies.push(body)
+          const keys = Object.keys(body)
+          // A single-key body is a per-field PATCH; multi-key is the combined one.
+          if (keys.length === 1) {
+            const handler = opts.perField?.[keys[0]]
+            return handler ? handler() : Promise.resolve({})
+          }
+          return opts.combinedPatch ? opts.combinedPatch() : Promise.resolve({})
+        }
+        return Promise.reject(new Error(`unexpected: ${path}`))
+      },
+    )
 
   const client: GitHubClient = {
     request: request as unknown as GitHubClient["request"],
@@ -156,10 +164,12 @@ describe("repairOrgDefaults", () => {
 
   it("does not manufacture a checklist when the read-back fails", async () => {
     const client: GitHubClient = {
-      request: vi.fn().mockImplementation((_path: string, options?: { method?: string }) => {
-        if (options?.method === "PATCH") return Promise.resolve({})
-        return Promise.reject(httpError(500)) // read-back fails
-      }) as unknown as GitHubClient["request"],
+      request: vi
+        .fn()
+        .mockImplementation((_path: string, options?: { method?: string }) => {
+          if (options?.method === "PATCH") return Promise.resolve({})
+          return Promise.reject(httpError(500)) // read-back fails
+        }) as unknown as GitHubClient["request"],
       requestRaw: () => Promise.reject(new Error("x")),
     }
     const result = await repairOrgDefaults(client, "acme", "team")

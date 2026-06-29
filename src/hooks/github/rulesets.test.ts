@@ -110,7 +110,11 @@ describe("repairRulesets", () => {
         if (method === "GET") return Promise.resolve([])
         if (method === "POST" && path.endsWith("/rulesets")) {
           // Fail the first POST, succeed the second.
-          if ((request.mock.calls.filter((c) => (c[1] as { method?: string })?.method === "POST")).length === 1) {
+          if (
+            request.mock.calls.filter(
+              (c) => (c[1] as { method?: string })?.method === "POST",
+            ).length === 1
+          ) {
             return Promise.reject(new Error("boom"))
           }
         }

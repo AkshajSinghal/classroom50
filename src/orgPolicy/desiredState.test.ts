@@ -75,8 +75,9 @@ describe("classifyDefaults", () => {
     const { criticalMissed, verdicts } = classifyDefaults(live, "enterprise")
     expect(criticalMissed).toBe(true)
     expect(
-      verdicts.find((v) => v.setting.field === "members_can_delete_repositories")
-        ?.enforced,
+      verdicts.find(
+        (v) => v.setting.field === "members_can_delete_repositories",
+      )?.enforced,
     ).toBe(false)
   })
 

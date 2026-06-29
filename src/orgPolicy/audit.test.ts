@@ -66,7 +66,8 @@ function makeClient(overrides: Routes = {}): GitHubClient {
         })
       if (path.includes("/permissions/access"))
         return ok({ access_level: "organization" })
-      if (path.includes("/pages")) return ok({ build_type: "workflow", public: true })
+      if (path.includes("/pages"))
+        return ok({ build_type: "workflow", public: true })
       if (path.includes("/rulesets"))
         return ok([
           { id: 1, name: RULESET_NAME_SUBMISSION_HISTORY },

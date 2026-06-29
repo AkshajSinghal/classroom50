@@ -69,7 +69,9 @@ const RerunOnboarding = ({ org }: { org: string }) => {
           type="button"
           className="btn btn-primary btn-sm"
           disabled={!isOwner || mutation.isPending}
-          title={isOwner ? undefined : "Requires organization owner permissions"}
+          title={
+            isOwner ? undefined : "Requires organization owner permissions"
+          }
           onClick={() => {
             if (!mutation.isPending) void runRerun(() => mutation.mutateAsync())
           }}

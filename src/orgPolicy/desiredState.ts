@@ -38,7 +38,8 @@ const ALL_MEMBER_DEFAULT_SETTINGS: readonly MemberDefaultSetting[] = [
     field: "members_can_create_repositories",
     value: true,
     desc: "member repo creation enabled",
-    manualFix: 'under "Repository creation", allow members to create repositories',
+    manualFix:
+      'under "Repository creation", allow members to create repositories',
     critical: true,
     enterpriseOnly: false,
   },
@@ -64,7 +65,8 @@ const ALL_MEMBER_DEFAULT_SETTINGS: readonly MemberDefaultSetting[] = [
     field: "members_can_create_internal_repositories",
     value: false,
     desc: "internal repo creation disabled",
-    manualFix: 'under "Repository creation", uncheck "Internal" if your plan offers it',
+    manualFix:
+      'under "Repository creation", uncheck "Internal" if your plan offers it',
     critical: true,
     enterpriseOnly: true,
   },

@@ -20,7 +20,12 @@ import type { CheckState } from "@/hooks/github/orgChecks"
 
 const VERDICT_BANNER: Record<
   AuditVerdict,
-  { className: string; Icon: typeof CheckCircle2; iconClassName: string; title: string }
+  {
+    className: string
+    Icon: typeof CheckCircle2
+    iconClassName: string
+    title: string
+  }
 > = {
   ok: {
     className: "border-success/30 bg-success/10",
@@ -163,8 +168,8 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
         <div>
           <h2 className="text-lg font-semibold">Organization policy</h2>
           <p className="mt-1 text-sm text-base-content/60">
-            What Classroom 50 configures on your behalf, and whether anything has
-            drifted from the expected lockdown.
+            What Classroom 50 configures on your behalf, and whether anything
+            has drifted from the expected lockdown.
           </p>
         </div>
         <button
