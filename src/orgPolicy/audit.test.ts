@@ -96,6 +96,10 @@ describe("buildOrgAuditReport", () => {
     expect(report.lockdownComplete).toBe(true)
     expect(report.unenforcedDefaults).toHaveLength(0)
     expect(report.manualUnreadable).toHaveLength(4)
+    // The full member-default list is surfaced so teachers see every
+    // permission we set, all enforced here (12 on a team plan).
+    expect(report.defaultVerdicts).toHaveLength(12)
+    expect(report.defaultVerdicts.every((v) => v.enforced)).toBe(true)
   })
 
   it("verdict fail when a critical member-default drifts", async () => {
@@ -147,5 +151,29 @@ describe("buildOrgAuditReport", () => {
       "team",
     )
     expect(report.manualUnreadable).toHaveLength(4)
+  })
+
+  it("attaches a GitHub settings URL to each concern", async () => {
+    const report = await buildOrgAuditReport(makeClient(), "acme", "team")
+    const url = (id: string) =>
+      report.concerns.find((c) => c.id === id)?.settingsUrl
+    expect(url("orgDefaults")).toBe(
+      "https://github.com/organizations/acme/settings/member_privileges",
+    )
+    expect(url("orgActions")).toBe(
+      "https://github.com/organizations/acme/settings/actions",
+    )
+    expect(url("rulesets")).toBe(
+      "https://github.com/organizations/acme/settings/rules",
+    )
+    expect(url("branchProtection")).toBe(
+      "https://github.com/acme/classroom50/settings/branches",
+    )
+    expect(url("pages")).toBe(
+      "https://github.com/acme/classroom50/settings/pages",
+    )
+    expect(url("reusableWorkflowAccess")).toBe(
+      "https://github.com/acme/classroom50/settings/actions",
+    )
   })
 })

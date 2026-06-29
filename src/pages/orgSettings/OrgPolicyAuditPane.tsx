@@ -1,15 +1,25 @@
-import { useQueryClient } from "@tanstack/react-query"
-import { CheckCircle2, Info, TriangleAlert, XCircle } from "lucide-react"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import {
+  CheckCircle2,
+  ExternalLink,
+  Info,
+  TriangleAlert,
+  XCircle,
+} from "lucide-react"
 
+import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { githubKeys } from "@/hooks/github/queries"
+import { useSafeSubmit } from "@/hooks/useSafeSubmit"
 import useGetOrgAudit from "@/hooks/useGetOrgAudit"
 import useGetOrgMembership from "@/hooks/useGetOrgMembership"
 import useGetOrgPlanDetails from "@/hooks/useGetOrgPlanDetails"
 import type {
   AuditVerdict,
   ConcernCheck,
+  ConcernId,
   OrgAuditReport,
 } from "@/orgPolicy/audit"
+import { REPAIRABLE_CONCERNS, repairConcern } from "@/orgPolicy/repair"
 import type { CheckState } from "@/hooks/github/orgChecks"
 
 // Org policy audit pane: surfaces every org/repo policy concern with its live
@@ -59,7 +69,20 @@ const CONCERN_STATE_BADGE: Record<CheckState, string> = {
   unreadable: "badge-neutral badge-ghost",
 }
 
-function ConcernRow({ concern }: { concern: ConcernCheck }) {
+function ConcernRow({
+  concern,
+  canFix,
+  fixing,
+  onFix,
+}: {
+  concern: ConcernCheck
+  canFix: boolean
+  fixing: boolean
+  onFix: (id: ConcernId) => void
+}) {
+  const isDrifted = concern.verdict.state === "unenforced"
+  const showFix = isDrifted && canFix && REPAIRABLE_CONCERNS.has(concern.id)
+
   return (
     <div className="flex items-start justify-between gap-4 rounded-lg border border-base-300 bg-base-100 p-3">
       <div className="min-w-0">
@@ -69,15 +92,50 @@ function ConcernRow({ concern }: { concern: ConcernCheck }) {
             {concern.verdict.detail}
           </p>
         )}
+        <a
+          href={concern.settingsUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-1 inline-flex items-center gap-1 text-xs text-base-content/50 hover:text-primary"
+        >
+          View on GitHub
+          <ExternalLink className="size-3" />
+        </a>
       </div>
-      <span className={`badge ${CONCERN_STATE_BADGE[concern.verdict.state]}`}>
-        {CONCERN_STATE_LABEL[concern.verdict.state]}
-      </span>
+      <div className="flex shrink-0 items-center gap-2">
+        {showFix && (
+          <button
+            type="button"
+            className="btn btn-xs btn-primary"
+            disabled={fixing}
+            onClick={() => onFix(concern.id)}
+          >
+            {fixing ? (
+              <span className="loading loading-spinner loading-xs" />
+            ) : (
+              "Fix it"
+            )}
+          </button>
+        )}
+        <span className={`badge ${CONCERN_STATE_BADGE[concern.verdict.state]}`}>
+          {CONCERN_STATE_LABEL[concern.verdict.state]}
+        </span>
+      </div>
     </div>
   )
 }
 
-function AuditBody({ report }: { report: OrgAuditReport }) {
+function AuditBody({
+  report,
+  canFix,
+  fixingId,
+  onFix,
+}: {
+  report: OrgAuditReport
+  canFix: boolean
+  fixingId: ConcernId | null
+  onFix: (id: ConcernId) => void
+}) {
   const banner = VERDICT_BANNER[report.verdict]
   const { Icon } = banner
 
@@ -103,21 +161,44 @@ function AuditBody({ report }: { report: OrgAuditReport }) {
 
       <div className="mt-4 grid gap-2">
         {report.concerns.map((c) => (
-          <ConcernRow key={c.id} concern={c} />
+          <ConcernRow
+            key={c.id}
+            concern={c}
+            canFix={canFix}
+            fixing={fixingId === c.id}
+            onFix={onFix}
+          />
         ))}
       </div>
 
-      {report.unenforcedDefaults.length > 0 && (
-        <div className="mt-4">
+      {report.defaultVerdicts.length > 0 && (
+        <div className="mt-6">
           <h3 className="text-sm font-semibold">
-            Member-privilege settings to fix
+            Member permissions we configure
           </h3>
-          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-base-content/70">
-            {report.unenforcedDefaults.map((s) => (
-              <li key={s.field}>
-                {s.desc}
-                {s.manualFix && (
-                  <span className="text-base-content/50"> — {s.manualFix}</span>
+          <p className="mt-1 text-xs text-base-content/50">
+            The organization member privileges Classroom 50 sets on your behalf,
+            and whether each currently matches.
+          </p>
+          <ul className="mt-2 space-y-1 text-sm">
+            {report.defaultVerdicts.map((v) => (
+              <li
+                key={v.setting.field}
+                className="flex items-start justify-between gap-3"
+              >
+                <span className="text-base-content/70">
+                  {v.setting.desc}
+                  {!v.enforced && v.setting.manualFix && (
+                    <span className="text-base-content/40">
+                      {" "}
+                      — {v.setting.manualFix}
+                    </span>
+                  )}
+                </span>
+                {v.enforced ? (
+                  <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />
+                ) : (
+                  <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning" />
                 )}
               </li>
             ))}
@@ -150,7 +231,9 @@ function AuditBody({ report }: { report: OrgAuditReport }) {
 }
 
 const OrgPolicyAuditPane = ({ org }: { org: string }) => {
+  const client = useGitHubClient()
   const queryClient = useQueryClient()
+  const runFix = useSafeSubmit()
   const { data: planDetails } = useGetOrgPlanDetails(org)
   const { data: membership } = useGetOrgMembership(org)
   const isOwner = membership?.role === "admin"
@@ -161,6 +244,20 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
     isError,
     refetch,
   } = useGetOrgAudit(org, planDetails?.plan.name)
+
+  const fixMutation = useMutation({
+    mutationFn: (id: ConcernId) =>
+      repairConcern(client, org, id, planDetails?.plan.name),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: githubKeys.orgAudit(org),
+      })
+    },
+  })
+  // The concern currently being repaired, so only its button shows a spinner.
+  const fixingId = fixMutation.isPending
+    ? (fixMutation.variables ?? null)
+    : null
 
   return (
     <section className="mt-8 rounded-2xl border border-base-300 bg-base-100 p-6">
@@ -200,7 +297,27 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
         </div>
       )}
 
-      {report && <AuditBody report={report} />}
+      {fixMutation.isError && (
+        <div className="mt-4 flex items-start gap-2 rounded-lg border border-error/30 bg-error/10 p-3 text-sm text-error">
+          <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+          <span>
+            Couldn&apos;t apply the fix. You may lack owner permissions, or an
+            enterprise policy blocks this change.
+          </span>
+        </div>
+      )}
+
+      {report && (
+        <AuditBody
+          report={report}
+          canFix={Boolean(isOwner)}
+          fixingId={fixingId}
+          onFix={(id) => {
+            if (!fixMutation.isPending)
+              void runFix(() => fixMutation.mutateAsync(id))
+          }}
+        />
+      )}
 
       <div className="mt-6 flex items-start gap-3 rounded-xl border border-info/30 bg-info/10 p-4 text-sm">
         <Info className="mt-0.5 size-5 shrink-0 text-info" />
