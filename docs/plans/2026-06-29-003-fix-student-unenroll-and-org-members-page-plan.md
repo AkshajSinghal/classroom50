@@ -81,7 +81,7 @@ In scope: the unenroll mutation change, the unenroll dialog change, the new Memb
 
 - KTD1. Remove `removeFromOrg` from the per-classroom unenroll path entirely. `unenrollStudent` keeps cancelling a `pending` invite (R2) but no longer removes an `active` member. The `UnenrollStudentInput.removeFromOrg` field and the active-member branch of `shouldRemoveFromOrg` are deleted; the pending branch stays. This is simpler and safer than making the checkbox cross-classroom-aware: a classroom-scoped UI never owns an org-scoped decision, so there is no per-roster scan to get wrong at unenroll time. Org removal is centralized on the Members page where the full footprint is visible (KTD5).
 - KTD2. Reuse the existing roster identity and matching primitives rather than inventing new ones. Dedupe key follows `studentKey` (`github_id || username || email`, `src/util/roster.ts`); member matching follows `memberIdSet` on numeric id (`src/util/inviteStatus.ts`). This keeps the Members page's notion of "same student" and "is a member" identical to the per-classroom roster, so the two views never disagree.
-- KTD3. Build the aggregation as a pure function plus a thin react-query-composing hook. A pure `aggregateOrgMembers(members, rosters)` in a new `src/util/orgMembers.ts` takes the org member list and an array of `{ classroom, archived, students }` and returns the deduplicated, matched, classified rows. The hook `useGetOrgMembership` (new, `src/hooks/useGetOrgMembership.ts`) composes `useGetOrgMembers`, `useGetClasses`, and a fan-out of `csvFileQuery` per classroom, then calls the pure function. Purity makes the dedup/match/classify logic unit-testable without mocking react-query.
+- KTD3. Build the aggregation as a pure function plus a thin react-query-composing hook. A pure `aggregateOrgMembers(members, rosters)` in a new `src/util/orgMembers.ts` takes the org member list and an array of `{ classroom, archived, students }` and returns the deduplicated, matched, classified rows. The hook `useOrgMembersOverview` (new, `src/hooks/useOrgMembersOverview.ts`) composes the paged member list, `useGetClasses`, and a fan-out of `csvFileQuery` per classroom, then calls the pure function. (Named to avoid colliding with the existing `useGetOrgMembership` role hook.) Purity makes the dedup/match/classify logic unit-testable without mocking react-query.
 - KTD4. Page org members through all pages. `listOrgMembers(client, org, page)` already takes a page arg but `useGetOrgMembers` only fetches page 1. Add a paged variant (`listAllOrgMembers`) that loops until a short page, and have the Members aggregation use it. Leave `useGetOrgMembers` (used by the per-classroom roster, where 100 is effectively always enough and the extra requests would be wasteful) as-is to avoid a broad behavior change; the Members page opts into the paged fetch.
 - KTD5. Org removal on the Members page is a sequenced action, not a single DELETE. When a student is still on N rosters, the action first unenrolls them from each classroom (reusing `unenrollStudent` with the now-org-safe semantics — roster row + team only), then calls `removeOrgMembership`. Each per-classroom unenroll is independent; a failure on one is surfaced as a warning and does not abort the others, mirroring the warning-accumulation pattern already in `unenrollStudent`. The org DELETE runs last so a partial failure never removes the membership while leaving rosters populated.
 - KTD6. Roster reads in the aggregation tolerate per-classroom failure. A single classroom whose `students.csv` 404s or fails to parse contributes zero students and a non-fatal note, rather than failing the whole page. Aligns with the best-effort posture already used in `reconcileOnboarding`/unenroll cleanup.
@@ -186,10 +186,10 @@ U1 (unenroll mutation) and U2 (unenroll dialog) are independent of the Members p
 
 ### U5. Org membership hook
 
-- Goal: `useGetOrgMembership` composes the data sources and returns aggregated rows plus loading/availability state. Implements R6 (data side), R7, R8, R9, R10.
+- Goal: `useOrgMembersOverview` composes the data sources and returns aggregated rows plus loading/availability state. Implements R6 (data side), R7, R8, R9, R10.
 - Requirements: R7, R8, R9, R10.
 - Dependencies: U3, U4.
-- Files: `src/hooks/useGetOrgMembership.ts`.
+- Files: `src/hooks/useOrgMembersOverview.ts`.
 - Approach: Use a query for `listAllOrgMembers`, `useGetClasses(org)` for classroom dirs, and fan out `csvFileQuery<Student>` per classroom via `useQueries` (mapping each through `toStudent`, matching `useGetStudents`), reading each classroom's archived flag from its `classroom.json` (reuse the existing classroom metadata source the classes list already exposes, or fetch per classroom; implementer picks the cheaper path already cached). Tolerate per-classroom roster failure (KTD6): a failed/absent roster contributes no students. Call `aggregateOrgMembers` in a `useMemo`. Return `{ rows, isLoading, isError, notes }` where `notes` carries per-classroom read failures.
 - Patterns to follow: `useGetStudents` (`toStudent` mapping, `csvFileQuery`), `useRosterStatus` (composing multiple queries with `useMemo`), `useGetClasses`.
 - Test scenarios: Test expectation: none at the hook level (thin react-query composition); the dedupe/match/classify logic is covered by U4, paging by U3. If the repo has a hook-testing harness, add one happy-path render test asserting `rows` is populated and a failing-roster note is surfaced.
@@ -225,12 +225,12 @@ U1 (unenroll mutation) and U2 (unenroll dialog) are independent of the Members p
 
 ## Verification Contract
 
-| Gate | Command | Applies to |
-|---|---|---|
-| Unit tests | `npm run test` (vitest run) | U1, U3, U4, U7 |
-| Typecheck | `npm run typecheck` (`tsc -b`) | U2, U5, U6 (and all) |
-| Lint | `npm run lint` (`eslint .`) | all |
-| Full check | `npm run check` (`tsc -b && eslint . && prettier --check . && vitest run`) | pre-merge |
+| Gate       | Command                                                                    | Applies to           |
+| ---------- | -------------------------------------------------------------------------- | -------------------- |
+| Unit tests | `npm run test` (vitest run)                                                | U1, U3, U4, U7       |
+| Typecheck  | `npm run typecheck` (`tsc -b`)                                             | U2, U5, U6 (and all) |
+| Lint       | `npm run lint` (`eslint .`)                                                | all                  |
+| Full check | `npm run check` (`tsc -b && eslint . && prettier --check . && vitest run`) | pre-merge            |
 
 Behavioral gates:
 

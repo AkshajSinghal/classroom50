@@ -44,7 +44,10 @@ export type ClassroomRoster = {
 // Pick the better display name for the same student seen across rosters: prefer
 // a row that carries a name over one that doesn't.
 const fullName = (s: Student) =>
-  [s.first_name, s.last_name].map((part) => part.trim()).filter(Boolean).join(" ")
+  [s.first_name, s.last_name]
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(" ")
 
 // Deduplicate students across every roster (by studentKey), match each to a live
 // org member by numeric github_id, fold in org members that appear on no roster,
@@ -86,7 +89,8 @@ export function aggregateOrgMembers(
         if (!existing.github_id && student.github_id)
           existing.github_id = student.github_id
         if (!existing.email && student.email) existing.email = student.email
-        if (!existing.name && fullName(student)) existing.name = fullName(student)
+        if (!existing.name && fullName(student))
+          existing.name = fullName(student)
       } else {
         byKey.set(key, {
           key,
