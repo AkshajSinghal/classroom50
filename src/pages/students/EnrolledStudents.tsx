@@ -12,8 +12,6 @@ import {
 } from "lucide-react"
 
 import {
-  getName,
-  getInitials,
   isSameGitHubUser,
   nameFromParts,
   initialsFromParts,
@@ -719,25 +717,19 @@ const EnrolledStudents = ({
         ? formatInvitedAt(statusEntry?.invitedAt)
         : null
     const isSelf = isSameGitHubUser(viewer, student)
-    // CSV is authoritative for the displayed name; when a not-yet-enrolled row
-    // has no name on the CSV, fall back to the student's onboarding self-report
-    // so the row reads as a person rather than a bare email. Username rows pull
-    // their name from the roster (getName), email-only rows from the email.
+    // CSV is authoritative for the displayed name; when a row has no name on the
+    // CSV (common for an onboarded-but-unenrolled, email-invited student), fall
+    // back to the student's onboarding self-report so the row reads as a person
+    // rather than a bare email.
     const selfReport = statusEntry?.selfReport
-    const csvName = student.username
-      ? getName(student.username, students)
-      : nameFromParts(student.first_name, student.last_name)
     const displayName =
-      csvName ||
+      nameFromParts(student.first_name, student.last_name) ||
       nameFromParts(selfReport?.first_name, selfReport?.last_name) ||
       student.email
     const displayHandle =
       student.username || selfReport?.github_username || student.email
-    const csvInitials = student.username
-      ? getInitials(student.username, students)
-      : initialsFromParts(student.first_name, student.last_name)
     const displayInitials =
-      csvInitials ||
+      initialsFromParts(student.first_name, student.last_name) ||
       initialsFromParts(selfReport?.first_name, selfReport?.last_name) ||
       student.email[0]?.toUpperCase() ||
       "?"

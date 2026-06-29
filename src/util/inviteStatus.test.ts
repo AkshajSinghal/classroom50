@@ -123,7 +123,13 @@ describe("buildInviteStatusLookup", () => {
       [],
       [],
       [],
-      [{ github_id: "583231", email: "octocat@example.com" }],
+      [
+        {
+          github_id: "583231",
+          email: "octocat@example.com",
+          github_username: "octocat",
+        },
+      ],
     )
     expect(lookup(student({ enrollment_status: "invited" })).status).toBe(
       "ready",
@@ -149,7 +155,13 @@ describe("buildInviteStatusLookup", () => {
       [],
       [],
       [],
-      [{ github_id: "999", email: "Octocat@Example.com" }],
+      [
+        {
+          github_id: "999",
+          email: "Octocat@Example.com",
+          github_username: "octocat",
+        },
+      ],
     )
     const emailRow = student({
       username: "",
@@ -164,7 +176,13 @@ describe("buildInviteStatusLookup", () => {
       [],
       [],
       [],
-      [{ github_id: "111", email: "someone-else@example.com" }],
+      [
+        {
+          github_id: "111",
+          email: "someone-else@example.com",
+          github_username: "someone-else",
+        },
+      ],
     )
     const emailRow = student({
       username: "",
