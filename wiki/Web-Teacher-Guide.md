@@ -225,6 +225,4 @@ Once your student has accepted the assignment, they will be given a repo named `
 
 ## Viewing Submissions
 
-
-
-# Editing Classroom Settings
+Assuming you have students who have accepted the assignment, the next important puzzle piece is aggregating the submissions themselves. Scores are aggregated together rather than being done per individual student submission; teachers can choose to just allow the default nightly collection workflow to trigger, or they can trigger a manual workflow run for submission collection at any time by clicking "Collect now" at the top of the [submissions page](#viewing-and-collecting-submissions); additionally, teachers can click "View workflow" if they're interested in seeing the Actions run of the workflow in more detail.
