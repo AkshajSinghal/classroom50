@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { csvFileQuery, githubKeys } from "./github/queries"
+import { toStudent } from "@/util/roster"
 import type { Student } from "@/types/classroom"
 
 const rosterKey = (org: string, classroom: string) =>
@@ -12,14 +13,22 @@ const useGetStudents = (
   classroom: string | undefined,
 ) => {
   const client = useGitHubClient()
-  const { data: students, isLoading } = useQuery(
-    csvFileQuery<Student>(
+  // Coerce every roster row through toStudent via `select` so
+  // enrollment_status/method are narrowed to their unions (an unknown/off-list
+  // value becomes "") rather than carried verbatim from a CLI-/hand-edited
+  // students.csv — otherwise an odd value bypasses inviteStatus's branches and
+  // can mis-bucket a row (#57 sub-item 3 / #52). `select` runs on both fetched
+  // rows and optimistically-written cache entries, and toStudent is idempotent
+  // over an already-typed Student, so the optimistic-update path is unaffected.
+  const { data: students, isLoading } = useQuery({
+    ...csvFileQuery<Student>(
       client,
       org ?? "",
       "classroom50",
       `${classroom ?? ""}/students.csv`,
     ),
-  )
+    select: (rows) => rows.map((row) => toStudent(row)),
+  })
 
   return {
     students: students || [],
