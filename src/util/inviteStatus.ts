@@ -15,14 +15,15 @@ export type InviteStatus =
 // github_id/github_username are GitHub-attested; email and the names are claimed
 // by the student. The match keys (github_id/email) classify "ready"; the names
 // let the teacher roster backfill a CSV row missing first/last name before
-// enrollment is confirmed. Names are optional for back-compat with pre-name
-// payloads.
+// enrollment is confirmed. first_name/last_name are optional for back-compat
+// with pre-name payloads; github_username is always present (YAML schema
+// requires it).
 export type OnboardingSelfReport = {
   github_id: string
   email: string
+  github_username: string
   first_name?: string
   last_name?: string
-  github_username?: string
 }
 
 export type StudentInviteStatus = {

@@ -10,6 +10,7 @@ import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useSafeSubmit } from "@/hooks/useSafeSubmit"
 import { isValidEmail } from "@/util/onboarding"
 import { studentKey } from "@/util/roster"
+import { isEnrolledRow } from "@/util/students"
 import type { Student } from "@/types/classroom"
 import type { OnboardingSelfReport } from "@/util/inviteStatus"
 import type { StudentCsvRow } from "@/api/mutations/students"
@@ -63,7 +64,7 @@ const EditStudent = ({
   const [error, setError] = useState<string | null>(null)
 
   const displayHandle = student.username || student.email
-  const isEnrolled = student.enrollment_status === "enrolled"
+  const isEnrolled = isEnrolledRow(student)
   // Identity (github username/id and email) is bound by onboarding/reconcile and
   // must not be overridden by the teacher before enrollment is confirmed —
   // otherwise an edit could break the match a later reconcile relies on. An
