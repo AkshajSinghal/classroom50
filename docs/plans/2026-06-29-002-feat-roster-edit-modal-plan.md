@@ -71,12 +71,14 @@ This plan adds an `updateStudent` mutation and an Edit modal so a teacher can ed
 **In scope:** an `updateStudent` / `updateStudentWithConflictRetry` mutation; an `EditStudent` modal component; an Edit affordance wired into each rendered roster row; optimistic cache update + invite-query invalidation; email validation, duplicate-guard, archived-guard.
 
 **Out of scope (true non-goals):**
+
 - Editing `username` or `github_id` (identity is onboarding/reconcile-owned — KTD3).
 - Any `students.csv` schema change (cross-binary contract).
 - Re-sending invites or re-running reconcile as part of an edit (those remain their own row actions).
 - Bulk/inline-grid editing of multiple rows at once.
 
 ### Deferred to Follow-Up Work
+
 - Inline (non-modal) editing directly in the row.
 - An "edit username for an email-only row" escape hatch, if a real need emerges (would require self-report-matching analysis first).
 
@@ -93,10 +95,12 @@ This plan adds an `updateStudent` mutation and an Edit modal so a teacher can ed
 **Dependencies:** none.
 
 **Files:**
+
 - `src/api/mutations/students.ts` (add `UpdateStudentInput` type, `updateStudent`, `updateStudentWithConflictRetry`)
 - `src/api/mutations/students.test.ts` (or the colocated test file matching the repo's existing convention — verify the existing students test path before writing)
 
 **Approach:**
+
 - Input shape: `{ org, classroom, key: string /* studentKey of target */, patch: { first_name; last_name; email; section } }`.
 - Follow KTD2's pipeline exactly. Match the target row with a `sameRow` predicate keyed on `studentKey` (mirror the `unenrollStudent` predicate: prefer username/github_id, fall back to email). Throw a clear error if no row matches.
 - Build the next row by spreading the matched row and overwriting only the four fields (trimmed), then re-run `normalizeStudentRow`. Preserve `username`, `github_id`, `enrollment_status`, `enrollment_method`, `invite_token`, `invited_at`, `enrolled_at` from the matched row.
@@ -109,6 +113,7 @@ This plan adds an `updateStudent` mutation and an Edit modal so a teacher can ed
 **Patterns to follow:** `addEmailInviteToClassroom` (email + `emailHash` + dedupe + commit shape) and `unenrollStudent` (`sameRow` match predicate, tree/commit/updateRef) in `src/api/mutations/students.ts`; `withGitConflictRetry` / `assertClassroomNotArchived` in `src/api/mutations/classrooms.ts`.
 
 **Test scenarios:**
+
 - Editing `first_name`/`last_name`/`section` rewrites only those fields; identity + lifecycle columns are byte-for-byte preserved in the output CSV.
 - Editing `email` to a new value recomputes `email_hash` (assert it equals `emailHash(newEmail)` and differs from the old).
 - Clearing `email` sets both `email` and `email_hash` to empty.
@@ -131,9 +136,11 @@ This plan adds an `updateStudent` mutation and an Edit modal so a teacher can ed
 **Dependencies:** U1.
 
 **Files:**
+
 - `src/pages/students/EditStudent.tsx` (new)
 
 **Approach:**
+
 - Props: `{ org, classroom, student: Student, open, onClose, onSaved }` (or an internal trigger button + controlled `open` state — mirror `UnenrollStudentButton`'s self-contained `dialog` + `useEffect(showModal/close)` pattern in `EnrolledStudents.tsx`). Choose self-contained to match the sibling Unenroll button; final shape is the implementer's call.
 - Form via TanStack Form (KTD6): fields `name` is **not** used here (unlike AddStudent's combined name field) — render separate `first_name` and `last_name` inputs plus `email` and `section`, all pre-filled from `student`. Validator: email, when non-empty, must pass `isValidEmail` (reuse AddStudent's rule); otherwise no required fields (a roster row may legitimately have empty name/section).
 - Show `username`/`github_id` as read-only context (e.g., a disabled handle line) so the teacher knows which row they're editing; do not render them as editable inputs (R5).
@@ -143,6 +150,7 @@ This plan adds an `updateStudent` mutation and an Edit modal so a teacher can ed
 **Patterns to follow:** `src/pages/students/AddStudent.tsx` (TanStack Form + `revalidateLogic` + per-field error rendering); `UnenrollStudentButton` in `src/pages/students/EnrolledStudents.tsx` (self-contained `dialog`, `showModal`/`close`, submitting guard, `modal-action` buttons); `useSafeSubmit` usage convention.
 
 **Test scenarios:**
+
 - Modal pre-fills first/last/email/section from the passed `student`.
 - Submitting an invalid non-empty email shows an inline error and does not call the mutation.
 - Submitting an empty email is allowed (no required-email error).
@@ -162,9 +170,11 @@ This plan adds an `updateStudent` mutation and an Edit modal so a teacher can ed
 **Dependencies:** U2.
 
 **Files:**
+
 - `src/pages/students/EnrolledStudents.tsx`
 
 **Approach:**
+
 - In `renderStudentRow`, add an Edit button (`Pencil` from `lucide-react`) in the existing right-side action cluster, before the `UnenrollStudentButton`. Use the same icon-button styling as the Unenroll button (`btn btn-ghost btn-square`, an `aria-label` like `Edit <displayHandle>`).
 - Render `EditStudent` for the row (self-contained open state, mirroring how Unenroll manages its own dialog), so each row owns its modal.
 - On `onSaved(updatedRow)`: optimistically patch the cached roster via the existing `updateRosterCache` — replace the row whose `studentKey` matches `studentKey(student)` with `toStudent(updatedRow)` (the `studentKey` is stable across the edit per KTD1/KTD3). Then `invalidateInviteQueries()` (an email/name change can affect invite display, and keeps parity with the other row actions).
@@ -173,6 +183,7 @@ This plan adds an `updateStudent` mutation and an Edit modal so a teacher can ed
 **Patterns to follow:** the `UnenrollStudentButton` wiring in `renderStudentRow` (`onRemoveStudent` → `updateRosterCache(removeFromRoster(...))` + `invalidateInviteQueries()`); `updateRosterCache`/`toStudent` usage already imported in this file and in `StudentListPage.tsx`.
 
 **Test scenarios:**
+
 - `Test expectation: none -- wiring/JSX only; behavior is covered by U1 (mutation) and U2 (modal).` If the repo has a render test harness for `EnrolledStudents`, add one assertion that each rendered row exposes an `Edit <handle>` control; otherwise rely on the manual verification below.
 
 **Verification:** Every row in Ready / Awaiting / Enrolled shows an Edit button; clicking opens the pre-filled modal; saving updates the row in place with no flash of stale data and the change survives a refresh.
