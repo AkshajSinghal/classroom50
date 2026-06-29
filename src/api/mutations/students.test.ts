@@ -613,6 +613,25 @@ describe("updateStudent — edit a roster row's teacher-facing fields in place (
     expect(committed.content).toBeNull()
   })
 
+  it("rejects clearing the email of an email-only row (would drop it from the roster)", async () => {
+    const { client, committed } = makeClient({ startingCsv: HEADER + bobRow })
+
+    await expect(
+      updateStudent(client, {
+        org: "acme",
+        classroom: "cs101",
+        key: "bob@x.edu",
+        patch: {
+          first_name: "Bob",
+          last_name: "B",
+          email: "   ", // trims to empty -> would leave the row keyless
+          section: "",
+        },
+      }),
+    ).rejects.toThrow(/only identifier|remove them from the roster/i)
+    expect(committed.content).toBeNull()
+  })
+
   it("preserves the canonical column order and drops no other rows", async () => {
     const { client, committed } = makeClient({
       startingCsv: HEADER + aliceRow + bobRow,
