@@ -1,8 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useState } from "react"
 import {
   CheckCircle2,
+  ChevronRight,
+  ChevronUp,
   ExternalLink,
-  Info,
   TriangleAlert,
   XCircle,
 } from "lucide-react"
@@ -21,6 +23,7 @@ import type {
 } from "@/orgPolicy/audit"
 import { REPAIRABLE_CONCERNS, repairConcern } from "@/orgPolicy/repair"
 import type { CheckState } from "@/hooks/github/orgChecks"
+import SettingsSection from "./SettingsSection"
 
 // Org policy audit pane: surfaces every org/repo policy concern with its live
 // drift verdict, the unenforced member-default fields (each with its manual
@@ -138,6 +141,7 @@ function AuditBody({
 }) {
   const banner = VERDICT_BANNER[report.verdict]
   const { Icon } = banner
+  const [showPermissions, setShowPermissions] = useState(false)
 
   return (
     <>
@@ -156,6 +160,13 @@ function AuditBody({
               your access and retry.
             </p>
           )}
+          {report.readOk && report.verdict !== "ok" && (
+            <p className="mt-1 text-base-content/70">
+              {canFix
+                ? "Use “Fix it” on a drifted setting, or re-run setup below to re-apply everything at once."
+                : "Ask an organization owner to repair the drift — these changes require owner permissions."}
+            </p>
+          )}
         </div>
       </div>
 
@@ -171,61 +182,91 @@ function AuditBody({
         ))}
       </div>
 
-      {report.defaultVerdicts.length > 0 && (
+      {report.manualUnreadable.length > 0 && (
         <div className="mt-6">
-          <h3 className="text-sm font-semibold">
-            Member permissions we configure
-          </h3>
+          <h3 className="text-sm font-semibold">Confirm by hand</h3>
           <p className="mt-1 text-xs text-base-content/50">
-            The organization member privileges Classroom 50 sets on your behalf,
-            and whether each currently matches.
+            GitHub exposes no API to read these settings, so we can&apos;t
+            verify them automatically — confirm each one on the member
+            privileges page.
           </p>
-          <ul className="mt-2 space-y-1 text-sm">
-            {report.defaultVerdicts.map((v) => (
-              <li
-                key={v.setting.field}
-                className="flex items-start justify-between gap-3"
+          <div className="mt-2 grid gap-2">
+            {report.manualUnreadable.map((step) => (
+              <div
+                key={step.setting}
+                className="flex items-start justify-between gap-4 rounded-lg border border-warning/40 bg-warning/5 p-3"
               >
-                <span className="text-base-content/70">
-                  {v.setting.desc}
-                  {!v.enforced && v.setting.manualFix && (
-                    <span className="text-base-content/40">
-                      {" "}
-                      — {v.setting.manualFix}
-                    </span>
-                  )}
+                <div className="min-w-0">
+                  <div className="text-sm text-base-content/80">
+                    {step.setting}
+                  </div>
+                  <a
+                    href={step.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-1 inline-flex items-center gap-1 text-xs text-base-content/50 hover:text-primary"
+                  >
+                    View on GitHub
+                    <ExternalLink className="size-3" />
+                  </a>
+                </div>
+                <span className="badge badge-warning badge-soft shrink-0">
+                  Confirm manually
                 </span>
-                {v.enforced ? (
-                  <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />
-                ) : (
-                  <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning" />
-                )}
-              </li>
+              </div>
             ))}
-          </ul>
+          </div>
         </div>
       )}
 
-      <div className="mt-4">
-        <h3 className="text-sm font-semibold">Confirm by hand</h3>
-        <p className="mt-1 text-xs text-base-content/50">
-          These settings have no API to read; confirm them on the{" "}
-          <a
-            href={report.settingsUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="link"
+      {report.defaultVerdicts.length > 0 && (
+        <div className="mt-6">
+          <button
+            type="button"
+            className="flex items-center gap-1 text-sm font-semibold hover:text-primary"
+            aria-expanded={showPermissions}
+            onClick={() => setShowPermissions((open) => !open)}
           >
-            member privileges page
-          </a>
-          .
-        </p>
-        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-base-content/70">
-          {report.manualUnreadable.map((step) => (
-            <li key={step.setting}>{step.setting}</li>
-          ))}
-        </ul>
-      </div>
+            {showPermissions ? (
+              <ChevronUp className="size-4" />
+            ) : (
+              <ChevronRight className="size-4" />
+            )}
+            Member permissions we configure
+          </button>
+          {showPermissions && (
+            <>
+              <p className="mt-1 text-xs text-base-content/50">
+                The organization member privileges Classroom 50 sets on your
+                behalf, and whether each currently matches.
+              </p>
+              <ul className="mt-2 space-y-1 text-sm">
+                {report.defaultVerdicts.map((v) => (
+                  <li
+                    key={v.setting.field}
+                    className="flex items-start justify-between gap-3"
+                  >
+                    <span className="text-base-content/70">
+                      {v.setting.desc}
+                      {!v.enforced && v.setting.manualFix && (
+                        <span className="text-base-content/40">
+                          {" "}
+                          — {v.setting.manualFix}
+                        </span>
+                      )}
+                    </span>
+                    {v.enforced ? (
+                      <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />
+                    ) : (
+                      <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning" />
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
     </>
   )
 }
@@ -260,15 +301,10 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
     : null
 
   return (
-    <section className="mt-8 rounded-2xl border border-base-300 bg-base-100 p-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-semibold">Organization policy</h2>
-          <p className="mt-1 text-sm text-base-content/60">
-            What Classroom 50 configures on your behalf, and whether anything
-            has drifted from the expected lockdown.
-          </p>
-        </div>
+    <SettingsSection
+      title="Organization policy"
+      description="What Classroom 50 configures on your behalf, and whether anything has drifted from the expected lockdown."
+      action={
         <button
           type="button"
           className="btn btn-sm btn-ghost"
@@ -281,17 +317,17 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
         >
           Re-check
         </button>
-      </div>
-
+      }
+    >
       {isLoading && (
-        <div className="mt-4 flex items-center gap-2 text-sm text-base-content/60">
+        <div className="flex items-center gap-2 text-sm text-base-content/60">
           <span className="loading loading-spinner loading-sm" />
           Auditing organization policy…
         </div>
       )}
 
       {isError && (
-        <div className="mt-4 flex items-start gap-2 rounded-lg border border-error/30 bg-error/10 p-3 text-sm text-error">
+        <div className="flex items-start gap-2 rounded-lg border border-error/30 bg-error/10 p-3 text-sm text-error">
           <TriangleAlert className="mt-0.5 size-4 shrink-0" />
           <span>Couldn&apos;t run the policy audit. Try re-checking.</span>
         </div>
@@ -318,19 +354,7 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
           }}
         />
       )}
-
-      <div className="mt-6 flex items-start gap-3 rounded-xl border border-info/30 bg-info/10 p-4 text-sm">
-        <Info className="mt-0.5 size-5 shrink-0 text-info" />
-        <div>
-          <p className="font-semibold text-base-content">Repairing drift</p>
-          <p className="mt-1 text-base-content/70">
-            {isOwner
-              ? "Re-run setup below to re-apply the full lockdown, rulesets, and repo settings."
-              : "Ask an organization owner to re-run setup to re-apply the lockdown — these changes require owner permissions."}
-          </p>
-        </div>
-      </div>
-    </section>
+    </SettingsSection>
   )
 }
 
