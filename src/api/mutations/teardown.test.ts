@@ -219,6 +219,55 @@ describe("executeTeardown", () => {
     expect(result.deleted).not.toContain("classroom50")
   })
 
+  it("re-enumerates at execution so a repo created after planning is still deleted", async () => {
+    // The plan is captured when the modal opens; a repo can be created during
+    // the type-to-confirm pause. executeTeardown must re-list, not trust it.
+    const deletes: string[] = []
+    let listCalls = 0
+    const request = vi
+      .fn()
+      .mockImplementation((path: string, options?: { method?: string }) => {
+        const method = options?.method ?? "GET"
+        if (method === "GET" && /\/repos\/[^/]+\/classroom50$/.test(path)) {
+          return Promise.resolve({ name: "classroom50" })
+        }
+        if (
+          method === "GET" &&
+          path.includes("/orgs/") &&
+          path.includes("/repos")
+        ) {
+          listCalls++
+          // planTeardown sees one repo; by execution a second has appeared.
+          const repos =
+            listCalls === 1
+              ? ["classroom50", "cs101-hw1-alice"]
+              : ["classroom50", "cs101-hw1-alice", "cs101-hw1-late"]
+          return Promise.resolve(repos.map((name) => ({ name })))
+        }
+        if (method === "DELETE") {
+          deletes.push(path.split("/").pop() ?? "")
+          return Promise.resolve(undefined)
+        }
+        return Promise.reject(new Error(`unexpected: ${method} ${path}`))
+      })
+    const client: GitHubClient = {
+      request: request as unknown as GitHubClient["request"],
+      requestRaw: () => Promise.reject(new Error("unexpected requestRaw")),
+    }
+    const plan = await planTeardown(client, "acme")
+    expect(plan.repoNames).not.toContain("cs101-hw1-late")
+    const result = await executeTeardown(client, plan)
+    // The repo created after planning is deleted, and the marker is still last.
+    expect(result.deleted).toEqual(
+      expect.arrayContaining([
+        "cs101-hw1-alice",
+        "cs101-hw1-late",
+        "classroom50",
+      ]),
+    )
+    expect(deletes[deletes.length - 1]).toBe("classroom50")
+  })
+
   it("retries a transient delete failure and recovers", async () => {
     // First DELETE on the repo fails transiently (500), the retry succeeds.
     let aliceAttempts = 0

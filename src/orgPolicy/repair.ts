@@ -31,10 +31,10 @@ export const REPAIRABLE_CONCERNS: ReadonlySet<ConcernId> = new Set<ConcernId>([
   "rulesets",
 ])
 
-// Result of a repair attempt. `unfixableFields` lists member-default fields
-// that were written but did not stick on read-back — i.e. silently overridden
-// by an enterprise-level policy (GitHub returns 200 but ignores the change).
-// Only populated for the orgDefaults concern.
+// Result of a repair attempt. `unfixableFields` lists member-default fields the
+// API accepted but that didn't stick on read-back — silently overridden by an
+// enterprise policy (200 but ignored). Plan-gated fields the API rejected
+// (403/422) are excluded. Only populated for the orgDefaults concern.
 export type RepairResult = {
   unfixableFields: string[]
 }
@@ -50,7 +50,7 @@ export async function repairConcern(
   switch (id) {
     case "orgDefaults": {
       const result = await repairOrgDefaults(client, org, plan)
-      return { unfixableFields: result.unenforced.map((s) => s.field) }
+      return { unfixableFields: result.enterprisePinned.map((s) => s.field) }
     }
     case "orgActions":
       await ensureOrgActionsEnabled(client, org)

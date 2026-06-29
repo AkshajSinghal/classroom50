@@ -120,6 +120,11 @@ async function deleteRepoWithRetry(
 // surfaces TeardownScopeError; a rate-limit 403 surfaces a retryable
 // TeardownRateLimitError. The marker is deleted only when every non-marker
 // delete succeeded, so a partial failure stays re-runnable.
+//
+// The repo set is re-enumerated here, not taken from plan.repoNames: the plan
+// is captured when the confirm modal opens, but a repo can be created during
+// the type-to-confirm pause. Re-listing keeps the "delete every repo"
+// guarantee against the live org and re-checks the marker gate.
 export async function executeTeardown(
   client: GitHubClient,
   plan: TeardownPlan,
@@ -127,10 +132,9 @@ export async function executeTeardown(
   const deleted: string[] = []
   const failed: string[] = []
 
-  // Delete non-marker repos with bounded concurrency, then the marker alone so
-  // it is genuinely last regardless of scheduling.
-  const nonMarker = plan.repoNames.filter((n) => n !== CONFIG_REPO)
-  const marker = plan.repoNames.filter((n) => n === CONFIG_REPO)
+  const current = await planTeardown(client, plan.org)
+  const nonMarker = current.repoNames.filter((n) => n !== CONFIG_REPO)
+  const marker = current.repoNames.filter((n) => n === CONFIG_REPO)
 
   let scopeWall = false
   let rateLimited = false

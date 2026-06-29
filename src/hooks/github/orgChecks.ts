@@ -231,6 +231,10 @@ export type OrgDefaultsRepairResult = {
   // The unenforced settings after the authoritative read-back, each carrying
   // its manualFix for the settings page / wizard checklist.
   unenforced: MemberDefaultSetting[]
+  // Fields the API accepted (200, no 403/422) yet that still didn't stick on
+  // read-back — silently overridden by an enterprise policy. A subset of
+  // `unenforced`, excluding plan-gated fields the API rejected.
+  enterprisePinned: MemberDefaultSetting[]
   message: string
 }
 
@@ -282,6 +286,10 @@ export async function repairOrgDefaults(
 ): Promise<OrgDefaultsRepairResult> {
   const settings = memberDefaultSettings(plan)
 
+  // Fields the API rejected (403/422) in the per-field fallback — plan-gated,
+  // not enterprise silent no-ops. Empty when the combined PATCH succeeded.
+  let rejected = new Set<string>()
+
   try {
     await client.request(`/orgs/${org}`, {
       method: "PATCH",
@@ -293,6 +301,7 @@ export async function repairOrgDefaults(
         ok: false,
         transient: true,
         unenforced: [],
+        enterprisePinned: [],
         message: `${org}: hit a rate limit applying org member defaults; retry shortly.`,
       }
     }
@@ -301,11 +310,13 @@ export async function repairOrgDefaults(
       (err.status === 403 || err.status === 422)
     ) {
       const fallback = await repairOrgDefaultsPerField(client, org, settings)
+      rejected = fallback.rejected
       if (fallback.transient) {
         return {
           ok: false,
           transient: true,
           unenforced: [],
+          enterprisePinned: [],
           message: `${org}: hit a rate limit applying org member defaults; retry shortly.`,
         }
       }
@@ -325,13 +336,18 @@ export async function repairOrgDefaults(
       ok: false,
       transient: true,
       unenforced: [],
+      enterprisePinned: [],
       message: `${org}: applied org member defaults but could not verify them (read-back failed); re-check shortly.`,
     }
   }
+  // A field still unenforced after an accepted write (not API-rejected) is the
+  // enterprise silent-no-op signal — GitHub returned 200 but ignored it.
+  const enterprisePinned = unenforced.filter((s) => !rejected.has(s.field))
   return {
     ok,
     transient: false,
     unenforced,
+    enterprisePinned,
     message: ok
       ? `${org}: org member-privilege lockdown applied.`
       : `${org}: org member-privilege lockdown incomplete — ${unenforced.length} setting(s) need manual attention.`,
@@ -355,18 +371,30 @@ const REPO_CREATION_FIELDS = new Set([
 // sub-PATCH. A 403/422 on a field is a plan-gated rejection — skip it; a
 // rate-limit aborts. The contract is intentionally narrow — it only signals
 // whether a rate limit aborted; verifyOrgDefaults produces the actual verdict.
+// Per-field fallback for when the combined PATCH is rejected. Sends each field
+// alone EXCEPT the entangled repo-creation booleans, which go in one grouped
+// sub-PATCH. Records fields the API rejected (403/422) — plan-gated, not
+// enterprise no-ops; a rate limit aborts. verifyOrgDefaults gives the drift
+// verdict.
 async function repairOrgDefaultsPerField(
   client: GitHubClient,
   org: string,
   settings: MemberDefaultSetting[],
-): Promise<{ transient: boolean }> {
-  const rateLimitAbort = (): { transient: boolean } => ({ transient: true })
+): Promise<{ transient: boolean; rejected: Set<string> }> {
+  const rejected = new Set<string>()
+  const rateLimitAbort = (): { transient: boolean; rejected: Set<string> } => ({
+    transient: true,
+    rejected,
+  })
 
   // One grouped body for the entangled repo-creation booleans (in scope for
   // this plan), plus the remaining fields applied individually.
   const repoCreation = settings.filter((s) => REPO_CREATION_FIELDS.has(s.field))
   const rest = settings.filter((s) => !REPO_CREATION_FIELDS.has(s.field))
 
+  // Returns whether the write was accepted. Only a rate limit throws — never
+  // rethrow other errors, or a mid-loop throw would escape repairOrgDefaults
+  // before the authoritative read-back runs.
   const patchBody = async (body: Record<string, unknown>): Promise<boolean> => {
     try {
       await client.request(`/orgs/${org}`, { method: "PATCH", body })
@@ -375,22 +403,18 @@ async function repairOrgDefaultsPerField(
       if (err instanceof GitHubAPIError && err.isRateLimited) {
         throw err // bubble to the abort handler below
       }
-      if (
-        err instanceof GitHubAPIError &&
-        (err.status === 403 || err.status === 422)
-      ) {
-        return false // plan-gated rejection; read-back reports residual state
-      }
-      throw err
+      return false
     }
   }
 
   try {
     if (repoCreation.length > 0) {
-      await patchBody(orgDefaultsBody(repoCreation))
+      const accepted = await patchBody(orgDefaultsBody(repoCreation))
+      if (!accepted) for (const s of repoCreation) rejected.add(s.field)
     }
     for (const s of rest) {
-      await patchBody({ [s.field]: s.value })
+      const accepted = await patchBody({ [s.field]: s.value })
+      if (!accepted) rejected.add(s.field)
     }
   } catch (err) {
     if (err instanceof GitHubAPIError && err.isRateLimited) {
@@ -399,5 +423,5 @@ async function repairOrgDefaultsPerField(
     throw err
   }
 
-  return { transient: false }
+  return { transient: false, rejected }
 }

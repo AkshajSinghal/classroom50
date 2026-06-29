@@ -242,4 +242,51 @@ describe("repairOrgDefaults", () => {
     expect(result.transient).toBe(true)
     expect(result.unenforced).toHaveLength(0)
   })
+
+  it("still reaches the read-back when a per-field PATCH fails with a non-403/422 error", async () => {
+    // A 5xx on one fallback field must not escape before the read-back, or the
+    // caller gets a bare exception with no residual-state report.
+    const live = enforced("team")
+    live.members_can_delete_issues = true // stays drifted (the 500'd field)
+    const { client } = makeClient({
+      combinedPatch: () => Promise.reject(httpError(422)),
+      perField: {
+        members_can_delete_issues: () => Promise.reject(httpError(500)),
+      },
+      readback: live,
+    })
+    const result = await repairOrgDefaults(client, "acme", "team")
+    // Resolved (not thrown), with read-back-derived residual state.
+    expect(result.transient).toBe(false)
+    expect(result.ok).toBe(false)
+    expect(result.unenforced.map((s) => s.field)).toContain(
+      "members_can_delete_issues",
+    )
+  })
+
+  it("marks only API-accepted-but-unstuck fields as enterprise-pinned, not API-rejected ones", async () => {
+    const live = enforced("team")
+    // One field the API REJECTED per-field (422) and one the API ACCEPTED
+    // (no per-field handler -> resolves) yet that did not stick on read-back.
+    live.members_can_delete_repositories = true // rejected (422) -> NOT pinned
+    live.members_can_change_repo_visibility = true // accepted but ignored -> pinned
+    const { client } = makeClient({
+      combinedPatch: () => Promise.reject(httpError(422)),
+      perField: {
+        members_can_delete_repositories: () => Promise.reject(httpError(422)),
+      },
+      readback: live,
+    })
+    const result = await repairOrgDefaults(client, "acme", "team")
+    const pinned = result.enterprisePinned.map((s) => s.field)
+    expect(pinned).toContain("members_can_change_repo_visibility")
+    expect(pinned).not.toContain("members_can_delete_repositories")
+    // Both are still reported as unenforced for the full drift checklist.
+    expect(result.unenforced.map((s) => s.field)).toEqual(
+      expect.arrayContaining([
+        "members_can_delete_repositories",
+        "members_can_change_repo_visibility",
+      ]),
+    )
+  })
 })
