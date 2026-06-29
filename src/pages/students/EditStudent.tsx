@@ -201,45 +201,48 @@ const EditStudent = ({
             </form.Field>
 
             <form.Field name="email">
-              {(field) => (
-                <div>
-                  <div className="flex items-center">
-                    <Mail className="size-6 mr-2 text-[#bbb]" />
-                    <input
-                      id={field.name}
-                      name={field.name}
-                      type="email"
-                      placeholder="student@university.edu"
-                      className="input w-full"
-                      value={field.state.value}
-                      readOnly={emailLocked}
-                      disabled={emailLocked}
-                      onBlur={field.handleBlur}
-                      onChange={(e) => field.handleChange(e.target.value)}
-                    />
+              {(field) => {
+                const emailChangedWhileEnrolled =
+                  isEnrolled &&
+                  field.state.value.trim().toLowerCase() !==
+                    (student.email ?? "").trim().toLowerCase()
+                return (
+                  <div>
+                    <div className="flex items-center">
+                      <Mail className="size-6 mr-2 text-[#bbb]" />
+                      <input
+                        id={field.name}
+                        name={field.name}
+                        type="email"
+                        placeholder="student@university.edu"
+                        className="input w-full"
+                        value={field.state.value}
+                        disabled={emailLocked}
+                        onBlur={field.handleBlur}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                      />
+                    </div>
+                    {field.state.meta.errors.length > 0 && (
+                      <p className="text-error text-sm mt-1">
+                        {String(field.state.meta.errors[0] ?? "")}
+                      </p>
+                    )}
+                    {emailLocked ? (
+                      <p className="mt-1 text-xs text-base-content/60">
+                        This student has no GitHub identity yet, so their email
+                        is their only identifier and can&apos;t be changed here.
+                        Unenroll and re-add them to change it.
+                      </p>
+                    ) : emailChangedWhileEnrolled ? (
+                      <p className="mt-1 text-xs text-base-content/60">
+                        This student is already enrolled. Changing their email
+                        won&apos;t re-bind their confirmed GitHub identity; it
+                        only affects future email-based matching.
+                      </p>
+                    ) : null}
                   </div>
-                  {field.state.meta.errors.length > 0 && (
-                    <p className="text-error text-sm mt-1">
-                      {String(field.state.meta.errors[0] ?? "")}
-                    </p>
-                  )}
-                  {emailLocked ? (
-                    <p className="mt-1 text-xs text-base-content/60">
-                      This student has no GitHub identity yet, so their email is
-                      their only identifier and can&apos;t be changed here.
-                      Unenroll and re-add them to change it.
-                    </p>
-                  ) : isEnrolled &&
-                    field.state.value.trim().toLowerCase() !==
-                      (student.email ?? "").trim().toLowerCase() ? (
-                    <p className="mt-1 text-xs text-base-content/60">
-                      This student is already enrolled. Changing their email
-                      won&apos;t re-bind their confirmed GitHub identity; it
-                      only affects future email-based matching.
-                    </p>
-                  ) : null}
-                </div>
-              )}
+                )
+              }}
             </form.Field>
 
             <form.Field name="section">

@@ -8,18 +8,23 @@ import type { Student } from "@/types/classroom"
 const rosterKey = (org: string, classroom: string) =>
   githubKeys.csvFile(org, "classroom50", `${classroom}/students.csv`)
 
+// Module-level so the reference is stable: react-query memoizes a `select`
+// result only while the selector identity is unchanged, so an inline arrow
+// would re-map (and re-allocate the roster array) on every render, breaking
+// referential stability for downstream useMemo/partition deps.
+const selectStudents = (rows: Student[]): Student[] => rows.map(toStudent)
+
 const useGetStudents = (
   org: string | undefined,
   classroom: string | undefined,
 ) => {
   const client = useGitHubClient()
-  // Coerce every roster row through toStudent via `select` so
-  // enrollment_status/method are narrowed to their unions (an unknown/off-list
-  // value becomes "") rather than carried verbatim from a CLI-/hand-edited
-  // students.csv — otherwise an odd value bypasses inviteStatus's branches and
-  // can mis-bucket a row (#57 sub-item 3 / #52). `select` runs on both fetched
-  // rows and optimistically-written cache entries, and toStudent is idempotent
-  // over an already-typed Student, so the optimistic-update path is unaffected.
+  // Coerce every roster row through toStudent so enrollment_status/method are
+  // narrowed to their unions (an unknown/off-list value becomes "") rather than
+  // carried verbatim from a CLI-/hand-edited students.csv — otherwise an odd
+  // value bypasses inviteStatus's branches and can mis-bucket a row (#57/#52).
+  // toStudent is idempotent over an already-typed Student, so optimistic cache
+  // writes pass through unchanged.
   const { data: students, isLoading } = useQuery({
     ...csvFileQuery<Student>(
       client,
@@ -27,7 +32,7 @@ const useGetStudents = (
       "classroom50",
       `${classroom ?? ""}/students.csv`,
     ),
-    select: (rows) => rows.map((row) => toStudent(row)),
+    select: selectStudents,
   })
 
   return {
