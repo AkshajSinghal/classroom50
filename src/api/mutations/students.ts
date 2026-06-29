@@ -2038,6 +2038,18 @@ export async function updateStudent(
   const nextEmail = patch.email.trim()
   const emailChanged = nextEmail.toLowerCase() !== existing.email.toLowerCase()
 
+  // An email-only row (no username, no github_id) is identified solely by its
+  // email. Clearing it would leave the row with no key, and stringifyStudentsCsv
+  // drops keyless rows — so the student would silently vanish from the roster on
+  // write. Refuse rather than destroy the row (#74).
+  if (!nextEmail && !existing.username && !existing.github_id) {
+    throw new Error(
+      "Can't clear the email: this student has no GitHub username or id, so " +
+        "the email is their only identifier. Clearing it would remove them " +
+        "from the roster — unenroll them instead if that's the intent.",
+    )
+  }
+
   // Guard against editing an email into one already held by ANOTHER row
   // (case-insensitive). The target row matching its own current email is fine.
   if (nextEmail) {
