@@ -50,25 +50,39 @@ export const parseGitHubId = (githubId: string): number | null => {
 export const getName = (key: string, students: Student[]) => {
   const student = findByUsername(key, students)
   if (!student) return ""
+  return nameFromParts(student.first_name, student.last_name)
+}
 
-  const { first_name, last_name } = student
-
-  if (!first_name && !last_name) {
-    return ""
-  }
-
-  if (!first_name) return capitalize(last_name)
-  if (!last_name) return capitalize(first_name)
-
-  return `${capitalize(first_name)} ${capitalize(last_name)}`
+// Display name from self-reported names (onboarding YAML). CSV stays
+// authoritative; callers use this only to fill a row that has no CSV name yet.
+// Empty when neither name is present.
+export const nameFromParts = (
+  firstName?: string,
+  lastName?: string,
+): string => {
+  const first = firstName?.trim() ?? ""
+  const last = lastName?.trim() ?? ""
+  if (!first && !last) return ""
+  if (!first) return capitalize(last)
+  if (!last) return capitalize(first)
+  return `${capitalize(first)} ${capitalize(last)}`
 }
 
 export const getInitials = (key: string, students: Student[]) => {
   const student = findByUsername(key, students)
   if (!student) return ""
-  const { first_name, last_name } = student
+  return initialsFromParts(student.first_name, student.last_name)
+}
 
-  return `${capitalize(first_name.slice(0, 1)) + capitalize(last_name.slice(0, 1))}`
+// Avatar initials from self-reported names, mirroring getInitials. Empty when
+// neither name is present.
+export const initialsFromParts = (
+  firstName?: string,
+  lastName?: string,
+): string => {
+  const first = capitalize((firstName ?? "").trim().slice(0, 1))
+  const last = capitalize((lastName ?? "").trim().slice(0, 1))
+  return `${first}${last}`
 }
 
 // A student's section by username, or "" if unknown/unset.

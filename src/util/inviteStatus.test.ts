@@ -130,6 +130,20 @@ describe("buildInviteStatusLookup", () => {
     )
   })
 
+  it("surfaces the matched onboarding self-report on a 'ready' row", () => {
+    const report = {
+      github_id: "583231",
+      email: "octocat@example.com",
+      first_name: "Mona",
+      last_name: "Lisa",
+      github_username: "octocat",
+    }
+    const lookup = buildInviteStatusLookup([], [], [], [report])
+    const result = lookup(student({ enrollment_status: "invited" }))
+    expect(result.status).toBe("ready")
+    expect(result.selfReport).toEqual(report)
+  })
+
   it("classifies an email-invited row (no github_id) as 'ready' when a report matches by email", () => {
     const lookup = buildInviteStatusLookup(
       [],
