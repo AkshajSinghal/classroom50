@@ -143,6 +143,12 @@ export type TeardownResult = {
   teamsDeleted: string[]
   // Team slugs that could not be deleted (run stays re-runnable).
   teamsFailed: string[]
+  // Whether the marker repo (classroom50) was deleted this run. False means it
+  // was retained because something recoverable failed, so the org is still
+  // re-runnable; true means teardown completed the marker and a re-run would
+  // refuse on the now-missing marker (any leftover teams must be removed by
+  // hand). The UI's remedy message keys off this.
+  markerDeleted: boolean
 }
 
 const MAX_DELETE_ATTEMPTS = 4
@@ -150,72 +156,68 @@ const MAX_DELETE_ATTEMPTS = 4
 const DELETE_SCOPE_MESSAGE =
   "Deleting repositories was forbidden (403). Teardown needs the `delete_repo` OAuth scope, which is not granted by default. Re-authenticate with that scope, or archive repositories instead."
 
-type DeleteOutcome = "deleted" | "rate-limited" | "failed"
+// "1 repository" / "3 repositories" — count + correctly-pluralized noun.
+function countLabel(count: number, singular: string, plural: string): string {
+  return `${count} ${count === 1 ? singular : plural}`
+}
 
-// Delete one repo, retrying transient failures (rate limits, 5xx) with
-// exponential backoff + jitter, honoring Retry-After. A scope 403 (not a rate
-// limit) is unretryable and rethrown so the caller can surface the scope wall.
-async function deleteRepoWithRetry(
-  client: GitHubClient,
-  org: string,
-  repo: string,
+// Terminal disposition of a bounded-retry delete:
+//  - "deleted": gone (or already gone via 404).
+//  - "rate-limited": exhausted retries while throttled — recoverable, retry later.
+//  - "transient-failed": exhausted retries on a non-throttle transient error
+//    (e.g. 5xx) — recoverable, a re-run may succeed.
+//  - "permanent-failed": an unretryable refusal a re-run will repeat forever
+//    (a reused-slug id mismatch, or a scope 403 a caller chose not to rethrow).
+type DeleteOutcome =
+  | "deleted"
+  | "rate-limited"
+  | "transient-failed"
+  | "permanent-failed"
+
+// How withDeleteRetry should treat an error that is not a rate limit:
+//  - "rethrow": propagate it now (the caller surfaces a scope wall).
+//  - "permanent": stop retrying and report "permanent-failed".
+//  - null: treat as transient and keep retrying.
+type UnretryableDisposition = "rethrow" | "permanent" | null
+
+// Shared bounded-retry loop for destructive deletes (repos and teams). Owns the
+// attempt count, exponential backoff + jitter, and Retry-After honoring; the
+// only per-caller policy is `classifyUnretryable`, which decides what to do
+// with a non-rate-limit error. Factored out so the repo and team delete paths
+// can't drift in their backoff/retry behavior.
+async function withDeleteRetry(
+  deleteFn: () => Promise<void>,
+  classifyUnretryable: (err: GitHubAPIError) => Exclude<
+    UnretryableDisposition,
+    null
+  > | null,
 ): Promise<DeleteOutcome> {
   let lastWasRateLimit = false
   for (let attempt = 0; attempt < MAX_DELETE_ATTEMPTS; attempt++) {
     try {
-      await deleteRepo(client, { owner: org, repo })
+      await deleteFn()
       return "deleted"
     } catch (err) {
       const isRateLimited = err instanceof GitHubAPIError && err.isRateLimited
       lastWasRateLimit = isRateLimited
-      // A scope 403 (forbidden but not a rate limit) will never succeed on
-      // retry — rethrow immediately so the caller surfaces the scope wall.
-      if (err instanceof GitHubAPIError && err.isForbidden && !isRateLimited) {
-        throw err
+
+      // A non-GitHubAPIError (e.g. the id-mismatch guard) can never succeed on
+      // retry: it's a permanent refusal.
+      if (!(err instanceof GitHubAPIError)) return "permanent-failed"
+
+      if (!isRateLimited) {
+        const disposition = classifyUnretryable(err)
+        if (disposition === "rethrow") throw err
+        if (disposition === "permanent") return "permanent-failed"
       }
+
       const isLastAttempt = attempt === MAX_DELETE_ATTEMPTS - 1
-      if (isLastAttempt) return isRateLimited ? "rate-limited" : "failed"
+      if (isLastAttempt) {
+        return isRateLimited ? "rate-limited" : "transient-failed"
+      }
 
       // Back off before retrying: honor Retry-After when present, else
       // exponential backoff with jitter capped at ~8s.
-      const retryAfterMs =
-        err instanceof GitHubAPIError && err.rateLimit.retryAfter !== null
-          ? err.rateLimit.retryAfter * 1000
-          : 0
-      const backoffMs = Math.min(8000, 500 * 2 ** attempt)
-      const jitterMs = Math.floor(Math.random() * 250)
-      await sleep(Math.max(retryAfterMs, backoffMs) + jitterMs)
-    }
-  }
-  return lastWasRateLimit ? "rate-limited" : "failed"
-}
-
-// Delete one classroom team (by its persisted { id, slug }), retrying transient
-// failures the same way repo deletes do. Uses deleteClassroomTeam, which
-// confirms the live team's id matches the persisted id before deleting (so a
-// reused slug isn't clobbered) and treats 404 as already-gone. A scope/
-// permission 403 or an id mismatch is unretryable: it's recorded as failed
-// without spinning on retries.
-async function deleteClassroomTeamWithRetry(
-  client: GitHubClient,
-  org: string,
-  team: ClassroomTeamRef,
-): Promise<DeleteOutcome> {
-  let lastWasRateLimit = false
-  for (let attempt = 0; attempt < MAX_DELETE_ATTEMPTS; attempt++) {
-    try {
-      await deleteClassroomTeam(client, org, team)
-      return "deleted"
-    } catch (err) {
-      const isRateLimited = err instanceof GitHubAPIError && err.isRateLimited
-      lastWasRateLimit = isRateLimited
-      // A scope 403 (forbidden, not a rate limit) or a non-API error (id
-      // mismatch guard) won't succeed on retry — record it and stop.
-      if (!(err instanceof GitHubAPIError)) return "failed"
-      if (err.isForbidden && !isRateLimited) return "failed"
-      const isLastAttempt = attempt === MAX_DELETE_ATTEMPTS - 1
-      if (isLastAttempt) return isRateLimited ? "rate-limited" : "failed"
-
       const retryAfterMs =
         err.rateLimit.retryAfter !== null ? err.rateLimit.retryAfter * 1000 : 0
       const backoffMs = Math.min(8000, 500 * 2 ** attempt)
@@ -223,16 +225,49 @@ async function deleteClassroomTeamWithRetry(
       await sleep(Math.max(retryAfterMs, backoffMs) + jitterMs)
     }
   }
-  return lastWasRateLimit ? "rate-limited" : "failed"
+  return lastWasRateLimit ? "rate-limited" : "transient-failed"
+}
+
+// Delete one repo, retrying transient failures (rate limits, 5xx). A scope 403
+// (not a rate limit) is unretryable and rethrown so the caller can surface the
+// scope wall.
+function deleteRepoWithRetry(
+  client: GitHubClient,
+  org: string,
+  repo: string,
+): Promise<DeleteOutcome> {
+  return withDeleteRetry(
+    () => deleteRepo(client, { owner: org, repo }),
+    (err) => (err.isForbidden ? "rethrow" : null),
+  )
+}
+
+// Delete one classroom team (by its persisted { id, slug }), retrying transient
+// failures the same way repo deletes do. Uses deleteClassroomTeam, which
+// confirms the live team's id matches the persisted id before deleting (so a
+// reused slug isn't clobbered) and treats 404 as already-gone. A scope/
+// permission 403 (the team-delete path swallows rather than rethrows the scope
+// wall) and an id mismatch are permanent refusals: recorded without retrying.
+function deleteClassroomTeamWithRetry(
+  client: GitHubClient,
+  org: string,
+  team: ClassroomTeamRef,
+): Promise<DeleteOutcome> {
+  return withDeleteRetry(
+    () => deleteClassroomTeam(client, org, team),
+    (err) => (err.isForbidden ? "permanent" : null),
+  )
 }
 
 // Delete the per-classroom teams resolved from classroom.json. Deletes are
-// best-effort: a hard failure is recorded but never aborts teardown, mirroring
-// the repo flow's re-runnable contract. A *throttle* is reported separately
-// (teamsRateLimited): unlike a hard failure it is recoverable, so the caller
-// retains the marker repo (which holds classroom.json, the only team-ref
-// source) rather than deleting it and orphaning a team that a re-run would
-// otherwise have cleaned up.
+// best-effort: a failure is recorded but never aborts teardown, mirroring the
+// repo flow's re-runnable contract. A *recoverable* failure (a throttle or a
+// transient 5xx) is reported separately (teamsRecoverable): unlike a permanent
+// refusal it can succeed on a re-run, so the caller retains the marker repo
+// (which holds classroom.json, the only team-ref source) rather than deleting
+// it and orphaning a team a re-run would otherwise have cleaned up. A permanent
+// refusal (a reused-slug id mismatch, or a scope 403) lands in teamsFailed and
+// does NOT retain the marker — a re-run would just refuse it again.
 async function deleteClassroomTeams(
   client: GitHubClient,
   org: string,
@@ -240,23 +275,27 @@ async function deleteClassroomTeams(
 ): Promise<{
   teamsDeleted: string[]
   teamsFailed: string[]
-  teamsRateLimited: boolean
+  teamsRecoverable: boolean
 }> {
   const teamsDeleted: string[] = []
   const teamsFailed: string[] = []
-  let teamsRateLimited = false
+  let teamsRecoverable = false
 
   await mapWithConcurrency(teams, 4, async (team) => {
     const outcome = await deleteClassroomTeamWithRetry(client, org, team)
     if (outcome === "deleted") {
       teamsDeleted.push(team.slug)
     } else {
-      if (outcome === "rate-limited") teamsRateLimited = true
+      // A throttle or a transient 5xx exhaustion may succeed on a re-run, so
+      // keep the marker; a permanent refusal will not, so let the marker go.
+      if (outcome === "rate-limited" || outcome === "transient-failed") {
+        teamsRecoverable = true
+      }
       teamsFailed.push(team.slug)
     }
   })
 
-  return { teamsDeleted, teamsFailed, teamsRateLimited }
+  return { teamsDeleted, teamsFailed, teamsRecoverable }
 }
 
 // Execute the teardown plan with bounded concurrency, marker last. A scope 403
@@ -289,7 +328,8 @@ export async function executeTeardown(
         deleted.push(repo)
       } else {
         // Retries exhausted: a throttle is retryable; other transient failures
-        // (5xx) go to `failed` so the marker is preserved (re-runnable).
+        // (5xx) go to `failed` so the marker is preserved (re-runnable). Repos
+        // never see "permanent-failed" — a scope 403 rethrows below instead.
         if (outcome === "rate-limited") rateLimited = true
         failed.push(repo)
       }
@@ -318,27 +358,68 @@ export async function executeTeardown(
   // is deleted — classroom.json lives in the marker repo, so reading it after
   // would be impossible. Best-effort: a team failure never blocks the marker.
   const teamRefs = await collectClassroomTeams(client, plan.org)
-  const { teamsDeleted, teamsFailed, teamsRateLimited } =
+  const { teamsDeleted, teamsFailed, teamsRecoverable } =
     await deleteClassroomTeams(client, plan.org, teamRefs)
 
-  // A throttled team delete is recoverable, so treat it like a repo throttle:
-  // retain the marker (don't run the block below) so classroom.json survives
-  // and a re-run can re-resolve and finish the team. A *hard* team failure
-  // (id mismatch, scope 403, exhausted 5xx) is accepted as best-effort and
-  // does NOT retain the marker — see the marker-gate note below.
-  if (teamsRateLimited) rateLimited = true
+  // A recoverable team failure (throttle or transient 5xx) can succeed on a
+  // re-run, so treat it like a repo throttle: retain the marker (skip the block
+  // below) so classroom.json survives and a re-run can re-resolve and finish
+  // the team. A *permanent* team refusal (reused-slug id mismatch, scope 403)
+  // is accepted as best-effort and does NOT retain the marker — see below.
+  if (teamsRecoverable) rateLimited = true
 
   // Marker deleted only on a fully-successful run; otherwise it's left behind so
   // planTeardown's gate still passes and the run stays re-runnable. Gated on
-  // repo `failed` and a team *throttle* only: a hard team failure is best-effort
-  // and intentionally does not retain the marker (a permanently-refused team,
-  // e.g. a reused-slug id mismatch, would otherwise wedge teardown forever).
+  // repo `failed` and a *recoverable* team failure only: a permanent team
+  // refusal does not retain the marker (a reused-slug id mismatch would
+  // otherwise wedge teardown forever, since a re-run repeats the refusal).
+  let markerDeleted = false
   if (failed.length === 0 && !rateLimited) {
     for (const repo of marker) {
       await tryDelete(repo)
     }
     abortIfBlocked()
+    // tryDelete records the marker in `deleted` on success; reflect that.
+    markerDeleted = marker.every((repo) => deleted.includes(repo))
   }
 
-  return { deleted, failed, teamsDeleted, teamsFailed }
+  return { deleted, failed, teamsDeleted, teamsFailed, markerDeleted }
+}
+
+// Build the human success/partial message for a completed teardown run. Pure
+// and exported so the message logic (counts, pluralization, remedy) is
+// unit-testable without the React component. `orgTeamsUrl` is the org's teams
+// settings URL used in the "remove by hand" remedy.
+export function formatTeardownResult(
+  result: TeardownResult,
+  orgTeamsUrl: string,
+): string {
+  const repos = countLabel(result.deleted.length, "repository", "repositories")
+  const teams =
+    result.teamsDeleted.length > 0
+      ? ` and ${countLabel(result.teamsDeleted.length, "classroom team", "classroom teams")}`
+      : ""
+
+  const anyFailed = result.failed.length > 0 || result.teamsFailed.length > 0
+  if (!anyFailed) {
+    return `Deleted ${repos}${teams}.`
+  }
+
+  const failedParts = [
+    result.failed.length > 0
+      ? countLabel(result.failed.length, "repository", "repositories")
+      : "",
+    result.teamsFailed.length > 0
+      ? countLabel(result.teamsFailed.length, "team", "teams")
+      : "",
+  ].filter(Boolean)
+
+  // The marker is the team-ref source (classroom.json). If it's still present,
+  // a re-run can finish the job; if it's gone, a re-run would just refuse on the
+  // missing marker, so any leftover teams must be removed by hand.
+  const remedy = !result.markerDeleted
+    ? "Re-run teardown to finish."
+    : `Remove the leftover ${result.teamsFailed.length === 1 ? "team" : "teams"} by hand at ${orgTeamsUrl}.`
+
+  return `Deleted ${repos}${teams}; ${failedParts.join(" and ")} could not be deleted. ${remedy}`
 }

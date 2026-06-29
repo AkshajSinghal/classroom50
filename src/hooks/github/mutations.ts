@@ -458,6 +458,31 @@ async function adoptClassroomTeam(
   return { id: existing.id, slug: existing.slug }
 }
 
+// Thrown by deleteClassroomTeam when the live team's id no longer matches the
+// id recorded in classroom.json (a slug was reused for a different team). A
+// dedicated type lets callers and telemetry distinguish this deliberate safety
+// refusal — which a re-run will repeat forever — from a transient failure that
+// is worth retrying.
+export class TeamIdMismatchError extends Error {
+  slug: string
+  recordedId: number
+  liveId: number
+  constructor(args: {
+    org: string
+    slug: string
+    recordedId: number
+    liveId: number
+  }) {
+    super(
+      `Team "${args.slug}" in ${args.org} now has id ${args.liveId}, not the recorded ${args.recordedId} — refusing to delete a team that isn't the one this classroom created; remove it by hand if intended.`,
+    )
+    this.name = "TeamIdMismatchError"
+    this.slug = args.slug
+    this.recordedId = args.recordedId
+    this.liveId = args.liveId
+  }
+}
+
 // Delete the per-classroom team by its persisted slug. As defense against a
 // reused slug, the live team's id is confirmed against the persisted id before
 // deletion (skipped when no id was recorded). 404 = already gone (success).
@@ -474,9 +499,12 @@ export async function deleteClassroomTeam(
         `/orgs/${org}/teams/${team.slug}`,
       )
       if (live.id !== team.id) {
-        throw new Error(
-          `Team "${team.slug}" in ${org} now has id ${live.id}, not the recorded ${team.id} — refusing to delete a team that isn't the one this classroom created; remove it by hand if intended.`,
-        )
+        throw new TeamIdMismatchError({
+          org,
+          slug: team.slug,
+          recordedId: team.id,
+          liveId: live.id,
+        })
       }
     } catch (err) {
       if (err instanceof GitHubAPIError && err.status === 404) {
