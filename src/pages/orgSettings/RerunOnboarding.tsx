@@ -88,7 +88,7 @@ const RerunOnboarding = ({ org }: { org: string }) => {
       return initClassroom50({
         client,
         org,
-        plan: planDetails?.plan.name,
+        plan: planDetails?.plan?.name,
         onStepUpdate: (update) => {
           if (!mountedRef.current) return
           setSteps((prev) => applyStepUpdate(prev, update))

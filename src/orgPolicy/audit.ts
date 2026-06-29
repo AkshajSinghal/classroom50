@@ -99,7 +99,8 @@ function concernSettingsUrl(id: ConcernId, org: string): string {
 }
 
 // Any drift fails the audit — stricter than the CLI, which warns on
-// non-critical drift (see header).
+// non-critical drift (see header). An unreadable concern also fails: a partial
+// read outage is "needs attention", not a clean bill of health.
 function deriveVerdict(
   readOk: boolean,
   lockdownComplete: boolean,
@@ -107,8 +108,10 @@ function deriveVerdict(
 ): AuditVerdict {
   if (!readOk) return "fail"
   if (!lockdownComplete) return "fail"
-  const anyDrift = concerns.some((c) => c.verdict.state === "unenforced")
-  return anyDrift ? "fail" : "ok"
+  const anyUnresolved = concerns.some(
+    (c) => c.verdict.state === "unenforced" || c.verdict.state === "unreadable",
+  )
+  return anyUnresolved ? "fail" : "ok"
 }
 
 export async function buildOrgAuditReport(
@@ -144,7 +147,11 @@ export async function buildOrgAuditReport(
       .filter((v) => !v.enforced)
       .map((v) => v.setting) ?? []
   const defaultVerdicts = defaults.classification?.verdicts ?? []
-  const lockdownComplete = readOk && unenforcedDefaults.length === 0
+  // lockdownComplete mirrors the CLI: critical defaults only. Non-critical
+  // drift leaves it true but still fails the verdict via the orgDefaults
+  // concern being "unenforced" (see deriveVerdict).
+  const lockdownComplete =
+    readOk && !(defaults.classification?.criticalMissed ?? false)
 
   const concerns: ConcernCheck[] = (
     [

@@ -140,7 +140,7 @@ const OrgSetupPage = () => {
       return initClassroom50({
         client: githubClient,
         org,
-        plan: orgPlanDetails?.plan.name,
+        plan: orgPlanDetails?.plan?.name,
         onStepUpdate: (update) => {
           setSteps((steps) => applyStepUpdate(steps, update))
         },
@@ -162,8 +162,8 @@ const OrgSetupPage = () => {
 
   const isOwner = orgMembership?.role === "admin"
   const isTeamOrEnterprise =
-    orgPlanDetails?.plan.name === "team" ||
-    orgPlanDetails?.plan.name === "enterprise"
+    orgPlanDetails?.plan?.name === "team" ||
+    orgPlanDetails?.plan?.name === "enterprise"
 
   return (
     <div className="min-h-screen">

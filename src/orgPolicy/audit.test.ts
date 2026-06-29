@@ -131,7 +131,9 @@ describe("buildOrgAuditReport", () => {
       "team",
     )
     expect(report.verdict).toBe("fail")
-    expect(report.lockdownComplete).toBe(false)
+    // lockdownComplete is critical-only (CLI parity): non-critical drift keeps
+    // it true, but the overall verdict still fails since any drift is actionable.
+    expect(report.lockdownComplete).toBe(true)
     expect(report.unenforcedDefaults.map((s) => s.field)).toContain(
       "members_can_create_pages",
     )
@@ -179,6 +181,53 @@ describe("buildOrgAuditReport", () => {
     )
     expect(report.verdict).toBe("fail")
     expect(report.lockdownComplete).toBe(true)
+  })
+
+  it("verdict fail when a per-concern check is unreadable (partial outage is not a clean bill of health)", async () => {
+    const report = await buildOrgAuditReport(
+      {
+        request: <T>(path: string) => {
+          const ok = (v: unknown) => Promise.resolve(v as T)
+          if (path === "/orgs/acme") {
+            const live: Record<string, unknown> = {}
+            for (const s of memberDefaultSettings("team"))
+              live[s.field] = s.value
+            return ok(live)
+          }
+          if (path.endsWith("/actions/permissions"))
+            return ok({ enabled_repositories: "all", allowed_actions: "all" })
+          if (path.endsWith("/actions/permissions/workflow"))
+            return ok({
+              default_workflow_permissions: "write",
+              can_approve_pull_request_reviews: true,
+            })
+          if (path.includes("/protection"))
+            return ok({
+              allow_force_pushes: { enabled: false },
+              allow_deletions: { enabled: false },
+            })
+          if (path.includes("/permissions/access"))
+            return ok({ access_level: "organization" })
+          // Pages read fails with a 500 → unreadable (not 404/unenforced).
+          if (path.includes("/pages"))
+            return Promise.reject(httpError(500)) as Promise<T>
+          if (path.includes("/rulesets"))
+            return ok([
+              { id: 1, name: RULESET_NAME_SUBMISSION_HISTORY },
+              { id: 2, name: RULESET_NAME_FEEDBACK_BASE },
+            ])
+          return Promise.reject(new Error(`unexpected: ${path}`)) as Promise<T>
+        },
+        requestRaw: () => Promise.reject(new Error("unexpected requestRaw")),
+      },
+      "acme",
+      "team",
+    )
+    expect(report.verdict).toBe("fail")
+    expect(report.lockdownComplete).toBe(true)
+    expect(report.concerns.find((c) => c.id === "pages")?.verdict.state).toBe(
+      "unreadable",
+    )
   })
 
   it("verdict fail and readOk false when the org cannot be read", async () => {

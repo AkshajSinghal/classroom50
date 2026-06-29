@@ -14,15 +14,15 @@ const OrgPreflightNotice = ({ org }: { org: string }) => {
     useGetServiceTokenStatus(org)
   const { data: planDetails, isPending: planPending } =
     useGetOrgPlanDetails(org)
-  const { data: audit, isPending: auditPending } = useGetOrgAudit(
+  const { data: audit, isLoading: auditLoading } = useGetOrgAudit(
     org,
-    planDetails?.plan.name,
+    planDetails?.plan?.name,
   )
 
-  // Stay invisible until every input settles, so the banner doesn't rewrite
-  // itself mid-flight or flash a placeholder on a healthy org. The audit query
-  // is gated on the plan, so auditPending also covers the plan dependency.
-  const checking = tokenPending || planPending || auditPending
+  // Stay invisible until every input settles. Use isLoading (not isPending) for
+  // the audit: it's false for a disabled query, so an org whose plan can't be
+  // read (GitHub omits it for non-owners) doesn't keep the banner suppressed.
+  const checking = tokenPending || planPending || auditLoading
 
   if (checking) return null
 

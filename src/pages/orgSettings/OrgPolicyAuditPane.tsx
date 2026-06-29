@@ -359,11 +359,11 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
     data: report,
     isLoading,
     isError,
-  } = useGetOrgAudit(org, planDetails?.plan.name)
+  } = useGetOrgAudit(org, planDetails?.plan?.name)
 
   const fixMutation = useMutation({
     mutationFn: (id: ConcernId) =>
-      repairConcern(client, org, id, planDetails?.plan.name),
+      repairConcern(client, org, id, planDetails?.plan?.name),
     onSuccess: (result) => {
       if (result.unfixableFields.length > 0) {
         setEnterprisePinned((prev) => {
@@ -386,13 +386,13 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
     <SettingsSection
       title="Organization policy"
       titleAdornment={
-        planDetails?.plan.name && (
+        planDetails?.plan?.name && (
           <span
             className="badge badge-ghost badge-sm gap-1 capitalize"
             title="GitHub plan — determines which policies are in scope (Enterprise unlocks additional member-privilege fields)"
           >
             <GitHub className="size-3" />
-            {planDetails.plan.name} plan
+            {planDetails.plan?.name} plan
           </span>
         )
       }
