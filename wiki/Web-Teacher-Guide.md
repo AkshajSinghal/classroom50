@@ -215,4 +215,6 @@ This is a list of all of your students already added to this classroom. As a con
 
 ![View of existing assignment with no submissions](images/web_viewing_assignment.png)
 
+
+
 # Editing Classroom Settings
