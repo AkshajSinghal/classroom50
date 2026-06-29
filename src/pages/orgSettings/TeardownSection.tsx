@@ -1,0 +1,154 @@
+import { useState } from "react"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { TriangleAlert } from "lucide-react"
+
+import { ConfirmModal } from "@/components/modals"
+import { useGitHubClient } from "@/context/github/GitHubProvider"
+import { useSafeSubmit } from "@/hooks/useSafeSubmit"
+import useGetOrgMembership from "@/hooks/useGetOrgMembership"
+import {
+  executeTeardown,
+  planTeardown,
+  TeardownMarkerError,
+  TeardownScopeError,
+  type TeardownPlan,
+} from "@/api/mutations/teardown"
+
+// Teardown / org reset: deletes ALL repos in the org (mirroring the CLI's
+// `gh teacher teardown`), marker-gated and behind a typed-org-name
+// confirmation. Owner-gated; destructive and irreversible.
+const TeardownSection = ({ org }: { org: string }) => {
+  const client = useGitHubClient()
+  const queryClient = useQueryClient()
+  const runTeardown = useSafeSubmit()
+
+  const { data: membership } = useGetOrgMembership(org)
+  const isOwner = membership?.role === "admin"
+
+  const [open, setOpen] = useState(false)
+  const [plan, setPlan] = useState<TeardownPlan | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState<string | null>(null)
+
+  const openMutation = useMutation({
+    mutationFn: () => planTeardown(client, org),
+    onSuccess: (p) => {
+      setPlan(p)
+      setError(null)
+      setOpen(true)
+    },
+    onError: (err) => {
+      setError(
+        err instanceof TeardownMarkerError
+          ? err.message
+          : "Couldn't prepare the teardown plan.",
+      )
+    },
+  })
+
+  const runMutation = useMutation({
+    mutationFn: async () => {
+      if (!plan) return
+      const result = await executeTeardown(client, plan)
+      return result
+    },
+    onSuccess: (result) => {
+      setOpen(false)
+      setDone(
+        result
+          ? `Deleted ${result.deleted.length} repositor${result.deleted.length === 1 ? "y" : "ies"}.`
+          : null,
+      )
+      void queryClient.invalidateQueries({ queryKey: ["orgs"] })
+    },
+    onError: (err) => {
+      setError(
+        err instanceof TeardownScopeError
+          ? err.message
+          : "Teardown failed. Some repositories may not have been deleted.",
+      )
+    },
+  })
+
+  return (
+    <section className="mt-8 rounded-2xl border border-error/30 bg-error/5 p-6">
+      <div className="flex items-start gap-3">
+        <TriangleAlert className="mt-0.5 size-5 shrink-0 text-error" />
+        <div className="flex-1">
+          <h2 className="text-lg font-semibold text-error">Danger zone</h2>
+          <p className="mt-1 text-sm text-base-content/70">
+            Tear down this organization by deleting <strong>every</strong>{" "}
+            repository in it, including the <code>classroom50</code> config repo.
+            This is irreversible.
+          </p>
+
+          {error && (
+            <div className="mt-3 rounded-lg border border-error/30 bg-error/10 p-3 text-sm text-error">
+              {error}
+            </div>
+          )}
+          {done && (
+            <p className="mt-3 text-sm text-success">{done}</p>
+          )}
+
+          <button
+            type="button"
+            className="btn btn-error btn-sm mt-4"
+            disabled={!isOwner || openMutation.isPending}
+            title={
+              isOwner ? undefined : "Requires organization owner permissions"
+            }
+            onClick={() => {
+              if (!openMutation.isPending) openMutation.mutate()
+            }}
+          >
+            {openMutation.isPending ? "Preparing…" : "Tear down organization"}
+          </button>
+
+          {!isOwner && (
+            <p className="mt-2 text-xs text-base-content/50">
+              Teardown requires organization owner permissions.
+            </p>
+          )}
+        </div>
+      </div>
+
+      <ConfirmModal
+        open={open}
+        dangerous
+        needsConfirm
+        confirmText={org}
+        confirmLabel="Delete all repositories"
+        title="Delete every repository in this org?"
+        description={
+          <div className="space-y-2 text-sm">
+            <p>
+              This will permanently delete{" "}
+              <strong>{plan?.repoNames.length ?? 0}</strong> repositories in{" "}
+              <span className="font-mono">{org}</span>, including the{" "}
+              <code>classroom50</code> config repo (deleted last). This cannot be
+              undone.
+            </p>
+            {plan && plan.repoNames.length > 0 && (
+              <ul className="max-h-40 overflow-auto rounded border border-base-300 bg-base-100 p-2 font-mono text-xs">
+                {plan.repoNames.map((name) => (
+                  <li key={name}>{name}</li>
+                ))}
+              </ul>
+            )}
+            <p>
+              Type <span className="font-mono font-semibold">{org}</span> to
+              confirm.
+            </p>
+          </div>
+        }
+        onConfirm={async () => {
+          await runTeardown(() => runMutation.mutateAsync())
+        }}
+        onClose={() => setOpen(false)}
+      />
+    </section>
+  )
+}
+
+export default TeardownSection

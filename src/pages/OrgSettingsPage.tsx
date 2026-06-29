@@ -14,6 +14,7 @@ import useGetServiceTokenStatus from "@/hooks/useGetServiceTokenStatus"
 import RequireTeacher from "@/components/RequireTeacher"
 import OrgPolicyAuditPane from "@/pages/orgSettings/OrgPolicyAuditPane"
 import RerunOnboarding from "@/pages/orgSettings/RerunOnboarding"
+import TeardownSection from "@/pages/orgSettings/TeardownSection"
 import {
   CalendarClock,
   CheckCircle2,
@@ -405,6 +406,7 @@ const OrgSettingsPage = () => {
             <OrgSettingsPane />
             {org && <OrgPolicyAuditPane org={org} />}
             {org && <RerunOnboarding org={org} />}
+            {org && <TeardownSection org={org} />}
           </RequireTeacher>
         </DrawerContent>
         <DrawerSidebar page="classes" settings selected="settings" />
