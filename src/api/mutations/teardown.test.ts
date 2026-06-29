@@ -204,6 +204,19 @@ function makeClient(opts: Opts) {
   return { client, deletes, teamDeletes }
 }
 
+// A requestRaw mock for tests that build their own `request` mock inline and
+// just need the classroom-dir listing to come back empty (no classrooms).
+function emptyClassroomRequestRaw() {
+  return vi.fn().mockImplementation((path: string) => {
+    if (/\/repos\/[^/]+\/classroom50\/contents\//.test(path)) {
+      return Promise.resolve(
+        JSON.stringify([{ type: "dir", name: ".github", path: ".github" }]),
+      )
+    }
+    return Promise.reject(new Error(`unexpected requestRaw: ${path}`))
+  })
+}
+
 describe("planTeardown", () => {
   it("refuses an org without the classroom50 marker repo", async () => {
     const { client } = makeClient({ markerExists: false, repos: [] })
@@ -338,15 +351,7 @@ describe("executeTeardown", () => {
         }
         return Promise.reject(new Error(`unexpected: ${method} ${path}`))
       })
-    const requestRaw = vi.fn().mockImplementation((path: string) => {
-      // No classrooms: empty dir listing.
-      if (/\/repos\/[^/]+\/classroom50\/contents\//.test(path)) {
-        return Promise.resolve(
-          JSON.stringify([{ type: "dir", name: ".github", path: ".github" }]),
-        )
-      }
-      return Promise.reject(new Error(`unexpected requestRaw: ${path}`))
-    })
+    const requestRaw = emptyClassroomRequestRaw()
     const client: GitHubClient = {
       request: request as unknown as GitHubClient["request"],
       requestRaw: requestRaw as unknown as GitHubClient["requestRaw"],
@@ -396,14 +401,7 @@ describe("executeTeardown", () => {
         }
         return Promise.reject(new Error(`unexpected: ${method} ${path}`))
       })
-    const requestRaw = vi.fn().mockImplementation((path: string) => {
-      if (/\/repos\/[^/]+\/classroom50\/contents\//.test(path)) {
-        return Promise.resolve(
-          JSON.stringify([{ type: "dir", name: ".github", path: ".github" }]),
-        )
-      }
-      return Promise.reject(new Error(`unexpected requestRaw: ${path}`))
-    })
+    const requestRaw = emptyClassroomRequestRaw()
     const client: GitHubClient = {
       request: request as unknown as GitHubClient["request"],
       requestRaw: requestRaw as unknown as GitHubClient["requestRaw"],
