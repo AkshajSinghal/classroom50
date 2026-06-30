@@ -112,6 +112,9 @@ jobs:
           # Excluded paths:
           #   - wiki/ goes to the wiki repo in the next step.
           #   - This workflow file stays dev-only so the public repo doesn't try to run it.
+          #   - cli-release.yaml is dev-only release tooling: it references the
+          #     private target repos (foundation50/gh-teacher|gh-student) and the
+          #     CLI_RELEASE_PAT secret, so the public mono-mirror shouldn't carry it.
           #   - web-*.yaml workflows operate on the (private) web/ tree; exclude
           #     them too so the public repo doesn't carry workflows referencing a
           #     directory it doesn't have.
@@ -131,6 +134,7 @@ jobs:
             --exclude='.git/' \
             --exclude='wiki/' \
             --exclude='.github/workflows/mirror-to-public.yaml' \
+            --exclude='.github/workflows/cli-release.yaml' \
             --exclude='.github/workflows/web-ci.yaml' \
             --exclude='.github/workflows/web-deploy.yaml' \
             --exclude='.github/workflows/web-deploy-staging.yaml' \
