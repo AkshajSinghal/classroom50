@@ -32,8 +32,7 @@ behavior packages:
   `internal/output`/`internal/ui` the stderr-summary/`--json`/`--quiet`
   conventions.
 
-See `docs/solutions/architecture-patterns/embed-terminus-and-build-as-oracle-in-go-package-extraction.md`
-and `ARCHITECTURE_REFACTOR_PLAN.md`.
+See `docs/solutions/architecture-patterns/embed-terminus-and-build-as-oracle-in-go-package-extraction.md`.
 
 ## This binary owns the contracts
 

@@ -20,7 +20,6 @@ tags:
   - vite
   - skeleton-ownership
 related_docs:
-  - "docs/solutions/architecture-patterns/embed-terminus-and-build-as-oracle-in-go-package-extraction.md (why the skeleton must physically stay next to the Go file that embeds it)"
   - "web/docs/solutions/architecture-patterns/evolving-strict-cross-binary-schemas.md (the PRE-monorepo lockstep model this supersedes for the synchronized-release case)"
 ---
 
