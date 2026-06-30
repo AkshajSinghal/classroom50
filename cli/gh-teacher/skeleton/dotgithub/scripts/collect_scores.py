@@ -30,7 +30,9 @@ release is not an error (student hasn't accepted/submitted yet);
 the per-assignment "X of Y submitted" log shows roster coverage.
 
 Environment (set by `collect-scores.yaml`):
-  CLASSROOM50_SERVICE_TOKEN — fine-grained PAT, Contents: read.
+  CLASSROOM50_SERVICE_TOKEN — fine-grained PAT, Contents: Read and write.
+                              Collection only reads; the write scope is
+                              shared with regrade.yaml (pushes submit/* tags).
   CLASSROOM_FILTER          — optional single-classroom limit.
   GITHUB_REPOSITORY_OWNER   — org name (auto-set by Actions).
   GITHUB_API_URL            — API URL on GHES runners.

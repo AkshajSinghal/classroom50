@@ -5,6 +5,8 @@ because `gh teacher init` embeds them at `.github/scripts/` in each org's
 `classroom50` repo:
 
   - collect_scores.py    — score collector (collect-scores.yaml)
+  - regrade_repos.py     — regrade fan-out: re-tags student repos so the
+                           autograder re-runs (regrade.yaml)
   - materialize_tests.py — translates assignments.json `tests` blocks into
                            per-assignment tests.json bundles (publish-pages.yaml)
 
@@ -33,3 +35,4 @@ def _load_module(name: str, path: pathlib.Path):
 
 collect_scores = _load_module("collect_scores", _SCRIPTS_DIR / "collect_scores.py")
 materialize_tests = _load_module("materialize_tests", _SCRIPTS_DIR / "materialize_tests.py")
+regrade_repos = _load_module("regrade_repos", _SCRIPTS_DIR / "regrade_repos.py")

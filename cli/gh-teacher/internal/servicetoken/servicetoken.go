@@ -113,14 +113,16 @@ func SecretExists(client githubapi.Client, owner, repo string) (bool, error) {
 }
 
 // ValidateToken confirms a freshly-supplied service token can actually do
-// the one thing collect-scores needs: read repository contents in the org.
-// It builds a client authenticated AS the supplied token and reads the
-// config repo's contents listing. This catches the common setup mistakes
-// at configuration time — wrong/zeroed resource owner, a still-pending
-// (unapproved) fine-grained PAT, a missing `Contents: read` permission, or
-// an expired/revoked token — instead of letting them surface months later
-// as an opaque collect-scores workflow failure. Returns a descriptive,
-// actionable error on failure.
+// what the pipeline needs: read AND write repository contents in the org.
+// Reads back the gradebook (collect-scores) and pushing submit/* tags to
+// regrade (regrade.yaml, issue #208) both require Contents access — collect
+// reads, regrade writes — so the one shared token must hold Contents:
+// Read and write. It builds a client authenticated AS the supplied token,
+// reads the config repo (catching a wrong/zeroed resource owner, a
+// still-pending fine-grained PAT, or an expired/revoked token) and asserts
+// the repo's effective `permissions.push` so a read-only PAT is rejected
+// here rather than surfacing months later as an opaque regrade failure.
+// Returns a descriptive, actionable error on failure.
 func ValidateToken(token []byte, org string) error {
 	tokenClient, err := githubapi.NewClient(githubapi.ClientOptions{
 		AuthToken: string(token),
@@ -132,22 +134,39 @@ func ValidateToken(token []byte, org string) error {
 	return validateTokenWithClient(tokenClient, org)
 }
 
-// validateTokenWithClient is ValidateToken's testable core: it issues the
-// contents read with an already-built client (authenticated as the token
+// validateTokenWithClient is ValidateToken's testable core: it reads the
+// config repo with an already-built client (authenticated as the token
 // under test) and maps the failure modes to actionable errors.
+//
+// GET /repos/{owner}/{repo} returns a `permissions` object reflecting the
+// AUTHENTICATED token's effective access on the repo (`push` is true only
+// when the token can write contents). We assert it so a Contents: read-only
+// PAT — which can read the gradebook but cannot push the submit/* tags a
+// regrade needs — is rejected at configuration time. The read itself also
+// exercises Contents: read (what collect-scores does on student repos).
 func validateTokenWithClient(tokenClient githubapi.Client, org string) error {
-	// Reading the config repo's contents exercises Contents: read on an
-	// org repo — exactly what collect-scores does against student repos.
-	path := fmt.Sprintf("repos/%s/%s/contents/", url.PathEscape(org), url.PathEscape(configrepo.ConfigRepoName))
-	if err := tokenClient.Get(path, nil); err != nil {
+	path := fmt.Sprintf("repos/%s/%s", url.PathEscape(org), url.PathEscape(configrepo.ConfigRepoName))
+	var repo struct {
+		Permissions struct {
+			Push bool `json:"push"`
+		} `json:"permissions"`
+	}
+	if err := tokenClient.Get(path, &repo); err != nil {
 		switch {
 		case cliutil.IsHTTPStatus(err, http.StatusUnauthorized):
 			return fmt.Errorf("the supplied token is invalid, expired, or revoked (401). Create a fresh fine-grained PAT and try again")
 		case cliutil.IsHTTPStatus(err, http.StatusNotFound), cliutil.IsHTTPStatus(err, http.StatusForbidden):
-			return fmt.Errorf("the supplied token can't read %s/%s contents. Create a fine-grained PAT with Resource owner = %q, Repository access = All repositories, and Repository permissions -> Contents: Read-only. If your org requires PAT approval and you are not an org owner, an owner must approve it first (owners' tokens are auto-approved). Underlying error: %v", org, configrepo.ConfigRepoName, org, err)
+			return fmt.Errorf("the supplied token can't read %s/%s. Create a fine-grained PAT with Resource owner = %q, Repository access = All repositories, and Repository permissions -> Contents: Read and write. If your org requires PAT approval and you are not an org owner, an owner must approve it first (owners' tokens are auto-approved). Underlying error: %v", org, configrepo.ConfigRepoName, org, err)
 		default:
 			return fmt.Errorf("couldn't verify the token against %s/%s: %w", org, configrepo.ConfigRepoName, err)
 		}
+	}
+	// The token can read the repo, but regrade (issue #208) needs to push
+	// submit/* tags to student repos — Contents: write. A read-only PAT
+	// reports permissions.push == false here; reject it with the same
+	// actionable fix as a no-access token.
+	if !repo.Permissions.Push {
+		return fmt.Errorf("the supplied token can read %s/%s but lacks write access (Contents: write) — collecting scores needs read, but regrading needs to push submit/* tags to student repos. Re-create the fine-grained PAT with Resource owner = %q, Repository access = All repositories, and Repository permissions -> Contents: Read and write", org, configrepo.ConfigRepoName, org)
 	}
 	return nil
 }
@@ -226,9 +245,10 @@ func NewRotateCmd() *cobra.Command {
 			"CLASSROOM50_SERVICE_TOKEN environment variable, falling\n" +
 			"back to a hidden stdin prompt when run interactively.\n\n" +
 			"The token is validated against the org before it's stored\n" +
-			"(it must be able to read repository contents), so a\n" +
+			"(it must be able to read AND write repository contents:\n" +
+			"collect-scores reads, regrade pushes submit/* tags), so a\n" +
 			"misconfigured PAT is caught here rather than via a failed\n" +
-			"collect-scores run.\n\n" +
+			"collect-scores or regrade run.\n\n" +
 			"Idempotent: the repo secret is replaced in place.",
 		Example: "  CLASSROOM50_SERVICE_TOKEN=github_pat_xxx gh teacher rotate-service-token cs50-fall-2026\n" +
 			"  gh teacher rotate-service-token cs50-fall-2026   # interactive prompt",

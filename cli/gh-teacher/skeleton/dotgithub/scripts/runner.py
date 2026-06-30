@@ -311,6 +311,7 @@ def make_result(
     assignment_type: str,
     review_link: str | None = None,
     submitted_by: dict[str, Any] | None = None,
+    graded_at: datetime.datetime | None = None,
 ) -> dict[str, Any]:
     """Build a v1-shaped result.json payload. Single source of the field
     layout shared by the error/vacuous paths (empty_result) and the
@@ -322,7 +323,14 @@ def make_result(
     validates. `assignment_type` ("individual" | "group") records the
     assignment mode. There is no `usernames` field: who pushed is
     `submitted_by`, who owns the repo is `owner`, and the credited member
-    list (group only) is resolved by collection."""
+    list (group only) is resolved by collection.
+
+    `when` is the SUBMISSION instant (the graded commit's committer date),
+    emitted as `datetime`. It is invariant across regrades of the same
+    commit, so collect-scores' `late` marking (datetime vs `due`) never
+    changes when a teacher re-runs grading. `graded_at` is the wall-clock
+    instant THIS grading run produced the result (defaults to now); it
+    moves on every regrade and is purely informational ("last graded")."""
     result: dict[str, Any] = {
         "schema": RESULT_SCHEMA_V1,
         "classroom": classroom,
@@ -334,6 +342,7 @@ def make_result(
         "release": release_link,
         "review": review_link or commit_link,
         "datetime": when.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "graded_at": (graded_at or now_utc()).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "score": score,
         "max-score": max_score,
         "tests": tests,
@@ -1063,6 +1072,49 @@ def now_utc() -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc)
 
 
+def commit_submitted_at(sha: str, workspace: pathlib.Path) -> datetime.datetime:
+    """The SUBMISSION instant for a graded commit: its committer date, read
+    from git in the (full-depth) checkout and normalized to an aware UTC
+    datetime. This is invariant for a given commit, so re-grading the same
+    commit (a teacher regrade) reproduces the identical `datetime` in
+    result.json — the submission time and the `late` flag never move.
+
+    Falls back to now_utc() when the SHA is empty or git can't read the
+    committer date (shallow clone, detached state, git error): lateness is
+    advisory and a regrade must never fail or drop a submission over an
+    unreadable timestamp. The fallback only affects a freshly-graded commit
+    whose date couldn't be read; a normal full-depth checkout always resolves.
+    """
+    if not sha:
+        return now_utc()
+    try:
+        proc = subprocess.run(
+            ["git", "show", "-s", "--format=%cI", sha],
+            cwd=str(workspace),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return now_utc()
+    if proc.returncode != 0:
+        return now_utc()
+    raw = (proc.stdout or "").strip()
+    if not raw:
+        return now_utc()
+    try:
+        # %cI is strict ISO-8601 with an offset (e.g. 2026-06-30T12:00:00+01:00).
+        parsed = datetime.datetime.fromisoformat(raw)
+    except ValueError:
+        return now_utc()
+    if parsed.tzinfo is None:
+        return now_utc()
+    # Normalize to UTC so the YYYY-MM-DDTHH:MM:SSZ format (and the late
+    # comparison) is timezone-correct regardless of the committer's offset.
+    return parsed.astimezone(datetime.timezone.utc)
+
+
 def mode_is_group(mode: str | None) -> bool:
     """True only when the assignment mode is exactly 'group' (case- and
     whitespace-insensitive). Anything else — including None, '', or an
@@ -1097,6 +1149,7 @@ class Finalizer:
         review_link: str | None = None,
         submitted_by: dict[str, Any] | None = None,
         assignment_type: str = "individual",
+        submitted_at: datetime.datetime | None = None,
     ):
         self.workspace = workspace
         self.github_output = github_output
@@ -1109,6 +1162,10 @@ class Finalizer:
         self.review_link = review_link
         self.submitted_by = submitted_by
         self.assignment_type = assignment_type
+        # The graded commit's committer date — the invariant submission
+        # instant written as `datetime`. Defaults to now only when a caller
+        # didn't resolve it (keeps older call sites / tests working).
+        self.submitted_at = submitted_at or now_utc()
 
     def error(self, message: str) -> int:
         print(f"::error::{message}", file=sys.stderr)
@@ -1119,7 +1176,7 @@ class Finalizer:
             submission=self.submission,
             commit_link=self.commit_link,
             release_link=self.release_link,
-            when=now_utc(),
+            when=self.submitted_at,
             review_link=self.review_link,
             submitted_by=self.submitted_by,
             assignment_type=self.assignment_type,
@@ -1147,7 +1204,7 @@ class Finalizer:
             submission=self.submission,
             commit_link=self.commit_link,
             release_link=self.release_link,
-            when=now_utc(),
+            when=self.submitted_at,
             review_link=self.review_link,
             submitted_by=self.submitted_by,
             assignment_type=self.assignment_type,
@@ -1510,7 +1567,8 @@ class DeclarativeGrader:
                  commit_link: str, release_link: str,
                  review_link: str | None = None,
                  submitted_by: dict[str, Any] | None = None,
-                 assignment_type: str = "individual"):
+                 assignment_type: str = "individual",
+                 submitted_at: datetime.datetime | None = None):
         self.workspace = workspace
         self.fixtures_dir = fixtures_dir
         self.classroom = classroom
@@ -1522,6 +1580,9 @@ class DeclarativeGrader:
         self.review_link = review_link
         self.submitted_by = submitted_by
         self.assignment_type = assignment_type
+        # The graded commit's committer date (invariant submission instant),
+        # written as `datetime`; defaults to now when not supplied.
+        self.submitted_at = submitted_at or now_utc()
 
     def grade(self, tests: list[dict[str, Any]]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         """Run every test. Returns (result.json dict, outcomes) where the
@@ -1537,7 +1598,7 @@ class DeclarativeGrader:
             submission=self.submission,
             commit_link=self.commit_link,
             release_link=self.release_link,
-            when=now_utc(),
+            when=self.submitted_at,
             score=sum(o["score"] for o in outcomes),
             max_score=sum(o["max-score"] for o in outcomes),
             tests=rows,
@@ -1572,6 +1633,7 @@ def run_declarative(tests_path: pathlib.Path, finalize: Finalizer,
         review_link=finalize.review_link,
         submitted_by=finalize.submitted_by,
         assignment_type=finalize.assignment_type,
+        submitted_at=finalize.submitted_at,
     )
     # Backstop: execute_test/load_tests handle the expected failures; the
     # broad catch guarantees the "grading outcomes always exit 0"
@@ -1739,6 +1801,13 @@ def finalize_result(finalize: Finalizer, *, is_group: bool) -> int:
     if isinstance(result, dict):
         result["owner"] = finalize.username
         result["assignment_type"] = finalize.assignment_type
+        # Submission instant is runner-authoritative: the graded commit's
+        # committer date, invariant across regrades and not student-influenced.
+        # Overwrite any autograder-written `datetime` so a custom result.json
+        # can't move its own `late` flag or its submission time. `graded_at`
+        # (this run's wall clock) is stamped fresh on every (re)grade.
+        result["datetime"] = finalize.submitted_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+        result["graded_at"] = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
         # The actual pusher (GITHUB_ACTOR), also runner-authoritative. Stamp
         # unconditionally: set it when known, and DROP any autograder-written
         # `submitted_by` when the runner couldn't resolve the actor — never
@@ -1845,6 +1914,10 @@ def main() -> int:
     username = username_from_repo(repository, classroom, assignment, actor)
     commit_link = commit_url(server_url, repository, sha)
     release_link = release_url(server_url, repository, submission)
+    # The submission instant is the graded commit's committer date — stable
+    # across regrades, so re-running grading on the same commit never moves the
+    # `datetime`/`late` in the gradebook (the regrade only refreshes the score).
+    submitted_at = commit_submitted_at(sha, workspace)
     # Resolve the baseline once: both the review-compare link and the
     # Feedback PR gate need it, and the scan issues several sequential
     # git calls, so a second walk would double the worst-case time
@@ -1892,6 +1965,7 @@ def main() -> int:
         review_link=review_link,
         submitted_by=actor_identity(),
         assignment_type="group" if is_group else "individual",
+        submitted_at=submitted_at,
     )
 
     # Reset the runtime root and clear stale outputs from any prior run.

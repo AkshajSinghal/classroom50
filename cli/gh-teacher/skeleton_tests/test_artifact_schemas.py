@@ -111,6 +111,15 @@ class TestResultSchema:
         assert _errs(RESULT_V, _result(submitted_by={"username": "bob", "id": 222})) == []
         assert _errs(RESULT_V, _result(submitted_by={"username": "bob", "id": None})) == []
 
+    def test_graded_at_accepted(self):
+        # Optional: the "last graded" wall-clock instant (moves on regrade),
+        # distinct from `datetime` (the fixed submission instant).
+        assert _errs(RESULT_V, _result(graded_at="2026-06-02T09:00:00Z")) == []
+
+    def test_graded_at_malformed_rejected(self):
+        # Same strict UTC-Z pattern as datetime.
+        assert _errs(RESULT_V, _result(graded_at="2026-06-02 09:00:00")) != []
+
     def test_submitted_by_malformed_rejected(self):
         assert _errs(RESULT_V, _result(submitted_by={"id": 222})) != []            # no username
         assert _errs(RESULT_V, _result(submitted_by={"username": "", "id": 1})) != []  # empty

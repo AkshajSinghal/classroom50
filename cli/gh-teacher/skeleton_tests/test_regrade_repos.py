@@ -1,0 +1,522 @@
+"""Unit tests for `regrade_repos.py`.
+
+The GitHub-API transport is exercised end-to-end against a live classroom
+by the functional smoke test; these tests focus on the pure helpers and the
+per-repo decision logic (tag construction, idempotent reuse, missing-repo
+handling, hard-vs-skip error classification) and the roster/manifest loader,
+with the HTTP layer stubbed.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import pathlib
+import urllib.error
+
+import pytest
+
+from conftest import regrade_repos as rr
+
+
+# Pure helpers ----------------------------------------------------------------
+
+
+def test_assignment_repo_name_lowercases():
+    assert rr.assignment_repo_name("CS-Principles", "Hello", "Alice") == (
+        "cs-principles-hello-alice"
+    )
+
+
+def test_build_submit_tag_shape():
+    tag = rr.build_submit_tag("abcdef1234567890")
+    assert tag.startswith("submit/")
+    # submit/<ISO-ish timestamp>Z-<7-char short sha>
+    assert tag.endswith("-abcdef1")
+    assert "T" in tag and tag.count("-") >= 3
+
+
+def test_is_hard_http_error():
+    for code in (401, 403, 599):
+        assert rr.is_hard_http_error(_http_error(code))
+    for code in (404, 422, 500):
+        assert not rr.is_hard_http_error(_http_error(code))
+
+
+# regrade_repo decision logic -------------------------------------------------
+
+
+def test_regrade_repo_reruns_latest_run(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(rr, "latest_autograde_run_id", lambda *a, **k: 4242)
+
+    def fake_rerun(api_url, org, repo, token, run_id):
+        calls["run_id"] = run_id
+
+    monkeypatch.setattr(rr, "rerun_workflow_run", fake_rerun)
+    # main_head_sha / tagging must NOT be reached when a run exists.
+    monkeypatch.setattr(
+        rr, "main_head_sha", lambda *a, **k: (_ for _ in ()).throw(AssertionError())
+    )
+
+    assert rr.regrade_repo("https://api", "cs50", "cs50-hello-alice", "tok") == "rerun"
+    assert calls["run_id"] == 4242
+
+
+def test_regrade_repo_first_grades_when_no_prior_run(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(rr, "latest_autograde_run_id", lambda *a, **k: None)
+    monkeypatch.setattr(rr, "main_head_sha", lambda *a, **k: "deadbeefcafe")
+    monkeypatch.setattr(rr, "existing_submit_tag_at", lambda *a, **k: None)
+
+    def fake_create(api_url, org, repo, token, tag, sha):
+        calls["tag"] = tag
+        calls["sha"] = sha
+
+    monkeypatch.setattr(rr, "create_tag_ref", fake_create)
+
+    assert rr.regrade_repo("https://api", "cs50", "cs50-hello-alice", "tok") == "tagged"
+    assert calls["sha"] == "deadbeefcafe"
+    assert calls["tag"].startswith("submit/")
+
+
+def test_regrade_repo_first_grade_reuses_existing_tag(monkeypatch):
+    monkeypatch.setattr(rr, "latest_autograde_run_id", lambda *a, **k: None)
+    monkeypatch.setattr(rr, "main_head_sha", lambda *a, **k: "deadbeef")
+    monkeypatch.setattr(
+        rr, "existing_submit_tag_at", lambda *a, **k: "submit/2026-01-01T00-00-00Z-deadbee"
+    )
+
+    def boom(*a, **k):
+        raise AssertionError("create_tag_ref called despite an existing tag")
+
+    monkeypatch.setattr(rr, "create_tag_ref", boom)
+    assert rr.regrade_repo("https://api", "cs50", "cs50-hello-alice", "tok") == "tagged"
+
+
+def test_regrade_repo_missing_repo(monkeypatch):
+    monkeypatch.setattr(rr, "latest_autograde_run_id", lambda *a, **k: None)
+    monkeypatch.setattr(rr, "main_head_sha", lambda *a, **k: None)
+    monkeypatch.setattr(
+        rr, "existing_submit_tag_at", lambda *a, **k: (_ for _ in ()).throw(AssertionError())
+    )
+    assert rr.regrade_repo("https://api", "cs50", "cs50-hello-alice", "tok") == "missing"
+
+
+def test_latest_autograde_run_id_parses_newest(monkeypatch):
+    body = json.dumps({"workflow_runs": [{"id": 999}]}).encode("utf-8")
+    monkeypatch.setattr(rr, "_http_get", lambda *a, **k: body)
+    assert rr.latest_autograde_run_id("https://api", "cs50", "repo", "tok") == 999
+
+
+def test_latest_autograde_run_id_none_when_no_runs(monkeypatch):
+    body = json.dumps({"workflow_runs": []}).encode("utf-8")
+    monkeypatch.setattr(rr, "_http_get", lambda *a, **k: body)
+    assert rr.latest_autograde_run_id("https://api", "cs50", "repo", "tok") is None
+
+
+def test_latest_autograde_run_id_none_on_404(monkeypatch):
+    def fake_get(url, token, *, accept, _retries=3):
+        raise _http_error(404)
+
+    monkeypatch.setattr(rr, "_http_get", fake_get)
+    assert rr.latest_autograde_run_id("https://api", "cs50", "repo", "tok") is None
+
+
+def test_rerun_workflow_run_posts_to_rerun_endpoint(monkeypatch):
+    seen = {}
+
+    def fake_request(method, url, token, *, accept, body=None, _retries=3):
+        seen["method"] = method
+        seen["url"] = url
+        return b""
+
+    monkeypatch.setattr(rr, "_http_request", fake_request)
+    rr.rerun_workflow_run("https://api", "cs50", "repo", "tok", 77)
+    assert seen["method"] == "POST"
+    assert seen["url"].endswith("/actions/runs/77/rerun")
+
+
+def test_rerun_workflow_run_403_raises_skiprepo(monkeypatch):
+    def fake_request(method, url, token, *, accept, body=None, _retries=3):
+        raise _http_error(403)
+
+    monkeypatch.setattr(rr, "_http_request", fake_request)
+    with pytest.raises(rr._SkipRepo):
+        rr.rerun_workflow_run("https://api", "cs50", "repo", "tok", 5)
+
+
+def test_main_head_sha_returns_none_on_404(monkeypatch):
+    def fake_get(url, token, *, accept, _retries=3):
+        raise _http_error(404)
+
+    monkeypatch.setattr(rr, "_http_get", fake_get)
+    assert rr.main_head_sha("https://api", "cs50", "repo", "tok") is None
+
+
+def test_main_head_sha_parses_object_sha(monkeypatch):
+    body = json.dumps({"object": {"sha": "1234abcd"}}).encode("utf-8")
+    monkeypatch.setattr(rr, "_http_get", lambda *a, **k: body)
+    assert rr.main_head_sha("https://api", "cs50", "repo", "tok") == "1234abcd"
+
+
+def test_existing_submit_tag_matches_sha(monkeypatch):
+    body = json.dumps(
+        [
+            {"ref": "refs/tags/submit/2026-01-01T00-00-00Z-aaaaaaa", "object": {"sha": "other"}},
+            {"ref": "refs/tags/submit/2026-02-02T00-00-00Z-bbbbbbb", "object": {"sha": "target"}},
+        ]
+    ).encode("utf-8")
+    monkeypatch.setattr(rr, "_http_get", lambda *a, **k: body)
+    got = rr.existing_submit_tag_at("https://api", "cs50", "repo", "tok", "target")
+    assert got == "submit/2026-02-02T00-00-00Z-bbbbbbb"
+
+
+def test_existing_submit_tag_no_match_returns_none(monkeypatch):
+    body = json.dumps(
+        [{"ref": "refs/tags/submit/x", "object": {"sha": "nope"}}]
+    ).encode("utf-8")
+    monkeypatch.setattr(rr, "_http_get", lambda *a, **k: body)
+    assert rr.existing_submit_tag_at("https://api", "cs50", "repo", "tok", "target") is None
+
+
+def test_existing_submit_tag_dereferences_annotated_tag(monkeypatch):
+    # An annotated submit/* tag's ref points at a TAG object, not the commit;
+    # its target commit must be fetched via git/tags/<sha> before matching, or
+    # a duplicate tag/release would be minted on the first-grade fallback.
+    refs = json.dumps(
+        [
+            {
+                "ref": "refs/tags/submit/2026-03-03T00-00-00Z-ccccccc",
+                "object": {"sha": "tagobjsha", "type": "tag"},
+            }
+        ]
+    ).encode("utf-8")
+    tag_obj = json.dumps({"object": {"sha": "target", "type": "commit"}}).encode("utf-8")
+
+    def fake_get(url, token, *, accept, _retries=3):
+        return tag_obj if "/git/tags/" in url else refs
+
+    monkeypatch.setattr(rr, "_http_get", fake_get)
+    got = rr.existing_submit_tag_at("https://api", "cs50", "repo", "tok", "target")
+    assert got == "submit/2026-03-03T00-00-00Z-ccccccc"
+
+
+def test_existing_submit_tag_annotated_tag_pointing_elsewhere_no_match(monkeypatch):
+    refs = json.dumps(
+        [
+            {
+                "ref": "refs/tags/submit/2026-03-03T00-00-00Z-ccccccc",
+                "object": {"sha": "tagobjsha", "type": "tag"},
+            }
+        ]
+    ).encode("utf-8")
+    tag_obj = json.dumps({"object": {"sha": "someothercommit", "type": "commit"}}).encode("utf-8")
+
+    def fake_get(url, token, *, accept, _retries=3):
+        return tag_obj if "/git/tags/" in url else refs
+
+    monkeypatch.setattr(rr, "_http_get", fake_get)
+    assert rr.existing_submit_tag_at("https://api", "cs50", "repo", "tok", "target") is None
+
+
+def test_existing_submit_tag_annotated_deref_failure_is_no_match(monkeypatch):
+    # A failed dereference falls back to "no existing tag" (worst case: a
+    # duplicate release, never a missed regrade).
+    refs = json.dumps(
+        [
+            {
+                "ref": "refs/tags/submit/2026-03-03T00-00-00Z-ccccccc",
+                "object": {"sha": "tagobjsha", "type": "tag"},
+            }
+        ]
+    ).encode("utf-8")
+
+    def fake_get(url, token, *, accept, _retries=3):
+        if "/git/tags/" in url:
+            raise _http_error(404)
+        return refs
+
+    monkeypatch.setattr(rr, "_http_get", fake_get)
+    assert rr.existing_submit_tag_at("https://api", "cs50", "repo", "tok", "target") is None
+
+
+def test_create_tag_ref_swallows_ref_already_exists_422(monkeypatch):
+    def fake_request(method, url, token, *, accept, body=None, _retries=3):
+        raise _http_error(422, body={"message": "Reference already exists"})
+
+    monkeypatch.setattr(rr, "_http_request", fake_request)
+    # Should NOT raise — a 422 whose body says the ref exists is a benign
+    # concurrent-regrade race.
+    rr.create_tag_ref("https://api", "cs50", "repo", "tok", "submit/t", "sha")
+
+
+def test_create_tag_ref_propagates_other_422(monkeypatch):
+    # A 422 that is NOT "already exists" (e.g. invalid sha) is a real failure
+    # and must propagate so the caller records the repo as failed rather than
+    # mis-counting it as first-graded (phantom-tagged).
+    def fake_request(method, url, token, *, accept, body=None, _retries=3):
+        raise _http_error(422, body={"message": "Object does not exist"})
+
+    monkeypatch.setattr(rr, "_http_request", fake_request)
+    with pytest.raises(urllib.error.HTTPError):
+        rr.create_tag_ref("https://api", "cs50", "repo", "tok", "submit/t", "sha")
+
+
+def test_create_tag_ref_propagates_bodyless_422(monkeypatch):
+    # A 422 with an unreadable/empty body fails safe toward surfacing the
+    # error rather than silently swallowing an unconfirmed "already exists".
+    def fake_request(method, url, token, *, accept, body=None, _retries=3):
+        raise _http_error(422)
+
+    monkeypatch.setattr(rr, "_http_request", fake_request)
+    with pytest.raises(urllib.error.HTTPError):
+        rr.create_tag_ref("https://api", "cs50", "repo", "tok", "submit/t", "sha")
+
+
+def test_create_tag_ref_propagates_other_errors(monkeypatch):
+    def fake_request(method, url, token, *, accept, body=None, _retries=3):
+        raise _http_error(500)
+
+    monkeypatch.setattr(rr, "_http_request", fake_request)
+    with pytest.raises(urllib.error.HTTPError):
+        rr.create_tag_ref("https://api", "cs50", "repo", "tok", "submit/t", "sha")
+
+
+# main() orchestration ---------------------------------------------------------
+
+
+def _set_main_env(monkeypatch, **overrides):
+    env = {
+        "GITHUB_WORKSPACE": ".",
+        "CLASSROOM_FILTER": "cs50",
+        "ASSIGNMENT_FILTER": "hello",
+        "OWNER_FILTER": "",
+        "GITHUB_REPOSITORY_OWNER": "cs50org",
+        "CLASSROOM50_SERVICE_TOKEN": "tok",
+    }
+    env.update(overrides)
+    for key in (
+        "GITHUB_WORKSPACE", "CLASSROOM_FILTER", "ASSIGNMENT_FILTER", "OWNER_FILTER",
+        "GITHUB_REPOSITORY_OWNER", "CLASSROOM50_SERVICE_TOKEN", "GH_API_URL", "GITHUB_API_URL",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+
+
+@pytest.mark.parametrize(
+    "missing",
+    ["CLASSROOM_FILTER", "ASSIGNMENT_FILTER", "GITHUB_REPOSITORY_OWNER", "CLASSROOM50_SERVICE_TOKEN"],
+)
+def test_main_returns_1_on_missing_required_input(monkeypatch, missing):
+    _set_main_env(monkeypatch, **{missing: ""})
+    # load_roster must not be reached when a required input is empty.
+    monkeypatch.setattr(
+        rr, "load_roster", lambda *a, **k: (_ for _ in ()).throw(AssertionError())
+    )
+    assert rr.main() == 1
+
+
+def test_main_all_success_returns_0(monkeypatch):
+    _set_main_env(monkeypatch)
+    monkeypatch.setattr(rr, "load_roster", lambda *a, **k: ["alice", "bob"])
+    outcomes = {"cs50-hello-alice": "rerun", "cs50-hello-bob": "tagged"}
+
+    def fake_regrade(api_url, org, repo, token):
+        return outcomes[repo]
+
+    monkeypatch.setattr(rr, "regrade_repo", fake_regrade)
+    assert rr.main() == 0
+
+
+def test_main_hard_http_error_aborts_immediately(monkeypatch):
+    _set_main_env(monkeypatch)
+    monkeypatch.setattr(rr, "load_roster", lambda *a, **k: ["alice", "bob"])
+    seen = []
+
+    def fake_regrade(api_url, org, repo, token):
+        seen.append(repo)
+        raise _http_error(403)  # hard error -> abort the whole run
+
+    monkeypatch.setattr(rr, "regrade_repo", fake_regrade)
+    assert rr.main() == 1
+    # Aborts on the FIRST repo — does not continue iterating the roster.
+    assert seen == ["cs50-hello-alice"]
+
+
+def test_main_soft_http_error_skips_and_exits_1(monkeypatch):
+    _set_main_env(monkeypatch)
+    monkeypatch.setattr(rr, "load_roster", lambda *a, **k: ["alice", "bob"])
+
+    def fake_regrade(api_url, org, repo, token):
+        if repo.endswith("alice"):
+            raise _http_error(500)  # non-hard -> warn-and-skip, continue
+        return "rerun"
+
+    monkeypatch.setattr(rr, "regrade_repo", fake_regrade)
+    # One repo failed (appended to failed[]) but the other regraded -> exit 1.
+    assert rr.main() == 1
+
+
+def test_main_skiprepo_counts_as_skipped_not_failed(monkeypatch):
+    _set_main_env(monkeypatch)
+    monkeypatch.setattr(rr, "load_roster", lambda *a, **k: ["alice", "bob"])
+
+    def fake_regrade(api_url, org, repo, token):
+        if repo.endswith("alice"):
+            raise rr._SkipRepo()  # benign per-repo skip
+        return "rerun"
+
+    monkeypatch.setattr(rr, "regrade_repo", fake_regrade)
+    # A _SkipRepo is counted as skipped, not failed -> exit 0.
+    assert rr.main() == 0
+
+
+def test_main_owner_filter_narrows_to_one(monkeypatch):
+    _set_main_env(monkeypatch, OWNER_FILTER="Bob")  # case-insensitive match
+    monkeypatch.setattr(rr, "load_roster", lambda *a, **k: ["alice", "bob"])
+    seen = []
+
+    def fake_regrade(api_url, org, repo, token):
+        seen.append(repo)
+        return "rerun"
+
+    monkeypatch.setattr(rr, "regrade_repo", fake_regrade)
+    assert rr.main() == 0
+    assert seen == ["cs50-hello-bob"]
+
+
+def test_main_owner_filter_no_match_returns_1(monkeypatch):
+    _set_main_env(monkeypatch, OWNER_FILTER="carol")
+    monkeypatch.setattr(rr, "load_roster", lambda *a, **k: ["alice", "bob"])
+    monkeypatch.setattr(
+        rr, "regrade_repo", lambda *a, **k: (_ for _ in ()).throw(AssertionError())
+    )
+    assert rr.main() == 1
+
+
+def test_main_logs_incremental_progress(monkeypatch, capsys):
+    # A killed-by-timeout run must leave per-repo accounting in the log, so the
+    # fan-out emits a progress line every PROGRESS_EVERY repos (and on the last).
+    monkeypatch.setattr(rr, "PROGRESS_EVERY", 2)
+    _set_main_env(monkeypatch)
+    monkeypatch.setattr(rr, "load_roster", lambda *a, **k: ["a", "b", "c"])
+    monkeypatch.setattr(rr, "regrade_repo", lambda *a, **k: "rerun")
+
+    assert rr.main() == 0
+    out = capsys.readouterr().out
+    # One checkpoint at index 2 (PROGRESS_EVERY) and one at index 3 (== total).
+    assert out.count("progress 2/3") == 1
+    assert out.count("progress 3/3") == 1
+
+
+# Roster / manifest loader ----------------------------------------------------
+
+
+def _write_classroom(tmp_path: pathlib.Path, *, slug="hello", header=None, rows=("alice", "bob")):
+    cdir = tmp_path / "cs50"
+    cdir.mkdir()
+    (cdir / "assignments.json").write_text(
+        json.dumps(
+            {
+                "schema": rr.ASSIGNMENTS_SCHEMA_V1,
+                "assignments": [{"slug": slug, "name": slug, "mode": "individual", "autograder": "default"}],
+            }
+        )
+    )
+    header = header or ",".join(rr.ROSTER_REQUIRED_COLUMNS)
+    lines = [header] + [f"{u},,,,,," for u in rows]
+    (cdir / "students.csv").write_text("\n".join(lines) + "\n")
+    return cdir
+
+
+def test_load_roster_returns_usernames(tmp_path):
+    cdir = _write_classroom(tmp_path)
+    assert rr.load_roster(cdir, "hello") == ["alice", "bob"]
+
+
+def test_load_roster_rejects_unregistered_assignment(tmp_path):
+    cdir = _write_classroom(tmp_path, slug="hello")
+    with pytest.raises(rr.RegradeInputError, match="not registered"):
+        rr.load_roster(cdir, "nope")
+
+
+def test_load_roster_rejects_renamed_header(tmp_path):
+    cdir = _write_classroom(tmp_path, header="user,first_name,last_name,email,section,github_id")
+    with pytest.raises(rr.RegradeInputError, match="want it to"):
+        rr.load_roster(cdir, "hello")
+
+
+def test_load_roster_missing_classroom(tmp_path):
+    with pytest.raises(rr.RegradeInputError, match="not found"):
+        rr.load_roster(tmp_path / "missing", "hello")
+
+
+def test_load_roster_bad_schema(tmp_path):
+    cdir = tmp_path / "cs50"
+    cdir.mkdir()
+    (cdir / "assignments.json").write_text(json.dumps({"schema": "wrong", "assignments": []}))
+    (cdir / "students.csv").write_text(",".join(rr.ROSTER_REQUIRED_COLUMNS) + "\n")
+    with pytest.raises(rr.RegradeInputError, match="schema"):
+        rr.load_roster(cdir, "hello")
+
+
+def test_load_roster_skips_malformed_username(tmp_path):
+    cdir = _write_classroom(tmp_path, rows=("alice", "bad/name", "bob"))
+    # The malformed username is skipped with a warning; valid rows survive.
+    assert rr.load_roster(cdir, "hello") == ["alice", "bob"]
+
+
+def test_load_roster_empty_csv(tmp_path):
+    cdir = tmp_path / "cs50"
+    cdir.mkdir()
+    (cdir / "assignments.json").write_text(
+        json.dumps(
+            {
+                "schema": rr.ASSIGNMENTS_SCHEMA_V1,
+                "assignments": [{"slug": "hello", "name": "hello", "mode": "individual", "autograder": "default"}],
+            }
+        )
+    )
+    (cdir / "students.csv").write_text("")  # no header row
+    with pytest.raises(rr.RegradeInputError, match="empty"):
+        rr.load_roster(cdir, "hello")
+
+
+def test_load_roster_missing_assignments_json(tmp_path):
+    cdir = tmp_path / "cs50"
+    cdir.mkdir()
+    with pytest.raises(rr.RegradeInputError, match="assignments.json not found"):
+        rr.load_roster(cdir, "hello")
+
+
+def test_load_roster_unparseable_assignments_json(tmp_path):
+    cdir = tmp_path / "cs50"
+    cdir.mkdir()
+    (cdir / "assignments.json").write_text("{not json")
+    with pytest.raises(rr.RegradeInputError, match="assignments.json"):
+        rr.load_roster(cdir, "hello")
+
+
+def test_load_roster_missing_students_csv(tmp_path):
+    cdir = tmp_path / "cs50"
+    cdir.mkdir()
+    (cdir / "assignments.json").write_text(
+        json.dumps(
+            {
+                "schema": rr.ASSIGNMENTS_SCHEMA_V1,
+                "assignments": [{"slug": "hello", "name": "hello", "mode": "individual", "autograder": "default"}],
+            }
+        )
+    )
+    with pytest.raises(rr.RegradeInputError, match="students.csv not found"):
+        rr.load_roster(cdir, "hello")
+
+
+# Helpers ---------------------------------------------------------------------
+
+
+def _http_error(code: int, *, body: dict | None = None) -> urllib.error.HTTPError:
+    fp = io.BytesIO(json.dumps(body).encode("utf-8")) if body is not None else None
+    return urllib.error.HTTPError(url="https://api", code=code, msg="x", hdrs=None, fp=fp)
