@@ -2,6 +2,7 @@ import {
   ChevronRight,
   GitCommitHorizontal,
   MessageCircle,
+  RefreshCw,
   ScrollText,
   UsersRound,
 } from "lucide-react"
@@ -22,6 +23,7 @@ import { StudentProfileModal } from "@/components/modals/StudentProfileModal"
 import type { SubmissionAttempt, SubmissionRow } from "@/hooks/useGetScores"
 import useGetFeedbackPr from "@/hooks/useGetFeedbackPr"
 import useGetRepoCollaborators from "@/hooks/useGetRepoCollaborators"
+import useTriggerRegrade from "@/hooks/useTriggerRegrade"
 import type { Student } from "@/types/classroom"
 
 const formatDateTime = (datetime: string) =>
@@ -294,6 +296,73 @@ const ReviewButton = ({ org, repo }: { org: string; repo: string }) => {
   )
 }
 
+// Per-row regrade: re-runs the autograder against this repo's latest commit by
+// dispatching the regrade.yaml workflow scoped to a single owner. Tracks the
+// dispatch run via useTriggerRegrade so the icon shows progress and disables
+// while in flight. A confirm guards the (potentially minutes-long, async)
+// grading kickoff. Grading runs in the student repo afterward, so the gradebook
+// refreshes on the next collect — the button only kicks it off.
+const RegradeButton = ({
+  org,
+  classroom,
+  assignment,
+  owner,
+}: {
+  org: string
+  classroom: string
+  assignment: string
+  owner: string
+}) => {
+  const { regrade, phase } = useTriggerRegrade({
+    org,
+    classroom,
+    assignment,
+    owner,
+  })
+  const inFlight = phase === "dispatching" || phase === "running"
+
+  const title =
+    phase === "dispatching" || phase === "running"
+      ? "Regrade in progress…"
+      : phase === "completed"
+        ? "Regrade started — grading runs in the background; collect to see new scores"
+        : phase === "failed"
+          ? "Regrade failed to start — try again"
+          : "Regrade this submission"
+
+  const handleClick = () => {
+    if (inFlight) return
+    if (
+      window.confirm(
+        `Re-run the autograder on ${owner}'s latest commit for this assignment?\n\n` +
+          "Grading runs in the background and can take a few minutes; use " +
+          '"Collect now" afterward to pull the new score.',
+      )
+    ) {
+      regrade()
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      className={`${ACTION_BTN} text-base-content/70 disabled:opacity-60`}
+      disabled={inFlight}
+      onClick={handleClick}
+      aria-label={`Regrade ${owner}'s submission`}
+      title={title}
+    >
+      {inFlight ? (
+        <span className="loading loading-spinner loading-xs" />
+      ) : (
+        <RefreshCw
+          className={`size-4 ${phase === "completed" ? "text-success" : phase === "failed" ? "text-error" : ""}`}
+        />
+      )}
+    </button>
+  )
+}
+
 // Expanded per-row history: every submission for a repo, newest first.
 const SubmissionHistory = ({
   submissions,
@@ -513,16 +582,26 @@ const SubmissionsTable = ({
                         </label>
                       </td>
                       <td>
-                        <div className="flex items-center gap-2">
-                          <span className="whitespace-nowrap">
-                            {formatDateTime(datetime)}
-                          </span>
-                          {late ? (
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="whitespace-nowrap">
+                              {formatDateTime(datetime)}
+                            </span>
+                            {late ? (
+                              <span
+                                className="badge badge-sm badge-error badge-soft"
+                                title="The latest submission was pushed after the deadline."
+                              >
+                                Late
+                              </span>
+                            ) : null}
+                          </div>
+                          {rest.gradedAt && rest.gradedAt !== datetime ? (
                             <span
-                              className="badge badge-sm badge-error badge-soft"
-                              title="The latest submission was pushed after the deadline."
+                              className="whitespace-nowrap text-xs text-base-content/50"
+                              title="When the autograder last (re-)graded this submission. Regrading updates this without changing the submission time."
                             >
-                              Late
+                              Graded {formatDateTime(rest.gradedAt)}
                             </span>
                           ) : null}
                         </div>
@@ -564,6 +643,12 @@ const SubmissionsTable = ({
                             title="Details"
                             emptyLabel="No autograder details yet"
                             emptyTitle="No details yet"
+                          />
+                          <RegradeButton
+                            org={org}
+                            classroom={classroom}
+                            assignment={assignment}
+                            owner={rest.owner}
                           />
                         </div>
                       </td>
