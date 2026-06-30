@@ -1,4 +1,5 @@
 import { useParams, Link } from "@tanstack/react-router"
+import { useState } from "react"
 import {
   BookOpen,
   BookText,
@@ -13,13 +14,16 @@ import GitHub from "@/assets/github.svg?react"
 
 import useGetClasses from "@/hooks/useGetClasses"
 import useGetStudents from "@/hooks/useGetStudents"
+import { isClassroomArchived } from "@/types/classroom"
+import { useSafeSubmit } from "@/hooks/useSafeSubmit"
 
 import Drawer, {
   DrawerContent,
   DrawerSidebar,
   DrawerToggle,
 } from "@/components/drawer"
-import type { GitHubFileListing } from "@/hooks/github/types"
+import type { GitHubFileListing, GitHubRepo } from "@/hooks/github/types"
+import MissingParams from "@/components/MissingParams"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
 import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
@@ -29,13 +33,36 @@ import { useGitHubClient } from "@/context/github/GitHubProvider"
 import useGetOrgRepos from "@/hooks/useGetMyOrgRepos"
 import useDotClassroom50 from "@/hooks/useDotClassroom50"
 import useGetPublicAssignment from "@/hooks/useGetPublicAssignment"
+import OrgPreflightNotice from "@/pages/orgSettings/OrgPreflightNotice"
 
-const ClassCard = ({ cl, org }: { cl: GitHubFileListing; org: string }) => {
+type ClassFilter = "active" | "archived" | "all"
+
+const ClassCard = ({
+  cl,
+  org,
+  filter,
+}: {
+  cl: GitHubFileListing
+  org: string
+  filter: ClassFilter
+}) => {
   const { data: classroomData } = useGetClassroom(org, cl.path)
   const { students } = useGetStudents(org, cl.path)
   const { isTeacher } = useCourseTeacherAccess(org)
 
   const canEdit = isTeacher && cl.name
+  const archived = isClassroomArchived(classroomData ?? {})
+
+  // Defer rendering until the classroom's lifecycle is known, for every tab.
+  // We can't tell active from archived until classroomData loads, so painting a
+  // full card (or even a skeleton slot) under Active/All and then unmounting it
+  // when it resolves archived causes a grid relayout flash. Rendering nothing
+  // until resolved means each card appears exactly once, in its correct tab —
+  // never painted then self-unmounted. (The page already shows a top-level
+  // skeleton grid during the initial classes load.)
+  if (!classroomData) return null
+  if (filter === "active" && archived) return null
+  if (filter === "archived" && !archived) return null
 
   return (
     <div className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
@@ -51,35 +78,27 @@ const ClassCard = ({ cl, org }: { cl: GitHubFileListing; org: string }) => {
         </Link>
       )}
       <div className="card-body gap-4">
-        {classroomData ? (
-          <label
-            className={`h-6 badge badge-soft ${classroomData?.active ? "badge-success" : "badge-primary"}`}
-          >
+        <div className="flex items-center gap-2">
+          <label className="h-6 badge badge-soft badge-primary">
             {classroomData?.term || "No Term Specified"}
           </label>
-        ) : (
-          <div className="skeleton w-10 h-6" />
-        )}
-        {classroomData ? (
-          <h1 className="text-xl h-8">
-            {classroomData?.name ||
-              classroomData?.short_name ||
-              "Unknown Class Name"}
-          </h1>
-        ) : (
-          <div className="skeleton h-8 w-40" />
-        )}
-        {classroomData ? (
-          <div className="flex gap-2 h-6">
-            <UsersRound />
-            {students ? `${students.length} Students` : "No Students"}
-          </div>
-        ) : (
-          <div className="skeleton w-20 h-6" />
-        )}
+          {archived ? (
+            <span className="h-6 badge badge-soft badge-neutral">Archived</span>
+          ) : null}
+        </div>
+        <h1 className="text-xl h-8">
+          {classroomData?.name ||
+            classroomData?.short_name ||
+            "Unknown Class Name"}
+        </h1>
+        <div className="flex gap-2 h-6">
+          <UsersRound />
+          {students ? `${students.length} Students` : "No Students"}
+        </div>
         <Link
           type="button"
-          to={`/${org}/${cl.path}/assignments`}
+          to="/$org/$classroom/assignments"
+          params={{ org, classroom: cl.path }}
           className="btn btn-outline btn-primary w-full"
         >
           <BookText />
@@ -90,7 +109,7 @@ const ClassCard = ({ cl, org }: { cl: GitHubFileListing; org: string }) => {
   )
 }
 
-const CreateClassroomPane = ({ org }) => (
+const CreateClassroomPane = ({ org }: { org: string }) => (
   <div className="card border border-dashed border-base-300 bg-base-100 shadow-sm">
     <div className="card-body items-center py-12 text-center">
       <div className="mb-2 flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary">
@@ -106,7 +125,8 @@ const CreateClassroomPane = ({ org }) => (
 
       <div className="card-actions mt-4">
         <Link
-          to={`/${org}/classes/new`}
+          to="/$org/classes/new"
+          params={{ org }}
           type="button"
           className="btn btn-primary"
         >
@@ -121,6 +141,7 @@ const CreateClassroomPane = ({ org }) => (
 const JoinOrgCard = ({ org }: { org: string }) => {
   const client = useGitHubClient()
   const queryClient = useQueryClient()
+  const run = useSafeSubmit()
 
   const mutation = useMutation({
     mutationFn: () => acceptPendingOrgInvite(client, org),
@@ -158,7 +179,7 @@ const JoinOrgCard = ({ org }: { org: string }) => {
             type="button"
             className="btn btn-primary"
             disabled={mutation.isPending}
-            onClick={() => mutation.mutate()}
+            onClick={() => void run(() => mutation.mutateAsync())}
           >
             {mutation.isPending ? (
               <span className="loading loading-spinner loading-sm" />
@@ -173,22 +194,30 @@ const JoinOrgCard = ({ org }: { org: string }) => {
   )
 }
 
-const RepoCard = ({ org, repo }) => {
+const RepoCard = ({ org, repo }: { org: string; repo: GitHubRepo }) => {
   const cl50Yaml = useDotClassroom50(org, repo.name)
-  const { classroom, assignment } = cl50Yaml
-  const assignmentData = useGetPublicAssignment(org, classroom, assignment)
+  const { classroom, assignment, secret } = cl50Yaml
+  const { assignment: assignmentData } = useGetPublicAssignment(
+    org,
+    classroom,
+    assignment,
+    secret,
+  )
 
-  const canEdit = classroom && assignment
+  // Only group assignments have something a student can manage (collaborators);
+  // for individual assignments the edit page is a dead-end, so no pencil.
+  const canManageGroup =
+    Boolean(classroom && assignment) && assignmentData?.mode === "group"
 
   return (
     <div className="card relative col-span-12 rounded-2xl border border-base-200 bg-base-100 md:col-span-6 xl:col-span-4">
-      {canEdit && (
+      {canManageGroup && classroom && assignment && (
         <Link
           to="/$org/$classroom/assignments/$assignment/edit"
           params={{ org, classroom, assignment }}
           className="btn btn-ghost btn-sm btn-circle absolute right-3 top-3 z-10 text-base-content/50 hover:text-primary"
-          aria-label={`Edit ${assignment}`}
-          title="Edit assignment"
+          aria-label={`Manage group for ${assignment}`}
+          title="Manage group"
         >
           <Pencil className="size-4" />
         </Link>
@@ -225,7 +254,7 @@ const RepoCard = ({ org, repo }) => {
               <Link
                 to="/$org/$classroom"
                 params={{ org, classroom }}
-                className="group inline-flex w-fit gap-1.5 text-sm text-base-content/60 transition hover:text-primary"
+                className="max-w-full truncate group inline-flex w-fit gap-1.5 text-sm text-base-content/60 transition hover:text-primary"
               >
                 <GraduationCap className="size-4" />
                 <span className="truncate">
@@ -237,11 +266,11 @@ const RepoCard = ({ org, repo }) => {
               </Link>
             )}
 
-            {assignment && (
+            {classroom && assignment && (
               <Link
-                to={`/${org}/${classroom}/assignments/${assignment}`}
-                params={{ org, classroom }}
-                className="group inline-flex w-fit gap-1.5 text-sm text-base-content/60 transition hover:text-primary"
+                to="/$org/$classroom/assignments/$assignment"
+                params={{ org, classroom, assignment }}
+                className="max-w-full truncate group inline-flex w-fit gap-1.5 text-sm text-base-content/60 transition hover:text-primary"
               >
                 <BookOpen className="size-4" />
                 <span className="truncate">
@@ -331,11 +360,20 @@ export const OrgRepos = ({
 const ClassesPage = () => {
   const { org } = useParams({ strict: false })
   const { classes } = useGetClasses(org)
-  const { isTeacher, isStudent, isBlocked } = useCourseTeacherAccess(org)
+  const {
+    isTeacher,
+    isStudent,
+    isLoading: roleLoading,
+  } = useCourseTeacherAccess(org)
   const { data: membership, isLoading: loadingMembership } =
     useGetOwnOrgMembership(org)
 
   const isMember = membership?.state === "active"
+  const [filter, setFilter] = useState<ClassFilter>("active")
+
+  if (!org) {
+    return <MissingParams message="Missing organization." />
+  }
 
   return (
     <div className="min-h-screen">
@@ -359,52 +397,88 @@ const ClassesPage = () => {
                 </div>
 
                 <div>
-                  <h1 className="text-2xl font-bold tracking-tight">
-                    My {isTeacher ? "Classes" : "Assignments"}
-                  </h1>
+                  {roleLoading ? (
+                    <div className="skeleton h-8 w-48" />
+                  ) : (
+                    <h1 className="text-2xl font-bold tracking-tight">
+                      My {isTeacher ? "Classes" : "Assignments"}
+                    </h1>
+                  )}
                   <p className="mt-2 max-w-2xl text-sm text-base-content/60">
                     Manage your courses and assignments.
                   </p>
                 </div>
               </div>
 
-              {classes.length && isTeacher ? (
+              {isTeacher && classes.length > 0 && (
                 <div className="flex sm:self-end">
                   <Link
                     type="button"
-                    to={`/${org}/classes/new`}
+                    to="/$org/classes/new"
+                    params={{ org }}
                     className="btn btn-primary"
                   >
                     + New Class
                   </Link>
                 </div>
-              ) : (
-                <></>
               )}
             </div>
-            {isStudent && !isMember && !loadingMembership ? (
+            {isStudent && !isMember && !loadingMembership && (
               <JoinOrgCard org={org} />
-            ) : (
-              <></>
             )}
           </div>
-          {classes.length === 0 && isTeacher ? (
-            <CreateClassroomPane org={org} />
-          ) : null}
-          {isTeacher && (
+          {isTeacher && <OrgPreflightNotice org={org} />}
+          {roleLoading ? (
             <div className="grid grid-cols-12 gap-4 mb-6">
-              {classes.map((cl) => (
-                <ClassCard key={cl.path} cl={cl} org={org} />
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="skeleton col-span-6 h-32 rounded-xl xl:col-span-4"
+                />
               ))}
             </div>
+          ) : (
+            <>
+              {classes.length === 0 && isTeacher && (
+                <CreateClassroomPane org={org} />
+              )}
+              {isTeacher && (
+                <>
+                  {classes.length > 0 && (
+                    <div className="mb-4 flex justify-end">
+                      <div role="tablist" className="tabs tabs-box tabs-sm">
+                        {(["active", "archived", "all"] as const).map((f) => (
+                          <button
+                            key={f}
+                            role="tab"
+                            type="button"
+                            className={`tab capitalize ${filter === f ? "tab-active" : ""}`}
+                            aria-selected={filter === f}
+                            onClick={() => setFilter(f)}
+                          >
+                            {f}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-12 gap-4 mb-6">
+                    {classes.map((cl) => (
+                      <ClassCard
+                        key={cl.path}
+                        cl={cl}
+                        org={org}
+                        filter={filter}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+              {isStudent && isMember && <OrgRepos org={org} />}
+            </>
           )}
-          {isStudent && isMember && <OrgRepos org={org} />}
         </DrawerContent>
-        <DrawerSidebar
-          page="classes"
-          selected="assignments"
-          isTeacher={isTeacher}
-        />
+        <DrawerSidebar page="classes" selected="assignments" />
       </Drawer>
     </div>
   )

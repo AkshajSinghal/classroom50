@@ -10,16 +10,22 @@ type AssignmentsSchema = {
   schema: string
   assignments: Assignment[]
 }
-const useGetClassroomAssignments = (org: string, classroom: string) => {
+const useGetClassroomAssignments = (
+  org: string | undefined,
+  classroom: string | undefined,
+  options?: { enabled?: boolean },
+) => {
   const client = useGitHubClient()
-  return useQuery(
-    jsonFileQuery<AssignmentsSchema>(
-      client,
-      org,
-      "classroom50",
-      `${classroom}/assignments.json`,
-    ),
+  const query = jsonFileQuery<AssignmentsSchema>(
+    client,
+    org ?? "",
+    "classroom50",
+    `${classroom ?? ""}/assignments.json`,
   )
+  return useQuery({
+    ...query,
+    enabled: query.enabled && (options?.enabled ?? true),
+  })
 }
 
 export default useGetClassroomAssignments

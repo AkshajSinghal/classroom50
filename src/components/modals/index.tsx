@@ -31,6 +31,12 @@ export function ConfirmModal({
   const [typedText, setTypedText] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Synchronous re-entrancy latch. `isSubmitting` (React state) updates a tick
+  // late and the button's disabled attribute lags one render, so two clicks in
+  // the same tick would both pass an `isSubmitting` check and both run
+  // onConfirm(). This ref flips synchronously, so a second same-tick submit is
+  // rejected before it can start a duplicate write.
+  const submittingRef = useRef(false)
 
   const matches = typedText === confirmText
   const canSubmit = !needsConfirm || matches
@@ -53,11 +59,12 @@ export function ConfirmModal({
       setHasAcknowledged(false)
       setTypedText("")
       setIsSubmitting(false)
+      submittingRef.current = false
       setError(null)
     }
   }, [open])
 
-  const handleClose = (event?: React.MouseEvent | Event) => {
+  const handleClose = (event?: React.SyntheticEvent | Event) => {
     event?.stopPropagation?.()
 
     if (isSubmitting) return
@@ -66,7 +73,8 @@ export function ConfirmModal({
   }
 
   const handleSubmit = async () => {
-    if (!canSubmit || isSubmitting) return
+    if (!canSubmit || submittingRef.current) return
+    submittingRef.current = true
 
     setIsSubmitting(true)
     setError(null)
@@ -77,6 +85,7 @@ export function ConfirmModal({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.")
     } finally {
+      submittingRef.current = false
       setIsSubmitting(false)
     }
   }
@@ -129,10 +138,12 @@ export function ConfirmModal({
 
         {!hasAcknowledged ? (
           <>
-            <div className="mt-6 rounded-box border border-base-300 bg-base-200/50 p-4 text-sm text-base-content/70">
-              Are you sure you want to continue? This action may be difficult or
-              impossible to undo.
-            </div>
+            {dangerous ? (
+              <div className="mt-6 rounded-box border border-base-300 bg-base-200/50 p-4 text-sm text-base-content/70">
+                Are you sure you want to continue? This action may be difficult
+                or impossible to undo.
+              </div>
+            ) : null}
 
             {error ? (
               <div className="alert alert-error alert-soft mt-4 text-sm">

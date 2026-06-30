@@ -1,13 +1,18 @@
 import type { GitHubClient } from "@/hooks/github/client"
 import type { Assignment } from "@/types/classroom"
+import { GROUP_SIZE_MAX, GROUP_SIZE_MIN } from "@/types/classroom"
+import { PASS_THRESHOLD_MAX, PASS_THRESHOLD_MIN } from "@/types/classroom"
 import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
+import { getUser } from "@/hooks/github/queries"
 import { GitHubAPIError } from "@/hooks/github/errors"
 
 import type { AssignmentTestDraft } from "@/util/assignmentTests"
 import { draftToTest, makeSetupTest } from "@/util/assignmentTests"
 import { buildDueFields } from "@/util/formatDate"
 import { studentRepoName } from "@/util/studentRepo"
+import { classroomPagesSegment } from "@/util/secret"
 import { parseRunnerLabels } from "@/util/runners"
+import { parseAllowedFiles, validateAllowedFiles } from "@/util/allowedFiles"
 import {
   addRepositoryToTeam,
   createCommitForAssignment,
@@ -24,7 +29,11 @@ import {
   getAssignmentsFile,
   type AssignmentsFile,
 } from "../queries/assignments"
-import { withGitConflictRetry, type CreateClassroomResult } from "./classrooms"
+import {
+  withGitConflictRetry,
+  assertClassroomNotArchived,
+  type CreateClassroomResult,
+} from "./classrooms"
 import type { GitHubRepo } from "@/hooks/github/types"
 import {
   getBranchRefRepo,
@@ -34,12 +43,113 @@ import {
 } from "@/hooks/github/queries"
 import { getAuthenticatedUser } from "../queries/users"
 import { acceptPendingOrgInvite } from "./users"
+import {
+  TemplateAccessError,
+  inOrgTemplateError,
+  outOfOrgTemplateError,
+} from "@/util/templateAccessError"
+import { githubOrgOAuthPolicyUrl } from "@/auth/constants"
 
 // Exact subject the runner (runner.py: ACCEPT_COMMIT_SUBJECT) scans for to
 // find the trusted Feedback-PR baseline — any other message makes it skip the
 // PR. Mirrors the CLI's `gh student accept` commit; keep in lockstep.
 const ACCEPT_COMMIT_SUBJECT =
   "Initialize .classroom50.yaml and autograde workflow (gh student accept)"
+
+// A student-facing accept failure. The accept page renders `error.message`
+// verbatim, so this keeps a raw GitHub "Not Found" from reaching a student.
+class AcceptStepError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message)
+    this.name = "AcceptStepError"
+    if (cause !== undefined) {
+      this.cause = cause
+    }
+  }
+}
+
+// Ordered phases of the accept flow, surfaced as a progress checklist in the
+// GUI.
+export type AcceptStepId =
+  | "account"
+  | "assignment"
+  | "autograder"
+  | "repo"
+  | "access"
+  | "setup"
+
+export type AcceptStepStatus = "pending" | "running" | "complete" | "error"
+
+type AcceptStepUpdate = {
+  id: AcceptStepId
+  status: AcceptStepStatus
+  // The label shown for the step; on resolution it can override the default
+  // (e.g. "Repository already exists").
+  message?: string
+  error?: string
+}
+
+type OnAcceptStepUpdate = (update: AcceptStepUpdate) => void
+
+// Run one accept step, emitting progress around it. Its core job is to
+// translate a raw GitHubAPIError into a student-facing, actionable message
+// (`actions`) so a bare "Not Found" never reaches the student; already-friendly
+// errors pass through untouched.
+async function withAcceptStep<T>(
+  params: {
+    id: AcceptStepId
+    label: string
+    actions: string
+    onStepUpdate?: OnAcceptStepUpdate
+    doneMessage?: string
+  },
+  fn: () => Promise<T>,
+): Promise<T> {
+  const { id, label, actions, onStepUpdate, doneMessage } = params
+
+  onStepUpdate?.({ id, status: "running", message: label })
+
+  try {
+    const result = await fn()
+    onStepUpdate?.({ id, status: "complete", message: doneMessage ?? label })
+    return result
+  } catch (err) {
+    const fail = (message: string, cause?: unknown): never => {
+      onStepUpdate?.({ id, status: "error", error: message })
+      throw new AcceptStepError(message, cause)
+    }
+
+    if (err instanceof TemplateAccessError || err instanceof AcceptStepError) {
+      onStepUpdate?.({ id, status: "error", error: err.message })
+      throw err
+    }
+    if (err instanceof GitHubAPIError) {
+      console.error(`Accept step "${label}" failed:`, err)
+
+      if (err.isRateLimited) {
+        fail(
+          `${label} hit GitHub's rate limit. Wait a minute, then try accepting again.`,
+          err,
+        )
+      }
+      if (err.isUnauthorized) {
+        fail(
+          `${label} failed because your GitHub session expired (HTTP 401). Sign out and sign back in, then accept again.`,
+          err,
+        )
+      }
+      fail(`${label} failed (HTTP ${err.status}). ${actions}`, err)
+    }
+    // Unexpected non-GitHub error (network/parse/etc.): surface it on the step
+    // so the checklist row leaves "running" instead of spinning forever.
+    onStepUpdate?.({
+      id,
+      status: "error",
+      error: err instanceof Error ? err.message : "Unexpected error",
+    })
+    throw err
+  }
+}
 
 // Parse a `--template` ref — `<owner>/<repo>[@<branch>]` or a bare `<repo>`
 // (owner defaults to the org). Mirrors the CLI's parseTemplateRef so the GUI
@@ -81,6 +191,130 @@ function parseTemplateRef(raw: string, defaultOwner: string): ParsedTemplate {
     owner: parts[0],
     repo: parts[1],
     branch: trimmedBranch || undefined,
+  }
+}
+
+// Advisory pre-flight verdict for a template ref: mirrors resolveTemplate's
+// checks but returns a verdict instead of throwing. Uses the teacher's OAuth
+// token — the same one students use at accept time.
+export type TemplateAccessVerification =
+  | { kind: "empty" }
+  | { kind: "invalid"; message: string }
+  | { kind: "not-visible"; owner: string; repo: string }
+  | { kind: "not-template"; owner: string; repo: string }
+  // No usable branch: no @branch given and the repo has no default branch
+  // (e.g. a commitless template). resolveTemplate rejects this too.
+  | { kind: "no-branch"; owner: string; repo: string }
+  | { kind: "private-out-of-org"; owner: string; repo: string }
+  // Read denied (HTTP 403): the owning org likely restricts third-party apps.
+  | { kind: "restricted"; owner: string; repo: string; policyUrl: string }
+  // GitHub rate limit hit; the check is inconclusive and should be retried.
+  | { kind: "rate-limited"; owner: string; repo: string }
+  // Verification couldn't complete (network or unexpected error).
+  | { kind: "unknown"; owner: string; repo: string }
+  | {
+      kind: "ok"
+      owner: string
+      repo: string
+      branch: string
+      visibility: "public" | "private"
+      inOrg: boolean
+    }
+  // Reachable third-party org template (neither the classroom org nor the
+  // teacher's account). The org's app restriction only bites at generate time,
+  // so accept may still fail.
+  | {
+      kind: "ok-verify"
+      owner: string
+      repo: string
+      branch: string
+      visibility: "public" | "private"
+      policyUrl: string
+    }
+
+export async function verifyTemplateAccess(
+  client: GitHubClient,
+  org: string,
+  raw: string,
+  viewerLogin?: string,
+): Promise<TemplateAccessVerification> {
+  if (!raw.trim()) return { kind: "empty" }
+
+  let parsed: ParsedTemplate
+  try {
+    parsed = parseTemplateRef(raw, org)
+  } catch (err) {
+    return {
+      kind: "invalid",
+      message: err instanceof Error ? err.message : "Invalid template ref.",
+    }
+  }
+
+  let repo: GitHubRepo | null
+  try {
+    // getRepo is 404-tolerant (returns null). A rate-limit also surfaces as 403,
+    // so check it before treating a 403 as an org restriction.
+    repo = await getRepo(client, parsed.owner, parsed.repo)
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.isRateLimited) {
+      return { kind: "rate-limited", owner: parsed.owner, repo: parsed.repo }
+    }
+    if (err instanceof GitHubAPIError && err.isForbidden) {
+      return {
+        kind: "restricted",
+        owner: parsed.owner,
+        repo: parsed.repo,
+        policyUrl: githubOrgOAuthPolicyUrl(parsed.owner),
+      }
+    }
+    return { kind: "unknown", owner: parsed.owner, repo: parsed.repo }
+  }
+
+  if (!repo) {
+    return { kind: "not-visible", owner: parsed.owner, repo: parsed.repo }
+  }
+  if (!repo.is_template) {
+    return { kind: "not-template", owner: parsed.owner, repo: parsed.repo }
+  }
+
+  const inOrg = parsed.owner.toLowerCase() === org.toLowerCase()
+  if (repo.private && !inOrg) {
+    return {
+      kind: "private-out-of-org",
+      owner: parsed.owner,
+      repo: parsed.repo,
+    }
+  }
+
+  const branch = parsed.branch || repo.default_branch
+  if (!branch) {
+    return { kind: "no-branch", owner: parsed.owner, repo: parsed.repo }
+  }
+  const visibility = repo.private ? "private" : "public"
+
+  // Third-party org (not the classroom org, not the teacher's account):
+  // readable, but generate may still be blocked by app restrictions.
+  const isOwnAccount =
+    viewerLogin !== undefined &&
+    parsed.owner.toLowerCase() === viewerLogin.toLowerCase()
+  if (!inOrg && !isOwnAccount) {
+    return {
+      kind: "ok-verify",
+      owner: parsed.owner,
+      repo: parsed.repo,
+      branch,
+      visibility,
+      policyUrl: githubOrgOAuthPolicyUrl(parsed.owner),
+    }
+  }
+
+  return {
+    kind: "ok",
+    owner: parsed.owner,
+    repo: parsed.repo,
+    branch,
+    visibility,
+    inOrg,
   }
 }
 
@@ -183,7 +417,13 @@ export async function editAssignment(
 ): Promise<CreateAssignmentResult> {
   const { org, classroom, slug } = input
 
-  const ref = await getBranchRef(client, org)
+  // The archive guard is independent of the org ref read, so run them
+  // concurrently — Promise.all rejects on the first rejection, so an archived
+  // classroom still fails closed before any write.
+  const [, ref] = await Promise.all([
+    assertClassroomNotArchived(client, org, classroom),
+    getBranchRef(client, org),
+  ])
   const commit = await getCommit(client, org, ref.object.sha)
 
   const assignmentsFilePath = `${classroom}/assignments.json`
@@ -366,7 +606,19 @@ async function buildAssignmentEntry(
       entry.due_meta = due_meta
     }
   }
-  if (input.mode === "group" && input.max_group_size > 0) {
+  if (input.mode === "group") {
+    // A group size outside [GROUP_SIZE_MIN, GROUP_SIZE_MAX] (or non-integer)
+    // produces an assignments.json the CLI refuses to parse; enforce the schema
+    // bounds here, not just in the form.
+    if (
+      !Number.isInteger(input.max_group_size) ||
+      input.max_group_size < GROUP_SIZE_MIN ||
+      input.max_group_size > GROUP_SIZE_MAX
+    ) {
+      throw new Error(
+        `max_group_size: group assignments require a whole number between ${GROUP_SIZE_MIN} and ${GROUP_SIZE_MAX} (got ${input.max_group_size}).`,
+      )
+    }
     entry.max_group_size = input.max_group_size
   }
 
@@ -391,8 +643,36 @@ async function buildAssignmentEntry(
     entry.runtime = runtime
   }
 
+  // allowed_files: parse the textarea, re-validate, omit when empty.
+  const allowedFiles = parseAllowedFiles(input.allowed_files ?? "")
+  if (allowedFiles.length > 0) {
+    const allowedFilesError = validateAllowedFiles(allowedFiles)
+    if (allowedFilesError) {
+      throw new Error(`allowed_files: ${allowedFilesError}`)
+    }
+    entry.allowed_files = allowedFiles
+  }
+
   if (tests.length > 0) {
     entry.tests = tests
+  }
+
+  // pass_threshold: opt-in integer percentage [0,100]. Absent (undefined) means
+  // the teacher didn't enable a passing threshold, so the field is omitted
+  // entirely — absent = "no passing concept" everywhere downstream. Validate
+  // the bounds so a bad value can't produce a file the CLI refuses to parse.
+  if (input.pass_threshold !== undefined) {
+    const threshold = input.pass_threshold
+    if (
+      !Number.isInteger(threshold) ||
+      threshold < PASS_THRESHOLD_MIN ||
+      threshold > PASS_THRESHOLD_MAX
+    ) {
+      throw new Error(
+        `pass_threshold: must be a whole number between ${PASS_THRESHOLD_MIN} and ${PASS_THRESHOLD_MAX} (got ${threshold}).`,
+      )
+    }
+    entry.pass_threshold = threshold
   }
 
   return { entry, needsTeamGrant }
@@ -471,16 +751,25 @@ async function tryGrantTeamTemplateRead(
   }
 }
 
+// Refuse a write into an archived classroom (active: false). The UI hides the
+// New-assignment / reuse / edit affordances, but the write path is the
+// authoritative guard — a stale tab, a direct API call, or a CLI/agent must not
+// be able to mutate an archived classroom. Reads classroom.json fresh and fails
+// closed before any commit. A genuinely teamless/legacy classroom (no `active`)
+// reads as active, so this never blocks normal use.
 export async function createAssignment(
   client: GitHubClient,
   input: CreateAssignmentInput,
 ): Promise<CreateAssignmentResult> {
-  const { entry: assignmentBody, needsTeamGrant } = await buildAssignmentEntry(
-    client,
-    input,
-  )
+  // The archive guard, the assignment-entry build, and the org ref read are
+  // independent, so run them concurrently — Promise.all rejects on the first
+  // rejection, so an archived classroom still fails closed before any write.
+  const [, { entry: assignmentBody, needsTeamGrant }, ref] = await Promise.all([
+    assertClassroomNotArchived(client, input.org, input.classroom),
+    buildAssignmentEntry(client, input),
+    getBranchRef(client, input.org),
+  ])
 
-  const ref = await getBranchRef(client, input.org)
   const commit = await getCommit(client, input.org, ref.object.sha)
 
   const assignmentsFilePath = `${input.classroom}/assignments.json`
@@ -556,14 +845,8 @@ export async function createAssignmentRepo(params: {
   name: string
   fallbackBranch: string
 }): Promise<AcceptRepoCreationResult> {
-  const {
-    client,
-    templateOwner,
-    templateRepo,
-    owner,
-    name,
-    fallbackBranch,
-  } = params
+  const { client, templateOwner, templateRepo, owner, name, fallbackBranch } =
+    params
 
   const cleanTemplateRepo = templateRepo
     ? extractTemplate(templateRepo)
@@ -604,19 +887,17 @@ export async function createAssignmentRepo(params: {
         }
       }
 
-      // Template generation failed. Do NOT fall back to an empty repo — that
-      // produced broken repos (no template content/shim) that look "accepted"
-      // but can't be regenerated. Usual cause: the team lacks read on a private
-      // in-org template. 403 = denied; 404 = template not visible.
-      if (err.status === 403 || err.status === 404) {
-        throw new Error(
-          `Couldn't generate your repository from the template ` +
-            `${templateOwner}/${cleanTemplateRepo} (HTTP ${err.status}). ` +
-            `If it's a private template, the classroom team may not have read ` +
-            `access to it yet — ask your instructor to re-run the assignment ` +
-            `setup (which grants the team read on the template), then accept again.`,
-          { cause: err },
-        )
+      // Don't fall back to an empty repo — it looks "accepted" but has no
+      // template content and can't be regenerated. A rate-limit also surfaces
+      // as 403, so rethrow it before treating 403/404 as a template problem.
+      if (err.isRateLimited) {
+        throw err
+      }
+      if (err.isForbidden || err.isNotFound) {
+        const inOrg = templateOwner.toLowerCase() === owner.toLowerCase()
+        throw inOrg
+          ? inOrgTemplateError(templateOwner, cleanTemplateRepo, err.status)
+          : outOfOrgTemplateError(templateOwner, cleanTemplateRepo, err.status)
       }
 
       // Any other status is a real failure too — don't mask it with an empty
@@ -717,6 +998,8 @@ export type CreateAssignmentInput = {
   container_image?: string
   container_user?: string
   setup_command?: string
+  allowed_files?: string
+  pass_threshold?: number
   tests: AssignmentTestDraft[]
 }
 export async function createAssignmentWithConflictRetry(
@@ -724,6 +1007,219 @@ export async function createAssignmentWithConflictRetry(
   input: CreateAssignmentInput,
 ) {
   return withGitConflictRetry(() => createAssignment(client, input))
+}
+
+export type CopyAssignmentInput = {
+  org: string
+  // A resolved, schema-valid record from the source classroom's
+  // assignments.json — copied verbatim, not re-derived from form input.
+  source: Assignment
+  // Sibling classroom under classroom50/. In-org only for v1: a private template
+  // can only be team-granted within its own org (see #60).
+  targetClassroom: string
+  // Default to the source slug/name; the slug must be unique in the target.
+  targetSlug?: string
+  targetName?: string
+}
+
+// First slug not in `taken`, suffixing `-2`, `-3`, … A base ending in `-<n>`
+// continues from n+1 ("hw1-2" -> "hw1-3", not "hw1-2-2"). Case-insensitive, to
+// match GitHub repo naming and the server-side check. Pure; prefills the reuse
+// modals — the write path re-checks authoritatively.
+export function nextAvailableSlug(
+  base: string,
+  taken: Iterable<string>,
+): string {
+  const takenSet = new Set(Array.from(taken, (s) => s.trim().toLowerCase()))
+  const isFree = (candidate: string) => !takenSet.has(candidate.toLowerCase())
+
+  if (isFree(base)) return base
+
+  // Split off a trailing "-<n>" so we increment it rather than append again.
+  const match = /^(.*?)-(\d+)$/.exec(base)
+  const stem = match ? match[1] : base
+  let n = match ? Number(match[2]) + 1 : 2
+
+  // Bounded defensively; a classroom never has thousands of same-stem slugs.
+  for (let i = 0; i < 10000; i++) {
+    const candidate = `${stem}-${n}`
+    if (isFree(candidate)) return candidate
+    n++
+  }
+  // Unreachable in practice, but never silently return a taken slug.
+  return `${stem}-${Date.now()}`
+}
+
+// Build the target classroom's record, overriding slug/name. Pure: deep-copies
+// (no shared mutable structure) and drops undefined keys to stay omitempty-clean
+// — the CLI rejects unknown/`null` fields.
+export function buildReusedEntry(
+  source: Assignment,
+  overrides: { slug: string; name: string },
+): Assignment {
+  const slug = overrides.slug.trim()
+  const name = overrides.name.trim()
+  if (!slug) {
+    throw new Error("A slug is required for the copied assignment.")
+  }
+
+  const entry: Assignment = {
+    // Spread the whole source so a field this client doesn't model yet rides
+    // through — deliberate. assignments.json is a strict cross-binary contract
+    // that evolves by one binary adding a field before the others; preserving
+    // unknown keys is the "tolerate AND preserve" rule from
+    // evolving-strict-cross-binary-schemas.md (an allowlist would drop them).
+    // Known nested objects/arrays are re-cloned below so nothing is shared.
+    ...source,
+    slug,
+    name,
+    template: source.template ? { ...source.template } : undefined,
+    due_meta: source.due_meta ? { ...source.due_meta } : undefined,
+    runtime: source.runtime
+      ? {
+          ...source.runtime,
+          container: source.runtime.container
+            ? { ...source.runtime.container }
+            : undefined,
+        }
+      : undefined,
+    allowed_files: source.allowed_files ? [...source.allowed_files] : undefined,
+    tests: source.tests ? source.tests.map((t) => ({ ...t })) : undefined,
+  }
+  if (!entry.template) delete entry.template
+  if (!entry.due_meta) delete entry.due_meta
+  if (entry.runtime && !entry.runtime.container) delete entry.runtime.container
+  if (!entry.runtime) delete entry.runtime
+  if (!entry.allowed_files) delete entry.allowed_files
+  if (!entry.tests) delete entry.tests
+
+  return entry
+}
+
+// Reuse an assignment into another in-org classroom: write the copied record
+// into the target's assignments.json and re-apply the private-template team
+// grant — the same write + grant as createAssignment, minus form resolution.
+// Cross-org reuse is out of scope for v1.
+export async function copyAssignmentToClassroom(
+  client: GitHubClient,
+  input: CopyAssignmentInput,
+): Promise<CreateAssignmentResult> {
+  const { org, source, targetClassroom } = input
+
+  const entry = buildReusedEntry(source, {
+    slug: input.targetSlug ?? source.slug,
+    name: input.targetName ?? source.name,
+  })
+
+  // The archive guard (refuse reuse into an archived target), the template
+  // re-check, and the org ref read are all independent, so run them
+  // concurrently — one fewer serial round-trip per conflict-retry attempt.
+  // Promise.all rejects on the first rejection, so an archived classroom or a
+  // bad template still throws before any write — no commit.
+  const [, repo, ref] = await Promise.all([
+    assertClassroomNotArchived(client, org, targetClassroom),
+    entry.template
+      ? getRepo(client, entry.template.owner, entry.template.repo)
+      : Promise.resolve(null),
+    getBranchRef(client, org),
+  ])
+
+  // Re-check the template live (mirrors create): public/missing -> no grant;
+  // private in-org -> needs grant; private out-of-org -> refuse.
+  let needsTeamGrant = false
+  if (entry.template) {
+    // getRepo returns null on 404 (deleted/renamed/invisible) — fail closed
+    // before any write, like resolveTemplate, so we never commit a record
+    // pointing at a template students can't generate from.
+    if (!repo) {
+      throw new Error(
+        `Template "${entry.template.owner}/${entry.template.repo}" is not visible to your account — it may have been deleted, renamed, or made private outside ${org}. Restore or update the source assignment's template, then reuse.`,
+      )
+    }
+    if (repo.private) {
+      const inOrg = entry.template.owner.toLowerCase() === org.toLowerCase()
+      if (!inOrg) {
+        throw new Error(
+          `Template "${entry.template.owner}/${entry.template.repo}" is private and outside ${org} — students in "${targetClassroom}" couldn't be granted access. Copy the template into ${org} and reference the copy, or make it public, then reuse.`,
+        )
+      }
+      needsTeamGrant = true
+    }
+  }
+
+  const commit = await getCommit(client, org, ref.object.sha)
+
+  const assignmentsFilePath = `${targetClassroom}/assignments.json`
+  const currentAssignments = await getAssignmentsFile(client, {
+    org,
+    path: assignmentsFilePath,
+    ref: ref.object.sha,
+  })
+
+  // Case-insensitive — slugs are GitHub repo path segments, matching the
+  // modals' optimistic check, so a mixed-case programmatic slug can't slip past.
+  const entrySlugLower = entry.slug.toLowerCase()
+  if (
+    currentAssignments.assignments.some(
+      (a) => a.slug.toLowerCase() === entrySlugLower,
+    )
+  ) {
+    throw new Error(
+      `Assignment "${entry.slug}" already exists in classroom "${targetClassroom}" — choose a different slug.`,
+    )
+  }
+
+  const nextAssignments: AssignmentsFile = {
+    ...currentAssignments,
+    assignments: [...currentAssignments.assignments, entry],
+  }
+
+  const tree = await createGitTree(client, {
+    org,
+    base_tree: commit.tree.sha,
+    tree: [
+      {
+        path: assignmentsFilePath,
+        mode: "100644",
+        type: "blob",
+        content: JSON.stringify(nextAssignments, null, 2) + "\n",
+      },
+    ],
+  })
+  const newCommit = await createGitCommit(client, {
+    org,
+    message: `Reuse assignment: ${source.slug} -> ${targetClassroom}/${entry.slug}`,
+    tree_sha: tree.sha,
+    parents: [ref.object.sha],
+  })
+  const updatedRef = await updateRef(client, org, newCommit.sha)
+
+  let templateGrantWarning: string | undefined
+  if (needsTeamGrant && entry.template) {
+    templateGrantWarning = await tryGrantTeamTemplateRead(
+      client,
+      org,
+      targetClassroom,
+      entry.slug,
+      entry.template,
+    )
+  }
+
+  return {
+    previousCommitSha: ref.object.sha,
+    baseTreeSha: commit.tree.sha,
+    newTreeSha: tree.sha,
+    newCommitSha: newCommit.sha,
+    updatedRef,
+    templateGrantWarning,
+  }
+}
+
+export async function copyAssignmentWithConflictRetry(
+  client: GitHubClient,
+  input: CopyAssignmentInput,
+) {
+  return withGitConflictRetry(() => copyAssignmentToClassroom(client, input))
 }
 
 // editAssignment writes to the same classroom50 main branch as createAssignment
@@ -737,27 +1233,68 @@ export async function editAssignmentWithConflictRetry(
   return withGitConflictRetry(() => editAssignment(client, input))
 }
 
-function createClassroom50Yaml(params: {
+export function createClassroom50Yaml(params: {
   classroom: string
   assignment: string
-  // The source block lets `gh student submit` re-fetch instructor
-  // .gitignore/.github on each push. Omitted for a template-less assignment,
-  // matching the CLI (which writes no `source:` block).
+  // `id` is the immutable numeric GitHub user id, recorded so the
+  // repo<->student binding survives a username rename (classroom50-cli#185).
+  ownerUsername: string
+  ownerId?: number | null
+  acceptedAt?: string
+  // Optional capability-URL secret copied from the classroom's classroom.json
+  // at accept. Written only for a protected classroom; when present, submit
+  // and the autograde runner build the `<classroom>/<secret>/...` Pages path.
+  secret?: string
+  // Lets `gh student submit` re-fetch instructor files; omitted when template-less.
   sourceOwner?: string
+  sourceOwnerId?: number | null
   sourceRepo?: string
   sourceBranch?: string
 }) {
-  const { classroom, assignment, sourceOwner, sourceRepo, sourceBranch } =
-    params
+  const {
+    classroom,
+    assignment,
+    ownerUsername,
+    ownerId,
+    acceptedAt,
+    secret,
+    sourceOwner,
+    sourceOwnerId,
+    sourceRepo,
+    sourceBranch,
+  } = params
+
+  // id is a number (or null) — never quote it as a string.
+  const idValue = (id: number | null | undefined) =>
+    typeof id === "number" ? String(id) : "null"
 
   const lines = [
+    `schema: "classroom50/repo-config/v1"`,
     `classroom: ${JSON.stringify(classroom)}`,
     `assignment: ${JSON.stringify(assignment)}`,
   ]
+
+  // Emit the secret right after the identity fields (matching the CLI's
+  // field order) and only when present, mirroring the CLI's `omitempty`.
+  if (secret) {
+    lines.push(`secret: ${JSON.stringify(secret)}`)
+  }
+
+  lines.push(
+    `owner:`,
+    `  username: ${JSON.stringify(ownerUsername)}`,
+    `  id: ${idValue(ownerId)}`,
+  )
+
+  if (acceptedAt) {
+    lines.push(`  accepted_at: ${JSON.stringify(acceptedAt)}`)
+  }
+
   if (sourceOwner && sourceRepo) {
     lines.push(
       `source:`,
       `  owner: ${JSON.stringify(sourceOwner)}`,
+      `  owner_id: ${idValue(sourceOwnerId)}`,
       `  repo: ${JSON.stringify(sourceRepo)}`,
       `  branch: ${JSON.stringify(sourceBranch ?? "main")}`,
     )
@@ -777,7 +1314,12 @@ export async function deleteAssignment(
 ) {
   const { org, classroom, assignment: slug } = input
 
-  const ref = await getBranchRef(client, org)
+  // Refuse a delete into an archived classroom (write-path guard); run the
+  // check concurrently with the ref read.
+  const [, ref] = await Promise.all([
+    assertClassroomNotArchived(client, org, classroom),
+    getBranchRef(client, org),
+  ])
   const commit = await getCommit(client, org, ref.object.sha)
 
   const assignmentsFilePath = `${classroom}/assignments.json`
@@ -868,8 +1410,15 @@ async function patchRepoSurface(
   })
 }
 
-function pagesAutograderUrl(org: string, classroom: string, name: string) {
-  return `https://${org}.github.io/classroom50/${classroom}/autograders/${name}.yaml`
+function pagesAutograderUrl(params: {
+  org: string
+  classroom: string
+  name: string
+  secret?: string
+}) {
+  const { org, classroom, name, secret } = params
+  const segment = classroomPagesSegment(classroom, secret)
+  return `https://${org}.github.io/classroom50/${segment}/autograders/${name}.yaml`
 }
 
 function defaultAutograderWorkflow(org: string) {
@@ -893,17 +1442,19 @@ jobs:
 `
 }
 
-export async function resolveAutograderWorkflow(
-  org: string,
-  classroom: string,
-  autograder?: string,
-): Promise<string> {
+export async function resolveAutograderWorkflow(params: {
+  org: string
+  classroom: string
+  autograder?: string
+  secret?: string
+}): Promise<string> {
+  const { org, classroom, autograder, secret } = params
   if (!autograder || autograder === "default") {
     return defaultAutograderWorkflow(org)
   }
 
   const workflow = await fetchTextWithFriendlyErrors(
-    pagesAutograderUrl(org, classroom, autograder),
+    pagesAutograderUrl({ org, classroom, name: autograder, secret }),
     `autograder ${autograder}`,
   )
 
@@ -1010,60 +1561,133 @@ async function provisionAcceptedRepo(params: {
   branch: string
   metadataYaml: string
   autogradeYaml: string
+  onStepUpdate?: OnAcceptStepUpdate
 }) {
-  const { client, org, repo, username, branch, metadataYaml, autogradeYaml } =
-    params
-
-  await patchRepoSurface(client, org, repo.name)
-
-  await addAdminCollaborator({
+  const {
     client,
-    owner: org,
-    repo: repo.name,
+    org,
+    repo,
     username,
-  })
-
-  // Land the metadata + autograde shim, retrying through GitHub's post-generate
-  // git-data lag (see commitAcceptFilesWithFreshRepoRetry).
-  await commitAcceptFilesWithFreshRepoRetry({
-    client,
-    owner: org,
-    repo: repo.name,
     branch,
     metadataYaml,
     autogradeYaml,
-  })
+    onStepUpdate,
+  } = params
+
+  await withAcceptStep(
+    {
+      id: "access",
+      label: "Granting you access to your repository",
+      actions: `Your repository ${org}/${repo.name} was created, but adding you (${username}) as a collaborator failed. This usually means your GitHub username changed or you left ${org}. Confirm you're a member of ${org}, then use "Re-run setup".`,
+      doneMessage: "Granted you access to your repository",
+      onStepUpdate,
+    },
+    async () => {
+      await patchRepoSurface(client, org, repo.name)
+      await addAdminCollaborator({
+        client,
+        owner: org,
+        repo: repo.name,
+        username,
+      })
+    },
+  )
+
+  // Land the metadata + autograde shim, retrying through GitHub's post-generate
+  // git-data lag (see commitAcceptFilesWithFreshRepoRetry).
+  await withAcceptStep(
+    {
+      id: "setup",
+      label: "Setting up autograding",
+      actions: `Your repository ${org}/${repo.name} exists, but writing the setup files to branch "${branch}" failed. The repository may still be initializing — wait a minute and use "Re-run setup".`,
+      doneMessage: "Autograding configured",
+      onStepUpdate,
+    },
+    () =>
+      commitAcceptFilesWithFreshRepoRetry({
+        client,
+        owner: org,
+        repo: repo.name,
+        branch,
+        metadataYaml,
+        autogradeYaml,
+      }),
+  )
 }
 export async function acceptAssignment(params: {
   client: GitHubClient
   org: string
   classroom: string
   assignmentSlug: string
+  // Capability-URL access key from the accept link (?k=). Selects the
+  // <classroom>/<secret>/ Pages path for a protected classroom and is
+  // written into .classroom50.yaml so submit + the runner can rebuild the
+  // URLs. Undefined for an unprotected classroom (plain path). Not read
+  // from classroom.json — students can't access the private config repo.
+  secret?: string
+  onStepUpdate?: OnAcceptStepUpdate
 }): Promise<AcceptAssignmentResult> {
-  const { client, org, classroom, assignmentSlug } = params
+  const { client, org, classroom, assignmentSlug, secret, onStepUpdate } =
+    params
 
-  const user = await getAuthenticatedUser(client)
+  const user = await withAcceptStep(
+    {
+      id: "account",
+      label: "Checking your GitHub account",
+      actions:
+        "Couldn't read your GitHub account. Sign out and sign back in, then accept again.",
+      doneMessage: "Checked your GitHub account",
+      onStepUpdate,
+    },
+    () => getAuthenticatedUser(client),
+  )
   const username = user.login
 
-  console.log("accepting pending org invite...")
+  // Best-effort: auto-accept a pending org invite. Failures are ignored (the
+  // student may already be a member), so this isn't a tracked step.
   await acceptPendingOrgInvite(client, org)
 
-  console.log("fetching assignment from pages...")
-  const assignment = await fetchAssignmentFromPages(
-    org,
-    classroom,
-    assignmentSlug,
+  const assignment = await withAcceptStep(
+    {
+      id: "assignment",
+      label: `Looking up ${assignmentSlug}`,
+      actions: `Couldn't load assignment "${assignmentSlug}" for ${org}/${classroom}. Check the link, or ask your instructor to confirm the assignment is published.`,
+      doneMessage: `Found assignment ${assignmentSlug}`,
+      onStepUpdate,
+    },
+    () => fetchAssignmentFromPages(org, classroom, assignmentSlug, secret),
   )
 
   const sourceOwner = assignment.template?.owner
   const sourceRepo = assignment.template?.repo
   const sourceBranch = assignment.template?.branch ?? "main"
 
-  console.log("resolving autograder workflow...")
-  const autogradeYaml = await resolveAutograderWorkflow(
-    org,
-    classroom,
-    assignment.autograder,
+  // Best-effort: resolve the template owner's immutable id (org or user). Never
+  // fail accept over this — a missing id is recorded as null.
+  let sourceOwnerId: number | null = null
+  if (sourceOwner) {
+    try {
+      sourceOwnerId = (await getUser(client, sourceOwner)).id
+    } catch {
+      sourceOwnerId = null
+    }
+  }
+
+  const autogradeYaml = await withAcceptStep(
+    {
+      id: "autograder",
+      label: "Resolving the autograder",
+      actions: `Couldn't resolve the autograder for "${assignmentSlug}". Ask your instructor to confirm it's published, then accept again.`,
+      doneMessage: "Resolved the autograder",
+      onStepUpdate,
+    },
+    () =>
+      resolveAutograderWorkflow({
+        org,
+        classroom,
+        autograder: assignment.autograder,
+        secret,
+      }),
   )
 
   const studentRepoNameValue = studentRepoName(
@@ -1072,45 +1696,85 @@ export async function acceptAssignment(params: {
     username,
   )
 
-  console.log("creating classroom50 yaml...")
   const metadataYaml = createClassroom50Yaml({
     classroom,
     assignment: assignment.slug,
+    ownerUsername: username,
+    ownerId: user.id,
+    acceptedAt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+    secret,
     sourceOwner,
+    sourceOwnerId,
     sourceRepo,
     sourceBranch,
   })
 
-  console.log("creating repo from template...")
-  const created = await createAssignmentRepo({
-    client,
-    templateOwner: sourceOwner,
-    templateRepo: sourceRepo,
-    owner: org,
-    name: studentRepoNameValue,
-    fallbackBranch: sourceBranch || "main",
-  })
+  const created = await withAcceptStep(
+    {
+      id: "repo",
+      label: "Creating your repository",
+      actions: `Couldn't create ${org}/${studentRepoNameValue}. Confirm you're a member of ${org} and ask your instructor to verify the assignment's template repository is configured correctly, then accept again.`,
+      doneMessage: `Created ${org}/${studentRepoNameValue}`,
+      onStepUpdate,
+    },
+    () =>
+      createAssignmentRepo({
+        client,
+        templateOwner: sourceOwner,
+        templateRepo: sourceRepo,
+        owner: org,
+        name: studentRepoNameValue,
+        fallbackBranch: sourceBranch || "main",
+      }),
+  )
 
   if (created.kind === "already-accepted") {
     // The repo exists, but a prior accept may have failed AFTER creating it but
     // BEFORE committing the metadata/workflow (seeding lag, transient 5xx),
-    // leaving a repo that looks accepted but never autogrades. Heal it: if
-    // .classroom50.yaml is missing, re-run the idempotent provisioning;
-    // otherwise it's genuinely already accepted — leave it untouched.
-    const provisioned = await repoContentsPathExists(
-      client,
-      org,
-      created.repo.name,
-      ".classroom50.yaml",
-    )
+    // leaving a repo that looks accepted but never autogrades. Heal it: a repo
+    // is only "genuinely accepted" when BOTH the metadata and the autograde
+    // workflow landed (they're written in one commit, so a missing workflow
+    // means the prior accept failed mid-flow). If either is missing, re-run the
+    // idempotent provisioning.
+    const [hasMetadata, hasWorkflow] = await Promise.all([
+      repoContentsPathExists(
+        client,
+        org,
+        created.repo.name,
+        ".classroom50.yaml",
+      ),
+      repoContentsPathExists(
+        client,
+        org,
+        created.repo.name,
+        ".github/workflows/autograde.yaml",
+      ),
+    ])
+    const provisioned = hasMetadata && hasWorkflow
 
     if (provisioned) {
+      // Genuinely already accepted — mark the remaining steps complete so the
+      // checklist doesn't look stuck.
+      onStepUpdate?.({
+        id: "repo",
+        status: "complete",
+        message: `Repository already exists: ${org}/${created.repo.name}`,
+      })
+      onStepUpdate?.({ id: "access", status: "complete" })
+      onStepUpdate?.({ id: "setup", status: "complete" })
       return {
         status: "already-accepted",
         repo: created.repo,
         cloneCommand: `git clone ${created.repo.ssh_url}`,
       }
     }
+
+    // Half-finished prior accept — re-provision to repair it.
+    onStepUpdate?.({
+      id: "repo",
+      status: "complete",
+      message: `Found incomplete setup: ${org}/${created.repo.name}`,
+    })
 
     await provisionAcceptedRepo({
       client,
@@ -1120,6 +1784,7 @@ export async function acceptAssignment(params: {
       branch: created.repo.default_branch || sourceBranch,
       metadataYaml,
       autogradeYaml,
+      onStepUpdate,
     })
 
     return {
@@ -1144,6 +1809,7 @@ export async function acceptAssignment(params: {
     branch: targetBranch,
     metadataYaml,
     autogradeYaml,
+    onStepUpdate,
   })
 
   return {

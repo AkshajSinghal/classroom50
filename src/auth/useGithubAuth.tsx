@@ -29,6 +29,7 @@ import {
   saveOAuthSession,
 } from "./storage"
 import type { DeviceAuthState, GithubAuthScreen } from "./types"
+import type { AuthStatus } from "@/types/router"
 
 function formatError(err: unknown) {
   const message = err instanceof Error ? err.message : String(err)
@@ -63,6 +64,7 @@ function sleep(ms: number, signal: AbortSignal) {
 function useGithubAuthState() {
   const queryClient = useQueryClient()
   const abortRef = useRef<AbortController | null>(null)
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [screen, setScreen] = useState<GithubAuthScreen>("config")
   const [clientId, setClientId] = useState(GITHUB_OAUTH_CLIENT_ID)
@@ -106,11 +108,22 @@ function useGithubAuthState() {
         queryFn: () => fetchGithubUser(data.access_token),
       })
 
-      window.setTimeout(() => {
+      if (successTimerRef.current) clearTimeout(successTimerRef.current)
+      successTimerRef.current = setTimeout(() => {
         setScreen("authed")
       }, 3500)
     },
     [queryClient],
+  )
+
+  // On unmount mid-flow, abort the device poll loop and clear the pending
+  // success-screen timer so neither runs (or setStates) after teardown.
+  useEffect(
+    () => () => {
+      abortRef.current?.abort()
+      if (successTimerRef.current) clearTimeout(successTimerRef.current)
+    },
+    [],
   )
 
   useEffect(() => {
@@ -450,7 +463,7 @@ function useGithubAuthState() {
     }
   }, [device, now])
 
-  const status = useMemo(() => {
+  const status = useMemo<AuthStatus>(() => {
     if (!hasLoadedStoredAuth) {
       return "loading"
     }

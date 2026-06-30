@@ -7,18 +7,15 @@ import type { Classroom50OrgSummary } from "@/hooks/github/queries"
 import useGetOrgs from "@/hooks/useGetOrgs"
 import { useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import {
-  AlertTriangle,
-  ExternalLink,
-  Info,
-  Lock,
-  RefreshCw,
-} from "lucide-react"
-import { useEffect } from "react"
+import { ExternalLink, Info, Lock, RefreshCw } from "lucide-react"
 
-function MissingOrgNotice() {
-  const queryClient = useQueryClient()
-
+function MissingOrgNotice({
+  refreshing,
+  onRefresh,
+}: {
+  refreshing: boolean
+  onRefresh: () => void
+}) {
   return (
     <div className="rounded-2xl border border-info/20 bg-info/5 p-5 shadow-sm">
       <div className="flex gap-4">
@@ -55,12 +52,15 @@ function MissingOrgNotice() {
             <button
               type="button"
               className="btn btn-ghost btn-sm"
-              onClick={() =>
-                queryClient.invalidateQueries({ queryKey: ["orgs"] })
-              }
+              disabled={refreshing}
+              onClick={onRefresh}
             >
-              <RefreshCw className="size-4" />
-              Refresh list
+              <RefreshCw
+                className={["size-4", refreshing ? "animate-spin" : ""].join(
+                  " ",
+                )}
+              />
+              {refreshing ? "Refreshing…" : "Refresh list"}
             </button>
           </div>
         </div>
@@ -81,8 +81,16 @@ function OrgCard({
   const isReady = classroom50.status === "ready"
   const needsSetup = classroom50.status === "needs_setup"
   const noAccess = classroom50.status === "no_access"
-  const hasCollectToken = classroom50.collectToken?.status === "present"
   const isAdmin = membership.role === "admin"
+  const isActiveMember = membership.state === "active"
+
+  // A student is an active member who can't read the classroom50 config repo
+  // (hence no_access). That's the normal student state, not a dead end: they
+  // can still open the org to reach their own assignment repos. A teacher
+  // (admin) opens any ready org; the service-token / policy preflight runs
+  // inside the org (ClassesPage), not here — checking every org in the list
+  // would fan out far too many GitHub API calls.
+  const canOpen = isAdmin ? isReady : isActiveMember
 
   return (
     <div className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
@@ -108,13 +116,6 @@ function OrgCard({
                 </span>
               )}
 
-              {!needsSetup && !hasCollectToken && isAdmin && (
-                <span className="badge badge-warning gap-1 text-xs">
-                  <AlertTriangle className="size-3" />
-                  Needs personal access token
-                </span>
-              )}
-
               {noAccess && isAdmin && (
                 <span className="badge badge-neutral gap-1">
                   <Lock className="size-3" />
@@ -126,7 +127,7 @@ function OrgCard({
         </div>
 
         <div className="card-actions mt-5 justify-end">
-          {isReady && hasCollectToken && (
+          {canOpen && (
             <Link
               to="/$org"
               params={{ org: org.login }}
@@ -146,17 +147,7 @@ function OrgCard({
             </Link>
           )}
 
-          {!needsSetup && !hasCollectToken && isAdmin && (
-            <Link
-              to="/$org/settings"
-              params={{ org: org.login }}
-              className="btn btn-warning btn-sm"
-            >
-              Complete Setup
-            </Link>
-          )}
-
-          {noAccess && (
+          {noAccess && !isActiveMember && (
             <button className="btn btn-disabled btn-sm">
               Ask a teacher for access
             </button>
@@ -168,66 +159,101 @@ function OrgCard({
 }
 
 const OrgsPage = () => {
-  const { data: orgs = [] } = useGetOrgs()
+  const queryClient = useQueryClient()
+  const { data: orgs = [], isLoading, isFetching } = useGetOrgs()
 
-  useEffect(() => {
-    console.log("orgs", orgs)
-  }, [orgs])
-
+  // Orgs that are confirmed Classroom 50 orgs the user can use: a teacher's
+  // ready org, or a student's enrolled org (no_access but the public Pages
+  // index confirmed it).
   const cl50Orgs = orgs?.filter(
     (summary) =>
-      summary.classroom50.status !== "unknown" &&
-      summary.classroom50.status !== "needs_setup",
+      summary.classroom50.status === "ready" ||
+      summary.classroom50.status === "no_access",
   )
+  // Orgs where the signed-in user is an admin who hasn't set up Classroom 50
+  // yet — offered in the "Set Up" section. Unrelated orgs (not_classroom50)
+  // and indeterminate ones (unknown) are filtered out entirely.
   const nonCl50Orgs = orgs?.filter(
-    (summary) =>
-      summary.classroom50.status === "unknown" ||
-      summary.classroom50.status === "needs_setup",
+    (summary) => summary.classroom50.status === "needs_setup",
   )
+
+  const handleRefresh = () =>
+    queryClient.invalidateQueries({ queryKey: ["orgs"] })
 
   return (
     <div className="min-h-screen">
       <Drawer>
         <DrawerToggle />
         <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
-          <div className="mb-8">
-            <div className="flex flex-col gap-6 p-6 sm:items-center sm:justify-between">
-              <div className="space-y-4">
-                <div>
-                  <h1 className="text-2xl font-bold tracking-tight">
-                    Classroom 50 Organizations
-                  </h1>
-                </div>
-                <MissingOrgNotice />
-                <div className="grid grid-cols-12 gap-4 mt-6">
-                  {cl50Orgs?.map((summary) => (
-                    <OrgCard
-                      key={summary.org.id}
-                      summary={summary}
-                      noRole={false}
-                    />
-                  ))}
-                </div>
+          {isLoading ? (
+            <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
+              <span className="loading loading-spinner loading-lg text-primary" />
+              <div>
+                <p className="text-base font-semibold">
+                  Loading your organizations…
+                </p>
+                <p className="mt-1 text-sm text-base-content/60">
+                  This may take a moment.
+                </p>
               </div>
-              {nonCl50Orgs.length ? <div className="divider" /> : <></>}
-              {nonCl50Orgs.length ? (
-                <div className="space-y-4 w-full">
+            </div>
+          ) : (
+            <div className="mb-8">
+              <div className="flex flex-col gap-6 p-6 sm:items-center sm:justify-between">
+                <div className="space-y-4">
                   <div>
                     <h1 className="text-2xl font-bold tracking-tight">
-                      Set Up New Classroom 50 Organization
+                      Classroom 50 Organizations
                     </h1>
                   </div>
+                  <MissingOrgNotice
+                    refreshing={isFetching}
+                    onRefresh={handleRefresh}
+                  />
                   <div className="grid grid-cols-12 gap-4 mt-6">
-                    {nonCl50Orgs?.map((summary) => (
-                      <OrgCard key={summary.org.id} summary={summary} noRole />
+                    {cl50Orgs?.map((summary) => (
+                      <OrgCard
+                        key={summary.org.id}
+                        summary={summary}
+                        noRole={false}
+                      />
                     ))}
                   </div>
+                  {cl50Orgs?.length === 0 && (
+                    <div className="rounded-2xl border border-dashed border-base-300 bg-base-100 p-8 text-center">
+                      <h2 className="text-lg font-semibold">
+                        No Classroom 50 organizations yet
+                      </h2>
+                      <p className="mx-auto mt-1 max-w-md text-sm text-base-content/60">
+                        Organizations you belong to that use Classroom 50 will
+                        appear here. If you expect one, ask your instructor to
+                        confirm you've been added, then refresh.
+                      </p>
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <></>
-              )}
+                {nonCl50Orgs.length > 0 && <div className="divider" />}
+                {nonCl50Orgs.length > 0 && (
+                  <div className="space-y-4 w-full">
+                    <div>
+                      <h1 className="text-2xl font-bold tracking-tight">
+                        Set Up New Classroom 50 Organization
+                      </h1>
+                    </div>
+                    <div className="grid grid-cols-12 gap-4 mt-6">
+                      {nonCl50Orgs?.map((summary) => (
+                        <OrgCard
+                          key={summary.org.id}
+                          summary={summary}
+                          noRole
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </DrawerContent>
         <DrawerSidebar page="orgs" />
       </Drawer>

@@ -10,6 +10,19 @@ export type GitHubOrgMembership = {
   }
 }
 
+// Shared by GET /orgs/{org}/invitations and /failed_invitations. failed_at /
+// failed_reason are only set on the failed list. No invitee numeric id, so
+// students match on login / email. id is needed to cancel (DELETE) before resend.
+export type GitHubOrgInvitation = {
+  id: number
+  login: string | null
+  email: string | null
+  role: string
+  created_at: string
+  failed_at: string | null
+  failed_reason: string | null
+}
+
 export type GitHubBranchRef = {
   ref: string
   node_id: string
@@ -32,6 +45,12 @@ export type GitHubCreateTree = {
   sha: string
 }
 
+// Response from POST /repos/{owner}/{repo}/git/blobs.
+export type GitHubBlob = {
+  sha: string
+  url: string
+}
+
 export type GitHubCreateCommit = {
   sha: string
 }
@@ -51,6 +70,12 @@ export type GitHubRepo = {
   is_template?: boolean
   default_branch: string
   visibility?: "public" | "private" | "internal"
+  archived?: boolean
+  description?: string | null
+  owner?: {
+    login: string
+    id: number
+  }
   permissions?: {
     admin: boolean
     maintain?: boolean
@@ -60,6 +85,17 @@ export type GitHubRepo = {
   }
   ssh_url: string
   html_url: string
+}
+
+export type GitHubRelease = {
+  id: number
+  tag_name: string
+  name: string | null
+  html_url: string
+  draft: boolean
+  prerelease: boolean
+  created_at: string
+  published_at: string | null
 }
 
 export type GitHubUser = {
@@ -95,10 +131,36 @@ export type GitHubTeam = {
 export type GitHubOrgDetails = {
   login: string
   id: number
-  plan: {
+  // `plan` is only returned by GET /orgs/{org} to org owners; a non-owner
+  // member gets a response without it, so it's optional and read defensively.
+  plan?: {
     name: string
     space: number
     filled_seats: number
     seats: number
   }
+}
+
+export type GitHubWorkflowRun = {
+  id: number
+  status:
+    | "queued"
+    | "in_progress"
+    | "completed"
+    | "waiting"
+    | "requested"
+    | "pending"
+  conclusion:
+    | "success"
+    | "failure"
+    | "cancelled"
+    | "skipped"
+    | "timed_out"
+    | "action_required"
+    | "neutral"
+    | "stale"
+    | null
+  created_at: string
+  html_url: string
+  event: string
 }

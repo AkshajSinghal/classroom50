@@ -18,6 +18,8 @@ const EditAssignmentForm = ({
   onSuccess,
   onError,
   onMutate,
+  onCancel,
+  readOnly = false,
 }: {
   org: string
   classroom: string
@@ -26,6 +28,9 @@ const EditAssignmentForm = ({
   onSuccess: (result: CreateAssignmentResult) => void
   onError?: (error: GitHubAPIError) => void
   onMutate?: () => void
+  onCancel?: () => void
+  // View the assignment config read-only (e.g. an archived classroom).
+  readOnly?: boolean
 }) => {
   const client = useGitHubClient()
   const editAssignmentMutation = useMutation<
@@ -50,8 +55,11 @@ const EditAssignmentForm = ({
   return (
     <CreateAssignmentForm
       edit
+      readOnly={readOnly}
       loading={editAssignmentMutation.isPending}
       org={org}
+      classroom={classroom}
+      onCancel={onCancel}
       defaultValues={assignmentToFormValues(defaultData)}
       onSubmit={(values) => {
         editAssignmentMutation.mutate({
@@ -67,6 +75,10 @@ const EditAssignmentForm = ({
           container_image: values.container_image,
           container_user: values.container_user,
           setup_command: values.setup_command,
+          allowed_files: values.allowed_files,
+          pass_threshold: values.pass_threshold_enabled
+            ? values.pass_threshold
+            : undefined,
           classroom,
           tests: values.tests,
           slug: assignment,

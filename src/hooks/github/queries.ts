@@ -1,21 +1,40 @@
 import { queryOptions } from "@tanstack/react-query"
+import type { QueryClient } from "@tanstack/react-query"
 import Papa from "papaparse"
 
 import type { GitHubClient } from "./client"
 import type {
   GitHubBranchRef,
   GitHubCommitRef,
+  GitHubFileListing,
+  GitHubOrgInvitation,
   GitHubOrgMembership,
+  GitHubRelease,
   GitHubRepo,
   GitHubTeam,
   GitHubUser,
+  GitHubWorkflowRun,
 } from "./types"
 import type { Assignment } from "@/types/classroom"
 import { GitHubAPIError } from "./errors"
-import { createTeam, getErrorMessage } from "./mutations"
+import {
+  COLLECT_SCORES_WORKFLOW,
+  REGRADE_WORKFLOW,
+  createTeam,
+  getErrorMessage,
+} from "./mutations"
 import { decodeBase64Utf8 } from "@/util/github"
+import { classroomPagesSegment } from "@/util/secret"
+import {
+  ONBOARDING_REPO_PREFIX,
+  ONBOARDING_YAML_PATH,
+  onboardingRepoPrefixForGithubId,
+} from "@/util/onboarding"
+import { parseOnboardingYaml, type OnboardingYaml } from "@/util/yaml"
+import { mapWithConcurrency } from "@/util/concurrency"
 import type { GetAssignmentsFileInput } from "@/api/queries/assignments"
 import type { OrgRunner, OrgRunnersResult } from "@/util/runners"
+import type { OnboardingSelfReport } from "@/util/inviteStatus"
 
 export const githubKeys = {
   all: ["github"] as const,
@@ -26,10 +45,27 @@ export const githubKeys = {
   orgMembership: (org: string) =>
     [...githubKeys.all, "org-membership", org] as const,
 
+  orgInvitations: (org: string) =>
+    [...githubKeys.all, "org-invitations", org] as const,
+
+  orgFailedInvitations: (org: string) =>
+    [...githubKeys.all, "org-failed-invitations", org] as const,
+
+  orgMembers: (org: string) => ["orgs", "list", "members", org] as const,
+
+  // Distinct from `orgMembers` (page-1 via listOrgMembers): this keys the
+  // all-pages fetch used by the org Members page. Sharing one key would let the
+  // page-1 and all-pages results overwrite each other in the cache.
+  orgMembersAll: (org: string) =>
+    ["orgs", "list", "members", "all", org] as const,
+
   orgRunners: (org: string) => [...githubKeys.all, "org-runners", org] as const,
 
   repo: (owner: string, repo: string) =>
     [...githubKeys.all, "repo", owner, repo] as const,
+
+  collaborators: (org: string, repo: string) =>
+    [...githubKeys.all, "collaborators", org, repo] as const,
 
   openPulls: (owner: string, repo: string) =>
     [...githubKeys.all, "open-pulls", owner, repo] as const,
@@ -53,6 +89,61 @@ export const githubKeys = {
 
   csvFile: (owner: string, repo: string, path: string, ref?: string) =>
     [...githubKeys.all, "csv-file", owner, repo, path, ref ?? null] as const,
+
+  collectScoresRun: (owner: string, sinceRunId: number | null) =>
+    [
+      ...githubKeys.all,
+      "collect-scores-run",
+      owner,
+      sinceRunId ?? "none",
+    ] as const,
+
+  lastCollectScoresRun: (owner: string) =>
+    [...githubKeys.all, "last-collect-scores-run", owner] as const,
+
+  // Scoped by classroom + assignment (+ optional repo owner) so a regrade of
+  // one assignment doesn't surface as in-progress on another assignment's
+  // page; sinceRunId binds the poll to our specific dispatch.
+  regradeRun: (
+    owner: string,
+    classroom: string,
+    assignment: string,
+    repoOwner: string | null,
+    sinceRunId: number | null,
+  ) =>
+    [
+      ...githubKeys.all,
+      "regrade-run",
+      owner,
+      classroom,
+      assignment,
+      repoOwner ?? "all",
+      sinceRunId ?? "none",
+    ] as const,
+
+  serviceToken: (owner: string) =>
+    [...githubKeys.all, "serviceToken", owner] as const,
+
+  orgAudit: (owner: string, plan?: string) =>
+    [...githubKeys.all, "orgAudit", owner, plan ?? null] as const,
+
+  // Prefix matching every orgAudit entry for an org regardless of plan — use
+  // for invalidation so a refetch happens whatever plan the cached audit used.
+  orgAuditPrefix: (owner: string) =>
+    [...githubKeys.all, "orgAudit", owner] as const,
+
+  releases: (owner: string, repo: string) =>
+    [...githubKeys.all, "releases", owner, repo] as const,
+}
+
+// Refresh roster invite-status lists after enroll/resend/unenroll: invites
+// move between pending/failed/members.
+export function invalidateInviteQueries(queryClient: QueryClient, org: string) {
+  queryClient.invalidateQueries({ queryKey: githubKeys.orgInvitations(org) })
+  queryClient.invalidateQueries({
+    queryKey: githubKeys.orgFailedInvitations(org),
+  })
+  queryClient.invalidateQueries({ queryKey: githubKeys.orgMembers(org) })
 }
 
 export function viewerQuery(client: GitHubClient) {
@@ -66,6 +157,14 @@ export function viewerQuery(client: GitHubClient) {
 
 export function getUser(client: GitHubClient, username: string) {
   return client.request<GitHubUser>(`/users/${username}`)
+}
+
+// Resolve a user by their immutable numeric account id (GET /user/{id}). The
+// stored CSV username can be stale if the student renamed their GitHub account,
+// but the id never changes — so this returns their CURRENT login. Used when
+// re-inviting a roster student whose username may have drifted.
+export function getUserById(client: GitHubClient, id: number | string) {
+  return client.request<GitHubUser>(`/user/${id}`)
 }
 
 export function getUserQuery(client: GitHubClient, username: string) {
@@ -173,11 +272,10 @@ function isNotFoundError(error: unknown) {
   )
 }
 
-// A freshly-generated/templated repo's git-data APIs lag behind the 200 from
-// POST .../generate: reads 404 and the first write 409s "Git Repository is
-// empty" while GitHub seeds. Both are transient. A bare 409 (no empty-repo
-// message) is a real conflict — e.g. a non-fast-forward updateRef — so the 409
-// branch is gated on the message. Mirrors the CLI's isFreshRepoRetryable.
+// A freshly-generated repo's git-data APIs lag the 200 from POST .../generate:
+// reads 404 and first write 409s "Git Repository is empty" while GitHub seeds.
+// A bare 409 (no empty-repo message) is a real conflict (e.g. non-fast-forward
+// updateRef), so the 409 branch is gated on the message.
 export function isFreshRepoLagError(error: unknown) {
   if (error instanceof GitHubAPIError) {
     if (error.status === 404) {
@@ -199,12 +297,9 @@ export type FreshRepoRetryOptions = {
   shouldRetry?: (error: unknown) => boolean
 }
 
-// Retry `fn` while it hits fresh-repo lag (the window where a just-generated
-// repo's git-data APIs lag behind the 200 from POST .../generate). Single source
-// of truth for the retry/backoff policy — the branch-ref poll and the accept
-// commit sequence both use it. `fn` must re-read its own state each attempt; it
-// may throw a synthetic error to signal lag that isn't an HTTP error (e.g. a 200
-// with a blank SHA). Mirrors the CLI's CommitWithFreshRepoRetry.
+// Retry `fn` while it hits fresh-repo lag. `fn` must re-read its own state each
+// attempt and may throw a synthetic error to signal non-HTTP lag (e.g. a 200
+// with a blank SHA).
 export async function withFreshRepoRetry<T>(
   fn: () => Promise<T>,
   options: FreshRepoRetryOptions = {},
@@ -339,12 +434,58 @@ export function jsonFileQuery<T>(
         { method: "GET", signal },
       )
 
-      return JSON.parse(raw) as T
+      // Throw a friendly error naming the file rather than a raw SyntaxError.
+      try {
+        return JSON.parse(raw) as T
+      } catch {
+        throw new Error(
+          `${path} couldn't be read (the file may be malformed). Try refreshing in a moment.`,
+        )
+      }
     },
     enabled: Boolean(owner && repo && typeof path === "string"),
     staleTime: 10 * 60 * 1000,
     retry: false,
   })
+}
+
+// The submission-tag convention written by the autograde runner: each graded
+// push publishes a `submit/<timestamp>-<sha>` release whose body GitHub renders
+// as the score + per-test table. We list these and link students straight to
+// the release page rather than reading result.json.
+const SUBMISSION_TAG_PREFIX = "submit/"
+
+// All graded-submission releases for a student's repo, newest first. A repo
+// with no releases yet (or the very first push still grading) returns []. The
+// release page itself shows the rendered grade, so we only need the metadata.
+export function releasesQuery(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+) {
+  return queryOptions({
+    queryKey: githubKeys.releases(owner, repo),
+    queryFn: async ({ signal }): Promise<GitHubRelease[]> => {
+      const releases = await client.request<GitHubRelease[]>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+          repo,
+        )}/releases?per_page=100`,
+        { method: "GET", signal },
+      )
+
+      return releases
+        .filter((r) => r.tag_name.startsWith(SUBMISSION_TAG_PREFIX))
+        .sort((a, b) => releaseTime(b) - releaseTime(a))
+    },
+    enabled: Boolean(owner && repo),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+}
+
+// published_at is null for a draft; fall back to created_at so ordering holds.
+function releaseTime(release: GitHubRelease): number {
+  return new Date(release.published_at ?? release.created_at).getTime()
 }
 
 export function csvFileQuery<T>(
@@ -421,9 +562,85 @@ export async function getClassroom50Yaml(
   return decodeBase64Utf8(file.content)
 }
 
+// Read a file from an arbitrary repo's default branch (onboarding reconcile
+// reads the self-report YAML out of each onboarding repo).
+export async function getRepoFile(
+  client: GitHubClient,
+  org: string,
+  repo: string,
+  path: string,
+): Promise<string> {
+  const file = await client.request<{
+    type: "file"
+    encoding: "base64"
+    content: string
+  }>(`/repos/${org}/${repo}/contents/${path}`)
+
+  if (file.type !== "file") {
+    throw new Error(`${path} is not a file in ${repo}`)
+  }
+
+  return decodeBase64Utf8(file.content)
+}
+
+// GitHub user ids on the latest commit touching `path`. Onboarding reconcile
+// uses this to verify the self-report's author: the repo name is a guessable
+// function of the email (a member could pre-create it with a forged payload),
+// but the commit author/committer is GitHub-attested and can't be spoofed.
+export async function getFileCommitAuthorIds(
+  client: GitHubClient,
+  org: string,
+  repo: string,
+  path: string,
+): Promise<number[]> {
+  const commits = await client.request<
+    {
+      author: { id: number } | null
+      committer: { id: number } | null
+    }[]
+  >(`/repos/${org}/${repo}/commits?path=${encodeURIComponent(path)}&per_page=1`)
+
+  const latest = commits[0]
+  if (!latest) return []
+
+  const ids: number[] = []
+  if (latest.author?.id != null) ids.push(latest.author.id)
+  if (latest.committer?.id != null) ids.push(latest.committer.id)
+  return ids
+}
+
 export function listOrgMembers(client: GitHubClient, org: string, page = 1) {
   return client.request<GitHubUser[]>(
     `/orgs/${org}/members?per_page=100&page=${page}`,
+  )
+}
+
+// Every org member across all pages. `listOrgMembers` (used by the per-classroom
+// roster, where the first 100 is effectively always enough) fetches a single
+// page; the org Members page needs the full list, so it pages to completion.
+export function listAllOrgMembers(client: GitHubClient, org: string) {
+  return paginateAll<GitHubUser>(
+    client,
+    (page) => `/orgs/${org}/members?per_page=100&page=${page}`,
+  )
+}
+
+// Server-side equivalent of useGetClasses: classroom dirs in the org's
+// classroom50 repo (root contents, dirs minus .github), for non-hook callers.
+export async function listClassroomDirs(
+  client: GitHubClient,
+  org: string,
+  ref?: string,
+): Promise<GitHubFileListing[]> {
+  const raw = await client.requestRaw(
+    `/repos/${encodeURIComponent(org)}/classroom50/contents/${
+      ref ? `?ref=${encodeURIComponent(ref)}` : ""
+    }`,
+    { method: "GET" },
+  )
+  const listing = JSON.parse(raw) as GitHubFileListing[]
+  return listing.filter(
+    (entry) => entry.type === "dir" && entry.name !== ".github",
   )
 }
 
@@ -435,8 +652,11 @@ export async function paginateAll<T>(
 ): Promise<T[]> {
   const all: T[] = []
   let page = 1
+  // Hard cap (100 pages x 100/page = 10k items) so a server that ignores the
+  // page param and keeps returning full pages can't loop unbounded.
+  const MAX_PAGES = 100
 
-  while (true) {
+  while (page <= MAX_PAGES) {
     const batch = await client.request<T[]>(makePath(page))
     all.push(...batch)
     if (batch.length < 100) break
@@ -446,13 +666,40 @@ export async function paginateAll<T>(
   return all
 }
 
-export async function getOrgMembers(
+// All onboarding repos in the org (names starting with the shared prefix).
+// Discovered by prefix because the name carries a browser-random suffix the
+// teacher can't recompute, so the repo can't be fetched by a derived name.
+export async function listOnboardingRepos(
   client: GitHubClient,
   org: string,
-): Promise<GitHubUser[]> {
-  return paginateAll<GitHubUser>(
+): Promise<GitHubRepo[]> {
+  const repos = await paginateAll<GitHubRepo>(
     client,
-    (page) => `/orgs/${org}/members?per_page=100&page=${page}`,
+    (page) => `/orgs/${org}/repos?per_page=100&page=${page}&type=all`,
+  )
+  return repos.filter((repo) => repo.name.startsWith(ONBOARDING_REPO_PREFIX))
+}
+
+// Owner-only (403 for non-owners). Expired invites drop off this list and
+// surface via getOrgFailedInvitations.
+export async function getOrgInvitations(
+  client: GitHubClient,
+  org: string,
+): Promise<GitHubOrgInvitation[]> {
+  return paginateAll<GitHubOrgInvitation>(
+    client,
+    (page) => `/orgs/${org}/invitations?per_page=100&page=${page}`,
+  )
+}
+
+// Failed / expired org invitations (carry failed_at / failed_reason). Owner-only.
+export async function getOrgFailedInvitations(
+  client: GitHubClient,
+  org: string,
+): Promise<GitHubOrgInvitation[]> {
+  return paginateAll<GitHubOrgInvitation>(
+    client,
+    (page) => `/orgs/${org}/failed_invitations?per_page=100&page=${page}`,
   )
 }
 
@@ -470,6 +717,29 @@ export async function getTeam(
       return null
     }
 
+    throw error
+  }
+}
+
+// Whether the classroom team already has access to a repo (the in-org private
+// template). 2xx = has access, 404 = doesn't; other errors propagate so a
+// transient failure isn't misread as "no access".
+export async function teamHasRepoAccess(
+  client: GitHubClient,
+  input: { org: string; classroom: string; owner: string; repo: string },
+): Promise<boolean> {
+  const { org, classroom, owner, repo } = input
+  const teamSlug = `classroom50-${classroom}`
+
+  try {
+    await client.request(
+      `/orgs/${org}/teams/${teamSlug}/repos/${owner}/${repo}`,
+    )
+    return true
+  } catch (error) {
+    if (error instanceof GitHubAPIError && error.status === 404) {
+      return false
+    }
     throw error
   }
 }
@@ -518,8 +788,44 @@ export async function fetchJson<T>(url: string): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export function pagesAssignmentUrl(org: string, classroom: string) {
-  return `https://${org}.github.io/classroom50/${classroom}/assignments.json`
+export function pagesAssignmentUrl(
+  org: string,
+  classroom: string,
+  secret?: string,
+) {
+  const segment = classroomPagesSegment(classroom, secret)
+  return `https://${org}.github.io/classroom50/${segment}/assignments.json`
+}
+
+// Public, unauthenticated signal that an org is a real Classroom50 org: the
+// classroom50 Pages site publishes this index, so a student who can't read the
+// private config repo can still distinguish a genuine Classroom50 org.
+export function classroomsIndexUrl(org: string) {
+  return `https://${org}.github.io/classroom50/classrooms-index.json`
+}
+
+export async function orgPublishesClassroom50Pages(
+  org: string,
+): Promise<"yes" | "no" | "indeterminate"> {
+  try {
+    const res = await fetch(classroomsIndexUrl(org), {
+      cache: "no-store",
+      // Bound the probe so a hung github.io host can't stall the orgs load.
+      signal: AbortSignal.timeout(5000),
+    })
+    // A clean 404 is a definitive "not a Classroom50 org". Other non-ok
+    // statuses (5xx, 429) are transient -> indeterminate, don't penalize.
+    if (res.status === 404) return "no"
+    if (!res.ok) return "indeterminate"
+    // Confirm it's actually the index shape, not a stray 200 (e.g. a custom
+    // 404 page served with 200).
+    const data = (await res.json()) as { classrooms?: unknown }
+    return Array.isArray(data?.classrooms) ? "yes" : "no"
+  } catch {
+    // Network failure, timeout, DNS, CORS -> transient; never collapse to a
+    // definitive "no" (that would hide a genuinely-enrolled student's org).
+    return "indeterminate"
+  }
 }
 
 export type AssignmentsJson =
@@ -549,9 +855,10 @@ export function extractAssignments(json: AssignmentsJson): Assignment[] {
 export async function fetchPagesAssignments(
   org: string,
   classroom: string,
+  secret?: string,
 ): Promise<Assignment[]> {
   const json = await fetchJson<AssignmentsJson>(
-    pagesAssignmentUrl(org, classroom),
+    pagesAssignmentUrl(org, classroom, secret),
   )
   const assignments = extractAssignments(json)
 
@@ -587,14 +894,18 @@ export type Classroom50OrgSummary = {
 
   classroom50: {
     status: Classroom50Status
-    collectToken: CollectTokenStatus | null
     canAccessRepo: boolean
     canInitialize: boolean
     pagesUrl: string
   }
 }
 
-type Classroom50Status = "ready" | "needs_setup" | "no_access" | "unknown"
+type Classroom50Status =
+  | "ready"
+  | "needs_setup"
+  | "no_access"
+  | "not_classroom50"
+  | "unknown"
 export async function getClassroom50OrgSummary(
   client: GitHubClient,
   membership: GitHubOrgMembership,
@@ -602,23 +913,34 @@ export async function getClassroom50OrgSummary(
   const org = membership.organization
 
   let canAccessRepo = false
-  let collectToken: CollectTokenStatus | null = null
-  let status: Classroom50Status = "unknown"
+  let status: Classroom50Status
 
   try {
     await client.request(`/repos/${org.login}/classroom50`)
     canAccessRepo = true
     status = "ready"
 
-    collectToken = await getCollectTokenStatus(client, org.login)
-  } catch (error: any) {
-    if (error.status === 404) {
+    // The service-token read is deliberately NOT done here: this summary runs
+    // for every org the user can see, and reading the token per org fans out
+    // an extra GitHub API call across potentially many orgs. The token (and
+    // the full policy audit) is checked only when a specific org is opened
+    // (the teacher preflight on ClassesPage).
+  } catch (error) {
+    if (error instanceof GitHubAPIError && error.status === 404) {
       canAccessRepo = false
 
-      status =
-        membership.state === "active" && membership.role === "admin"
-          ? "needs_setup"
-          : "no_access"
+      if (membership.state === "active" && membership.role === "admin") {
+        // An admin who can't see classroom50 hasn't initialized it yet.
+        status = "needs_setup"
+      } else {
+        // A non-admin gets a 404 both when the org isn't a Classroom50 org and
+        // when it is but the config repo is private to them. Disambiguate via
+        // the public Pages index. On an indeterminate probe (transient network
+        // failure) keep the org visible (no_access) rather than hiding a
+        // genuinely-enrolled student's org behind a CDN blip.
+        const pagesVerdict = await orgPublishesClassroom50Pages(org.login)
+        status = pagesVerdict === "no" ? "not_classroom50" : "no_access"
+      }
     } else {
       status = "unknown"
     }
@@ -633,12 +955,148 @@ export async function getClassroom50OrgSummary(
     classroom50: {
       status,
       canAccessRepo,
-      collectToken,
       canInitialize:
         membership.state === "active" && membership.role === "admin",
       pagesUrl: `https://${org.login}.github.io/classroom50/`,
     },
   }
+}
+
+// Max simultaneous per-repo onboarding reads. Bounded so a large class doesn't
+// fan out into hundreds of concurrent requests (GitHub secondary-rate-limit
+// territory) while still beating a strictly-sequential loop.
+export const ONBOARDING_READ_CONCURRENCY = 8
+
+// One onboarding repo owned by a github-id. `payload` is null when the repo
+// exists but its YAML hasn't committed yet (half-finished) or couldn't parse.
+type OwnOnboardingRepo = { repo: string; payload: OnboardingYaml | null }
+
+// The signed-in student's own onboarding repos (by github-id prefix), each
+// with its self-report YAML when present. Throws on a transient list failure so
+// callers distinguish "no repos" from "couldn't determine" — a silent
+// degrade-to-empty would let submitOnboarding mint a duplicate repo.
+async function listOwnOnboardingRepos(
+  client: GitHubClient,
+  org: string,
+  githubId: number | string,
+): Promise<OwnOnboardingRepo[]> {
+  const prefix = onboardingRepoPrefixForGithubId(githubId)
+  const repos = (await listOnboardingRepos(client, org)).filter(
+    (repo) => repo.name.startsWith(prefix) && !repo.archived,
+  )
+  const out: OwnOnboardingRepo[] = await mapWithConcurrency(
+    repos,
+    ONBOARDING_READ_CONCURRENCY,
+    async (repo) => {
+      try {
+        const payload = parseOnboardingYaml(
+          await getRepoFile(client, org, repo.name, ONBOARDING_YAML_PATH),
+        )
+        return { repo: repo.name, payload }
+      } catch {
+        // Repo exists but YAML not committed yet.
+        return { repo: repo.name, payload: null }
+      }
+    },
+  )
+  return out
+}
+
+// The student's onboarding repo for THIS classroom:
+//  - "matched":    committed YAML names this classroom -> reuse it.
+//  - "incomplete": exactly one same-prefix repo has no committed YAML yet and
+//                  no matched repo exists -> reuse the half-finished attempt so
+//                  a re-submit doesn't strand it. (Ambiguous when several lack
+//                  a YAML -> treat as "none" and mint fresh.)
+//  - "none":       no reusable repo.
+// Throws on a transient list/read failure (propagated from listOwnOnboardingRepos).
+export type OwnOnboardingResolution =
+  | { status: "matched"; repo: string }
+  | { status: "incomplete"; repo: string }
+  | { status: "none" }
+
+export async function resolveOwnOnboardingRepo(
+  client: GitHubClient,
+  org: string,
+  githubId: number | string,
+  classroom: string,
+): Promise<OwnOnboardingResolution> {
+  const repos = await listOwnOnboardingRepos(client, org, githubId)
+
+  const matched = repos.find((r) => r.payload?.classroom === classroom)
+  if (matched) return { status: "matched", repo: matched.repo }
+
+  // Repos that exist but have no committed YAML yet. Reuse only when unambiguous
+  // (exactly one), so a student mid-onboarding in another classroom can't have
+  // that classroom's lagging repo repurposed here.
+  const incomplete = repos.filter((r) => r.payload === null)
+  if (incomplete.length === 1) {
+    return { status: "incomplete", repo: incomplete[0].repo }
+  }
+  return { status: "none" }
+}
+
+// Whether the student has an onboarding repo for THIS classroom (matched YAML,
+// or a single in-progress repo whose YAML is still landing). The OnboardingPage
+// status probe uses this to show "pending confirmation" instead of re-showing
+// the form on reload.
+export async function hasActiveOnboardingForClassroom(
+  client: GitHubClient,
+  org: string,
+  githubId: number | string,
+  classroom: string,
+): Promise<boolean> {
+  const resolution = await resolveOwnOnboardingRepo(
+    client,
+    org,
+    githubId,
+    classroom,
+  )
+  return resolution.status !== "none"
+}
+
+// All onboarding self-reports in the org for a classroom: the GitHub-attested
+// github_id and claimed email from each onboarding repo's YAML. The teacher
+// roster uses this to tell a student who has onboarded (repo exists) apart from
+// one who hasn't. Best-effort per repo: an unreadable/missing payload is skipped.
+export async function listOnboardingSelfReports(
+  client: GitHubClient,
+  org: string,
+  classroom: string,
+): Promise<OnboardingSelfReport[]> {
+  const repos = (await listOnboardingRepos(client, org)).filter(
+    (repo) => !repo.archived,
+  )
+  // Bounded-parallel per-repo YAML reads: a busy classroom can have dozens of
+  // outstanding onboarding repos, and a sequential loop made the owner roster
+  // wait on N serial round trips.
+  const payloads = await mapWithConcurrency(
+    repos,
+    ONBOARDING_READ_CONCURRENCY,
+    async (repo) => {
+      try {
+        return parseOnboardingYaml(
+          await getRepoFile(client, org, repo.name, ONBOARDING_YAML_PATH),
+        )
+      } catch {
+        // Unreadable/missing payload -> not a confirmed self-report; skip.
+        return null
+      }
+    },
+  )
+  const reports: OnboardingSelfReport[] = []
+  for (const payload of payloads) {
+    if (payload && payload.classroom === classroom) {
+      reports.push({
+        github_id: String(payload.github_id),
+        email: payload.email,
+        first_name: payload.first_name,
+        last_name: payload.last_name,
+        github_username: payload.github_username,
+      })
+    }
+  }
+  return reports
 }
 
 export async function getRepo(
@@ -653,6 +1111,26 @@ export async function getRepo(
       return null
     }
     throw err
+  }
+}
+
+// Whether `username` is a member of the org team `teamSlug`. GET .../memberships
+// 404s when they're not a member (or the team/slug is unknown) -> false. Any
+// other error also degrades to false so a transient read can't misroute the
+// onboarding repo-naming decision toward the team path.
+export async function isTeamMember(
+  client: GitHubClient,
+  org: string,
+  teamSlug: string,
+  username: string,
+): Promise<boolean> {
+  try {
+    const membership = await client.request<{ state?: string }>(
+      `/orgs/${org}/teams/${teamSlug}/memberships/${username}`,
+    )
+    return membership.state === "active"
+  } catch {
+    return false
   }
 }
 
@@ -690,8 +1168,13 @@ export async function getOpenPullRequests(
 
 export async function getOrgRepos(client: GitHubClient, owner: string) {
   try {
-    return await client.request<GitHubRepo[]>(
-      `/orgs/${owner}/repos?per_page=100`,
+    // Paginate to exhaustion: a single per_page=100 page silently under-counts
+    // orgs with >100 repos, which would make repo-list-derived signals (e.g.
+    // assignment acceptance on the submissions dashboard) miss students in
+    // large orgs. The first page's failure still surfaces a 404 as null below.
+    return await paginateAll<GitHubRepo>(
+      client,
+      (page) => `/orgs/${owner}/repos?per_page=100&page=${page}&type=all`,
     )
   } catch (err) {
     if (err instanceof GitHubAPIError && err.status === 404) {
@@ -706,42 +1189,42 @@ type RepositorySecret = {
   created_at: string
   updated_at: string
 }
-const COLLECT_TOKEN_SECRET_NAME = "CLASSROOM50_SERVICE_TOKEN"
-export type CollectTokenStatus =
+const SERVICE_TOKEN_SECRET_NAME = "CLASSROOM50_SERVICE_TOKEN"
+export type ServiceTokenStatus =
   | {
       status: "present"
-      secretName: typeof COLLECT_TOKEN_SECRET_NAME
+      secretName: typeof SERVICE_TOKEN_SECRET_NAME
       createdAt: string
       updatedAt: string
       message: string
     }
   | {
       status: "missing"
-      secretName: typeof COLLECT_TOKEN_SECRET_NAME
+      secretName: typeof SERVICE_TOKEN_SECRET_NAME
       message: string
     }
   | {
       status: "unknown"
-      secretName: typeof COLLECT_TOKEN_SECRET_NAME
+      secretName: typeof SERVICE_TOKEN_SECRET_NAME
       reason: "repo_missing_or_no_access" | "permission_denied" | "unknown"
       message: string
     }
 
-export async function getCollectTokenStatus(
+export async function getServiceTokenStatus(
   client: GitHubClient,
   org: string,
-): Promise<CollectTokenStatus> {
+): Promise<ServiceTokenStatus> {
   try {
     const secret = await client.request<RepositorySecret>(
-      `/repos/${org}/classroom50/actions/secrets/${COLLECT_TOKEN_SECRET_NAME}`,
+      `/repos/${org}/classroom50/actions/secrets/${SERVICE_TOKEN_SECRET_NAME}`,
     )
 
     return {
       status: "present",
-      secretName: COLLECT_TOKEN_SECRET_NAME,
+      secretName: SERVICE_TOKEN_SECRET_NAME,
       createdAt: secret.created_at,
       updatedAt: secret.updated_at,
-      message: `Collect token secret exists. Last updated ${new Date(
+      message: `Service token is set on the classroom50 config repo. Last updated ${new Date(
         secret.updated_at,
       ).toLocaleString()}.`,
     }
@@ -750,28 +1233,30 @@ export async function getCollectTokenStatus(
       if (err.status === 404) {
         return {
           status: "missing",
-          secretName: COLLECT_TOKEN_SECRET_NAME,
+          secretName: SERVICE_TOKEN_SECRET_NAME,
           message:
-            "Collect token secret is missing. Store collection workflows will not be able to read student repositories until a token is stored.",
+            "Service token is not set on the classroom50 config repo. Score-collection and regrade workflows cannot access student repositories until a service token is set.",
         }
       }
 
       if (err.status === 403) {
         return {
           status: "unknown",
-          secretName: COLLECT_TOKEN_SECRET_NAME,
+          secretName: SERVICE_TOKEN_SECRET_NAME,
           reason: "permission_denied",
           message:
-            "Could not check the collect token secret because this GitHub authorization cannot read repository Actions secrets.",
+            "Could not check the service token on the classroom50 config repo because this GitHub authorization cannot read repository Actions secrets.",
         }
       }
     }
 
     return {
       status: "unknown",
-      secretName: COLLECT_TOKEN_SECRET_NAME,
+      secretName: SERVICE_TOKEN_SECRET_NAME,
       reason: "unknown",
-      message: `Could not check collect token secret: ${getErrorMessage(err)}`,
+      message: `Could not check the service token on the classroom50 config repo: ${getErrorMessage(
+        err,
+      )}`,
     }
   }
 }
@@ -787,4 +1272,138 @@ export async function getRepoPermissionForUser(params: {
   return client.request(
     `/repos/${org}/${repo}/collaborators/${username}/permission`,
   )
+}
+
+// Fetches the most recent workflow run matching the given filters (or null if
+// none) from a classroom50 workflow. Shared by the collect-scores "track my
+// dispatch" / "last collected" reads and the regrade dispatch tracker, so the
+// workflow file is a parameter (defaults to collect-scores).
+async function listLatestWorkflowRun(
+  client: GitHubClient,
+  org: string,
+  filters: {
+    event?: string
+    since?: string
+    status?: string
+    perPage?: number
+    page?: number
+  },
+  signal?: AbortSignal,
+  workflow: string = COLLECT_SCORES_WORKFLOW,
+): Promise<GitHubWorkflowRun[]> {
+  const params = new URLSearchParams({
+    per_page: String(filters.perPage ?? 1),
+  })
+  if (filters.event) params.set("event", filters.event)
+  if (filters.since) params.set("created", `>=${filters.since}`)
+  if (filters.status) params.set("status", filters.status)
+  if (filters.page) params.set("page", String(filters.page))
+
+  const res = await client.request<{ workflow_runs: GitHubWorkflowRun[] }>(
+    `/repos/${org}/classroom50/actions/workflows/${workflow}/runs?${params.toString()}`,
+    { method: "GET", signal },
+  )
+
+  return res.workflow_runs ?? []
+}
+
+// Finds the run we dispatched: run ids are monotonic, so it's the oldest
+// dispatch run with an id greater than `sinceRunId` (the newest id before our
+// POST). Binding to our own run avoids mistaking a concurrent dispatch for ours
+// and needs no clock. Returns null until our run registers; `sinceRunId === null`
+// means no prior runs, so the oldest run on the first page is ours.
+export async function getCollectScoresRunAfterId(
+  client: GitHubClient,
+  org: string,
+  sinceRunId: number | null,
+  signal?: AbortSignal,
+): Promise<GitHubWorkflowRun | null> {
+  const runs = await listLatestWorkflowRun(
+    client,
+    org,
+    { event: "workflow_dispatch", perPage: 20 },
+    signal,
+  )
+
+  // runs come newest-first; the run we triggered is the oldest one newer than
+  // the pre-dispatch baseline.
+  const newer =
+    sinceRunId === null ? runs : runs.filter((r) => r.id > sinceRunId)
+  return newer.length > 0 ? newer[newer.length - 1] : null
+}
+
+// Finds the regrade run we dispatched, by the same monotonic-id binding as
+// getCollectScoresRunAfterId but against the regrade.yaml workflow. Returns
+// null until our run registers.
+//
+// Unlike collect (one org-wide dispatcher), regrade can fan out one dispatch
+// per student via the per-row buttons, so far more than a single page of
+// dispatch runs can pile up between our snapshot and this poll. A fixed first
+// page would let our own run scroll off and bind us to a later student's run.
+// So we page newest-first, accumulating only runs with id > sinceRunId, and
+// stop as soon as a page contains a run at/below the baseline (everything older
+// is irrelevant) or we hit the page cap. The bound run is the oldest such run.
+const REGRADE_RUNS_PER_PAGE = 30
+const REGRADE_MAX_PAGES = 10
+
+export async function getRegradeRunAfterId(
+  client: GitHubClient,
+  org: string,
+  sinceRunId: number | null,
+  signal?: AbortSignal,
+): Promise<GitHubWorkflowRun | null> {
+  // No prior runs: our run is the oldest dispatch run that exists, so a single
+  // newest-first page is enough — the last entry is the earliest run.
+  if (sinceRunId === null) {
+    const runs = await listLatestWorkflowRun(
+      client,
+      org,
+      { event: "workflow_dispatch", perPage: REGRADE_RUNS_PER_PAGE },
+      signal,
+      REGRADE_WORKFLOW,
+    )
+    return runs.length > 0 ? runs[runs.length - 1] : null
+  }
+
+  // Page through dispatch runs (newest-first) collecting those newer than the
+  // baseline. Stop once a page reaches the baseline or yields nothing.
+  const newer: GitHubWorkflowRun[] = []
+  for (let page = 1; page <= REGRADE_MAX_PAGES; page++) {
+    const runs = await listLatestWorkflowRun(
+      client,
+      org,
+      { event: "workflow_dispatch", perPage: REGRADE_RUNS_PER_PAGE, page },
+      signal,
+      REGRADE_WORKFLOW,
+    )
+    if (runs.length === 0) break
+
+    for (const r of runs) {
+      if (r.id > sinceRunId) newer.push(r)
+    }
+
+    // This page already includes the baseline (or older), so no later page can
+    // hold a run newer than it — we've seen every candidate.
+    if (runs.some((r) => r.id <= sinceRunId)) break
+  }
+
+  // The run we triggered is the oldest one newer than the baseline.
+  return newer.length > 0 ? newer[newer.length - 1] : null
+}
+
+// The most recent *completed* collect-scores run (cron or manual), or null if
+// the workflow has never completed. Used for the "last collected" timestamp;
+// status=completed stops an in-flight newer run from hiding the prior one.
+export async function getLastCollectScoresRun(
+  client: GitHubClient,
+  org: string,
+  signal?: AbortSignal,
+): Promise<GitHubWorkflowRun | null> {
+  const runs = await listLatestWorkflowRun(
+    client,
+    org,
+    { status: "completed" },
+    signal,
+  )
+  return runs[0] ?? null
 }
