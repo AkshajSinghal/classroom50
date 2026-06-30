@@ -112,14 +112,25 @@ jobs:
           # Excluded paths:
           #   - wiki/ goes to the wiki repo in the next step.
           #   - This workflow file stays dev-only so the public repo doesn't try to run it.
+          #   - web-*.yaml workflows operate on the (private) web/ tree; exclude
+          #     them too so the public repo doesn't carry workflows referencing a
+          #     directory it doesn't have.
           #   - plans/ holds internal planning notes that reference dev-only resources
           #     (e.g. PR URLs against this repo); keep them out of the public mirror.
+          #   - web/ (the web frontend) is kept PRIVATE for now: the source is not
+          #     mirrored to the public repo yet, even though the built site is
+          #     deployed to classroom50.org from this repo (web-deploy.yaml). Drop
+          #     this exclude when the web source is ready to open-source.
           find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
           rsync -a \
             --exclude='.git/' \
             --exclude='wiki/' \
             --exclude='.github/workflows/mirror-to-public.yaml' \
+            --exclude='.github/workflows/web-ci.yaml' \
+            --exclude='.github/workflows/web-deploy.yaml' \
+            --exclude='.github/workflows/web-deploy-staging.yaml' \
             --exclude='plans/' \
+            --exclude='web/' \
             "$GITHUB_WORKSPACE"/ ./
 
           if [ -z "$(git status --porcelain)" ]; then
