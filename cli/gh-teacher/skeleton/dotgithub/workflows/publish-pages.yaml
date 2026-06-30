@@ -11,6 +11,9 @@ name: Publish Pages
 on:
   push:
     branches: ["{{DEFAULT_BRANCH}}"]
+    # Skip the redeploy for roster-only commits: students.csv isn't published.
+    paths-ignore:
+      - "**/students.csv"
   workflow_dispatch:
 
 permissions:
