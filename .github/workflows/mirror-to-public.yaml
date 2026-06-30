@@ -114,12 +114,15 @@ jobs:
           #   - This workflow file stays dev-only so the public repo doesn't try to run it.
           #   - plans/ holds internal planning notes that reference dev-only resources
           #     (e.g. PR URLs against this repo); keep them out of the public mirror.
+          #   - web/docs/plans/ is the web app's equivalent internal planning notes
+          #     (imported with the web subtree); keep them out of the public mirror too.
           find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
           rsync -a \
             --exclude='.git/' \
             --exclude='wiki/' \
             --exclude='.github/workflows/mirror-to-public.yaml' \
             --exclude='plans/' \
+            --exclude='web/docs/plans/' \
             "$GITHUB_WORKSPACE"/ ./
 
           if [ -z "$(git status --porcelain)" ]; then

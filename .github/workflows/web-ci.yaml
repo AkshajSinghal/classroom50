@@ -1,18 +1,24 @@
-name: CI
+name: web CI
 
-# Quality gate for PRs and pushes to long-lived branches: type-check, lint,
-# and tests. Blocks merge and can't be bypassed like a local hook.
+# Quality gate for the web app (web/): type-check, lint, format, and tests.
+# Blocks merge and can't be bypassed like a local hook. Scoped to web/** so
+# it only runs when the frontend changes, independent of the Go/Python CI.
 
 on:
-  pull_request:
-    branches: [main, staging]
   push:
-    branches: [main, staging]
+    branches: [main, v1]
+    paths:
+      - 'web/**'
+      - '.github/workflows/web-ci.yaml'
+  pull_request:
+    paths:
+      - 'web/**'
+      - '.github/workflows/web-ci.yaml'
 
 # Cancel superseded runs on the same ref so a quick succession of pushes
 # doesn't pile up redundant CI.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: web-ci-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -21,6 +27,10 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
     steps:
       - uses: actions/checkout@v6
 
@@ -28,6 +38,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: web/package-lock.json
 
       - run: npm ci
 
