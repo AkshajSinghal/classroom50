@@ -46,6 +46,7 @@ import useGetClassroom from "@/hooks/useGetClassroom"
 import useGetStudents from "@/hooks/useGetStudents"
 import useGetOrgRepos from "@/hooks/useGetMyOrgRepos"
 import useTriggerScoreCollection from "@/hooks/useTriggerScoreCollection"
+import useTriggerRegrade from "@/hooks/useTriggerRegrade"
 import useGetLastCollectScoresRun from "@/hooks/useGetLastCollectScoresRun"
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
 import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
@@ -312,6 +313,9 @@ const SubmissionsPageContent = () => {
   )
 
   const collectScores = useTriggerScoreCollection(org)
+  const regradeAll = useTriggerRegrade({ org, classroom, assignment })
+  const regrading =
+    regradeAll.phase === "dispatching" || regradeAll.phase === "running"
   const { data: lastRun, refetch: refetchLastRun } =
     useGetLastCollectScoresRun(org)
   const workflowUrl = `https://github.com/${org}/classroom50/actions/workflows/${COLLECT_SCORES_WORKFLOW}`
@@ -489,9 +493,65 @@ const SubmissionsPageContent = () => {
                     or refresh this page once it finishes.
                   </p>
                 )}
+                {regradeAll.phase === "dispatching" && (
+                  <p className="mt-1 text-sm text-base-content/70">
+                    Starting regrade…
+                  </p>
+                )}
+                {regradeAll.phase === "running" && (
+                  <p className="mt-1 flex items-center gap-1.5 text-sm text-base-content/70">
+                    <span className="loading loading-spinner loading-xs" />
+                    Re-tagging submissions for regrade…
+                  </p>
+                )}
+                {regradeAll.phase === "completed" && (
+                  <p className="mt-1 text-sm text-success">
+                    Regrade started. Grading now runs in the background for each
+                    repo — use “Collect now” in a few minutes to pull the new
+                    scores.
+                  </p>
+                )}
+                {regradeAll.phase === "failed" && (
+                  <p className="mt-1 text-sm text-error">
+                    {regradeAll.error instanceof Error
+                      ? `Could not start the regrade: ${regradeAll.error.message}`
+                      : "The regrade did not start successfully."}{" "}
+                    You can check or trigger it manually on GitHub.
+                  </p>
+                )}
+                {regradeAll.phase === "timeout" && (
+                  <p className="mt-1 text-sm text-base-content/70">
+                    The regrade is taking a while to register. Check its
+                    progress on GitHub.
+                  </p>
+                )}
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                className="btn btn-sm btn-outline"
+                disabled={regrading}
+                onClick={() => {
+                  if (regrading) return
+                  if (
+                    window.confirm(
+                      `Re-run the autograder on every submitted repo for "${assignmentInfo?.name ?? assignment}"?\n\n` +
+                        "This re-grades each student's latest commit (useful after fixing a test). " +
+                        'Grading runs in the background and can take several minutes; use "Collect now" ' +
+                        "afterward to pull the new scores.",
+                    )
+                  ) {
+                    regradeAll.regrade()
+                  }
+                }}
+                title="Re-run the autograder for the whole assignment"
+              >
+                {regrading && (
+                  <span className="loading loading-spinner loading-xs" />
+                )}
+                {regrading ? "Regrading…" : "Regrade all"}
+              </button>
               <button
                 type="button"
                 className="btn btn-sm btn-primary"
