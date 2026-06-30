@@ -2,6 +2,20 @@
 
 Shared domain vocabulary for this project — entities, named processes, and status concepts with project-specific meaning. Seeded with core domain vocabulary, then accretes as ce-compound and ce-compound-refresh process learnings; direct edits are fine. Glossary only, not a spec or catch-all.
 
+## Autograding
+
+- **Autograder** — the per-submission grading program the runner invokes once per push. Resolution is most-specific-first: a per-assignment override, then a declarative test set, then a classroom-wide default, then a Vacuous Pass when none is configured. A hand-written Autograder is the escape hatch when Declarative Tests can't express what's needed.
+
+- **Declarative test** — a grading test defined as data (in the assignment manifest) rather than as a hand-written Autograder. The runner grades a Declarative Test with a built-in interpreter, emitting one result row per test. Each is one of three Test Types: io, run, or python.
+
+- **Test type** — the kind of a Declarative Test, one of: **io** (feed stdin, compare the program's stdout against an expected value per a Comparison Mode), **run** (pass when the program's exit code matches an expected code), and **python** (run pytest; points split across discovered cases). Avoid calling these "checks."
+
+- **Comparison mode** — for an io Test Type, how the program's captured stdout is matched against the expected value: **included** (expected appears anywhere in stdout, raw substring), **exact** (equal after trimming only the surrounding whitespace of the whole capture), or **regex** (line-anchored search over the full stdout). The comparison always sees the entire stdout, including any prompt text the program prints.
+
+- **Vacuous pass** — the synthesized success result (score 0/0, status success) the runner emits when no Autograder is configured for an assignment. A valid mid-setup state, not an error: the Submission still lands as a graded release so the gradebook records it.
+
+- **Submission** — one graded unit: a push to a student repo's default branch, tagged `submit/<timestamp>-<sha>`, graded once, and published as a release with its result attached. Every push is its own Submission with one exception — the **acceptance commit** (the one that lands `.classroom50.yaml` at accept time) is detected and skipped by the runner, so it produces no tag, no grade, and no release. The full Submission history is retained, newest first.
+
 ## Onboarding & enrollment
 
 - **Onboarding** — the student-side flow where an invited student self-reports their identity so the teacher can add them to the classroom roster. Distinct from being an org/team member: a student can have classroom access (be on the team) yet not have onboarded.
@@ -24,7 +38,7 @@ Shared domain vocabulary for this project — entities, named processes, and sta
 
 - **Accepted (assignment)** — a student has accepted an assignment when their per-student assignment repository exists in the org (named by the shared repo-name formula). Acceptance is implicit and derived, not an event: there is no backend to record it, so "accepted" is inferred from repo existence. Distinct from **submitted** (a graded push exists in `scores.json`) and from **enrolled** (identity bound in the roster) — a student can be accepted without having submitted.
 
-- **Cross-binary contract** — a name, path, or schema whose format is shared across more than one independently-shipped tool (the web app, the `gh-teacher` CLI, the autograder/publisher), so it can only be changed by coordinating all sides. Examples in this project: the `students.csv` schema, the `assignments.json` schema, the published-resource capability path, and the student repo-name formula. Two disciplines: construct shared names in one agreed direction and never re-derive a shared value by reverse-parsing it; and evolve a shared schema additively with forward-compatible parsing (tolerate _and_ preserve unknown fields) rather than strict rejection or lockstep releases — a strict "reject unknown fields" parser turns every additive field into a coordinated release, and tolerate-without-preserve on a round-tripping tool silently drops a newer client's field.
+- **Cross-binary contract** — a name, path, or schema whose format is shared across more than one independently-shipped tool (the web app, the `gh-teacher` CLI, the autograder/publisher), so it can only be changed by coordinating all sides. Examples in this project: the `students.csv` schema, the `assignments.json` schema, the published-resource capability path, and the student repo-name formula. Two disciplines: construct shared names in one agreed direction and never re-derive a shared value by reverse-parsing it; and evolve a shared schema additively with forward-compatible parsing (tolerate _and_ preserve unknown fields) rather than strict rejection or lockstep releases — a strict "reject unknown fields" parser turns every additive field into a coordinated release, and tolerate-without-preserve on a round-tripping tool silently drops a newer client's field. In the monorepo the web app and CLI ship together, so co-shipped changes follow a web-priority model (update the schema first, CLI follows); tolerate-and-preserve still guards documents written by an older deployed release.
 
 - **Pass threshold** — an assignment's opt-in passing bar: the percentage of max score at or above which a submission counts as passing in the gradebook (passing rollup, score badges, passing/failing filter). Off by default; a display threshold only — it does not change a student's actual score. Stored in `assignments.json` only when the teacher enables it.
 

@@ -117,6 +117,11 @@ jobs:
           #     directory it doesn't have.
           #   - plans/ holds internal planning notes that reference dev-only resources
           #     (e.g. PR URLs against this repo); keep them out of the public mirror.
+          #   - AGENTS.md / CONCEPTS.md are internal contributor/agent guidance: they
+          #     describe the monorepo's internal layout, conventions, and decision
+          #     making and reference dev-only/web-private docs, so they stay out of
+          #     the public mirror. The basename excludes drop every AGENTS.md at any
+          #     depth (root + cli/*); web/AGENTS.md is already covered by web/.
           #   - web/ (the web frontend) is kept PRIVATE for now: the source is not
           #     mirrored to the public repo yet, even though the built site is
           #     deployed to classroom50.org from this repo (web-deploy.yaml). Drop
@@ -130,6 +135,8 @@ jobs:
             --exclude='.github/workflows/web-deploy.yaml' \
             --exclude='.github/workflows/web-deploy-staging.yaml' \
             --exclude='plans/' \
+            --exclude='AGENTS.md' \
+            --exclude='CONCEPTS.md' \
             --exclude='web/' \
             "$GITHUB_WORKSPACE"/ ./
 
