@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 
 import { useGitHubClient } from "@/context/github/GitHubProvider"
@@ -18,6 +18,10 @@ import {
   initialInitSteps,
 } from "./initStepBoard"
 import SettingsSection from "./SettingsSection"
+import {
+  SkeletonOverwriteModal,
+  useSkeletonOverwriteConfirm,
+} from "./skeletonOverwriteUi"
 
 const BANNER_TONE = {
   error: "border-error/30 bg-error/10 text-error",
@@ -62,22 +66,21 @@ const RerunOnboarding = ({ org }: { org: string }) => {
   const [failed, setFailed] = useState(false)
   const [done, setDone] = useState(false)
 
+  // Skeleton-overwrite confirmation. initClassroom50 calls confirmSkeletonOverwrite
+  // mid-run with the drifted files about to be overwritten; the hook opens the
+  // modal and parks the run until the teacher confirms or cancels.
+  const {
+    overwritePaths,
+    resolveOverwrite,
+    confirmSkeletonOverwrite,
+    mountedRef,
+  } = useSkeletonOverwriteConfirm()
+
   // After a completed run, surface whether any step finished with a warning so
   // the per-step messages on the board have a headline to explain them.
   const warningCount = started
     ? INIT_STEP_ORDER.filter((id) => steps[id].status === "warning").length
     : 0
-
-  // Guard setState after unmount: init fires onStepUpdate across ~10 sequential
-  // steps and the user can navigate away mid-run. The network work itself isn't
-  // cancelable (no AbortSignal); the guard just stops the setState churn.
-  const mountedRef = useRef(true)
-  useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-    }
-  }, [])
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -90,9 +93,13 @@ const RerunOnboarding = ({ org }: { org: string }) => {
         org,
         plan: planDetails?.plan?.name,
         onStepUpdate: (update) => {
+          // init fires onStepUpdate across ~10 sequential steps; the user can
+          // navigate away mid-run. The work isn't cancelable (no AbortSignal),
+          // so the mounted guard just stops the setState churn.
           if (!mountedRef.current) return
           setSteps((prev) => applyStepUpdate(prev, update))
         },
+        confirmSkeletonOverwrite,
       })
     },
     onSuccess: (data) => {
@@ -147,7 +154,7 @@ const RerunOnboarding = ({ org }: { org: string }) => {
 
       {started && (
         <div className={!isOwner ? "mt-4" : undefined}>
-          <InitStepBoard steps={steps} />
+          <InitStepBoard steps={steps} org={org} />
           {failed && (
             <SummaryBanner tone="error" className="mt-3">
               Re-run setup did not complete — a required step failed. Review the
@@ -173,6 +180,12 @@ const RerunOnboarding = ({ org }: { org: string }) => {
           )}
         </div>
       )}
+
+      <SkeletonOverwriteModal
+        paths={overwritePaths}
+        onConfirm={() => resolveOverwrite(true)}
+        onClose={() => resolveOverwrite(false)}
+      />
     </SettingsSection>
   )
 }

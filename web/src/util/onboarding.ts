@@ -4,17 +4,12 @@
 // lists by prefix and matches each self-report to a row purely on the YAML
 // payload (invite_token, then github_id, then email).
 
+import { bytesToHex } from "./hex"
+
 export const ONBOARDING_REPO_PREFIX = "classroom50-onboarding-"
 
 // Path of the self-report payload committed into the onboarding repo.
 export const ONBOARDING_YAML_PATH = ".classroom50-onboarding.yaml"
-
-// Lowercase hex of a byte array.
-function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")
-}
 
 // 128 bits of CSPRNG randomness as 32-char lowercase hex (unguessable,
 // collision-proof). Backs both the invite token and the onboarding suffix.

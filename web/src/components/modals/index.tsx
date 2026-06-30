@@ -5,7 +5,8 @@ type ConfirmModalProps = {
   open: boolean
   title: string
   description?: React.ReactNode
-  confirmText: string
+  // Only used when needsConfirm: the phrase the user must type to confirm.
+  confirmText?: string
   confirmLabel?: string
   cancelLabel?: string
   dangerous?: boolean
@@ -18,7 +19,7 @@ export function ConfirmModal({
   open,
   title,
   description,
-  confirmText,
+  confirmText = "",
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
   dangerous = true,
