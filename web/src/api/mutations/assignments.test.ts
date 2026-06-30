@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest"
 
-import { buildReusedEntry, nextAvailableSlug } from "./assignments"
+import {
+  buildReusedEntry,
+  nextAvailableSlug,
+  preserveUnmanagedAssignmentKeys,
+} from "./assignments"
 import type { Assignment } from "@/types/classroom"
 
 const fullSource: Assignment = {
@@ -159,6 +163,71 @@ describe("buildReusedEntry", () => {
     }
     const entry = buildReusedEntry(source, { slug: "c2", name: "Container 2" })
     expect(entry.runtime).toEqual({ container: { image: "node:22" } })
+  })
+})
+
+describe("preserveUnmanagedAssignmentKeys", () => {
+  it("carries forward migrated_from from the existing entry", () => {
+    const existing: Assignment = {
+      ...fullSource,
+      migrated_from: {
+        source: "github-classroom",
+        classroom_id: 42,
+        assignment_id: 7,
+        original_slug: "hw1-old",
+        migrated_at: "2026-01-02T03:04:05Z",
+      },
+    }
+    // A fresh form rebuild drops migrated_from.
+    const edited: Assignment = {
+      slug: "hw1",
+      name: "Homework 1 (edited)",
+      mode: "individual",
+      autograder: "default",
+    }
+    const merged = preserveUnmanagedAssignmentKeys(existing, edited)
+    expect(merged.migrated_from).toEqual(existing.migrated_from)
+    expect(merged.name).toBe("Homework 1 (edited)")
+  })
+
+  it("preserves unknown future keys but never overwrites managed ones", () => {
+    const existing = {
+      slug: "hw1",
+      name: "Old name",
+      mode: "individual",
+      autograder: "default",
+      // Unknown key from a newer binary.
+      experimental_flag: { enabled: true },
+      // Stale managed key the edit changes below.
+      pass_threshold: 50,
+    } as unknown as Assignment
+    const edited: Assignment = {
+      slug: "hw1",
+      name: "New name",
+      mode: "individual",
+      autograder: "default",
+      pass_threshold: 90,
+    }
+    const merged = preserveUnmanagedAssignmentKeys(existing, edited) as Record<
+      string,
+      unknown
+    >
+    expect(merged.experimental_flag).toEqual({ enabled: true })
+    expect(merged.pass_threshold).toBe(90)
+    expect(merged.name).toBe("New name")
+  })
+
+  it("does not re-add a managed key the edit deliberately cleared", () => {
+    const existing: Assignment = { ...fullSource, due: "2026-09-01T23:59:00Z" }
+    // Edit removed the due date (omitted from the rebuilt entry).
+    const edited: Assignment = {
+      slug: "hw1",
+      name: "Homework 1",
+      mode: "individual",
+      autograder: "default",
+    }
+    const merged = preserveUnmanagedAssignmentKeys(existing, edited)
+    expect(merged.due).toBeUndefined()
   })
 })
 
