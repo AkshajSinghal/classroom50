@@ -2,6 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
 import { useGitHubClient } from "@/context/github/GitHubProvider"
+import { useRegradeCoordinator } from "@/context/regrade/RegradeCoordinator"
 import { triggerRegrade } from "./github/mutations"
 import { getRegradeRunAfterId, githubKeys } from "./github/queries"
 import type { GitHubWorkflowRun } from "./github/types"
@@ -99,6 +100,7 @@ const saveDispatch = (t: RegradeTarget, state: DispatchState | null) => {
  */
 const useTriggerRegrade = (target: RegradeTarget) => {
   const client = useGitHubClient()
+  const coordinator = useRegradeCoordinator()
   const [dispatch, setDispatch] = useState<DispatchState | null>(() =>
     loadDispatch(target),
   )
@@ -196,11 +198,31 @@ const useTriggerRegrade = (target: RegradeTarget) => {
   else if (timedOut) phase = "timeout"
   else if (dispatch) phase = "running"
 
+  // Publish this tracker's in-flight state to the page coordinator so the
+  // page-level "Regrade all" hook, every per-row tracker, and "Collect now"
+  // share one mutual-exclusion signal (and so a new dispatch can be blocked
+  // while any regrade is already running). Unregister on unmount/target change.
+  const inFlight = phase === "dispatching" || phase === "running"
+  const { setInFlight } = coordinator
+  useEffect(() => {
+    setInFlight(key, inFlight)
+    return () => setInFlight(key, false)
+  }, [setInFlight, key, inFlight])
+
   return {
-    regrade: () => mutation.mutate(),
+    // Refuse to start a second regrade while any regrade for this assignment
+    // is in flight: trackers poll the same regrade.yaml run list and bind by
+    // monotonic id, which assumes one outstanding dispatch at a time.
+    regrade: () => {
+      if (inFlight || !coordinator.canDispatch()) return
+      mutation.mutate()
+    },
     phase,
     run,
     error: mutation.error ?? runQuery.error,
+    // True while ANY regrade (this one, another row, or "Regrade all") is in
+    // flight — callers use it to disable collect/regrade controls page-wide.
+    anyRegrading: coordinator.anyInFlight,
   }
 }
 

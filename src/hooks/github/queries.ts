@@ -1286,6 +1286,7 @@ async function listLatestWorkflowRun(
     since?: string
     status?: string
     perPage?: number
+    page?: number
   },
   signal?: AbortSignal,
   workflow: string = COLLECT_SCORES_WORKFLOW,
@@ -1296,6 +1297,7 @@ async function listLatestWorkflowRun(
   if (filters.event) params.set("event", filters.event)
   if (filters.since) params.set("created", `>=${filters.since}`)
   if (filters.status) params.set("status", filters.status)
+  if (filters.page) params.set("page", String(filters.page))
 
   const res = await client.request<{ workflow_runs: GitHubWorkflowRun[] }>(
     `/repos/${org}/classroom50/actions/workflows/${workflow}/runs?${params.toString()}`,
@@ -1304,20 +1306,6 @@ async function listLatestWorkflowRun(
 
   return res.workflow_runs ?? []
 }
-
-// Back-compat alias: existing callers read collect-scores specifically.
-const listLatestCollectScoresRun = (
-  client: GitHubClient,
-  org: string,
-  filters: {
-    event?: string
-    since?: string
-    status?: string
-    perPage?: number
-  },
-  signal?: AbortSignal,
-): Promise<GitHubWorkflowRun[]> =>
-  listLatestWorkflowRun(client, org, filters, signal, COLLECT_SCORES_WORKFLOW)
 
 // Finds the run we dispatched: run ids are monotonic, so it's the oldest
 // dispatch run with an id greater than `sinceRunId` (the newest id before our
@@ -1330,7 +1318,7 @@ export async function getCollectScoresRunAfterId(
   sinceRunId: number | null,
   signal?: AbortSignal,
 ): Promise<GitHubWorkflowRun | null> {
-  const runs = await listLatestCollectScoresRun(
+  const runs = await listLatestWorkflowRun(
     client,
     org,
     { event: "workflow_dispatch", perPage: 20 },
@@ -1347,22 +1335,59 @@ export async function getCollectScoresRunAfterId(
 // Finds the regrade run we dispatched, by the same monotonic-id binding as
 // getCollectScoresRunAfterId but against the regrade.yaml workflow. Returns
 // null until our run registers.
+//
+// Unlike collect (one org-wide dispatcher), regrade can fan out one dispatch
+// per student via the per-row buttons, so far more than a single page of
+// dispatch runs can pile up between our snapshot and this poll. A fixed first
+// page would let our own run scroll off and bind us to a later student's run.
+// So we page newest-first, accumulating only runs with id > sinceRunId, and
+// stop as soon as a page contains a run at/below the baseline (everything older
+// is irrelevant) or we hit the page cap. The bound run is the oldest such run.
+const REGRADE_RUNS_PER_PAGE = 30
+const REGRADE_MAX_PAGES = 10
+
 export async function getRegradeRunAfterId(
   client: GitHubClient,
   org: string,
   sinceRunId: number | null,
   signal?: AbortSignal,
 ): Promise<GitHubWorkflowRun | null> {
-  const runs = await listLatestWorkflowRun(
-    client,
-    org,
-    { event: "workflow_dispatch", perPage: 20 },
-    signal,
-    REGRADE_WORKFLOW,
-  )
+  // No prior runs: our run is the oldest dispatch run that exists, so a single
+  // newest-first page is enough — the last entry is the earliest run.
+  if (sinceRunId === null) {
+    const runs = await listLatestWorkflowRun(
+      client,
+      org,
+      { event: "workflow_dispatch", perPage: REGRADE_RUNS_PER_PAGE },
+      signal,
+      REGRADE_WORKFLOW,
+    )
+    return runs.length > 0 ? runs[runs.length - 1] : null
+  }
 
-  const newer =
-    sinceRunId === null ? runs : runs.filter((r) => r.id > sinceRunId)
+  // Page through dispatch runs (newest-first) collecting those newer than the
+  // baseline. Stop once a page reaches the baseline or yields nothing.
+  const newer: GitHubWorkflowRun[] = []
+  for (let page = 1; page <= REGRADE_MAX_PAGES; page++) {
+    const runs = await listLatestWorkflowRun(
+      client,
+      org,
+      { event: "workflow_dispatch", perPage: REGRADE_RUNS_PER_PAGE, page },
+      signal,
+      REGRADE_WORKFLOW,
+    )
+    if (runs.length === 0) break
+
+    for (const r of runs) {
+      if (r.id > sinceRunId) newer.push(r)
+    }
+
+    // This page already includes the baseline (or older), so no later page can
+    // hold a run newer than it — we've seen every candidate.
+    if (runs.some((r) => r.id <= sinceRunId)) break
+  }
+
+  // The run we triggered is the oldest one newer than the baseline.
   return newer.length > 0 ? newer[newer.length - 1] : null
 }
 
@@ -1374,7 +1399,7 @@ export async function getLastCollectScoresRun(
   org: string,
   signal?: AbortSignal,
 ): Promise<GitHubWorkflowRun | null> {
-  const runs = await listLatestCollectScoresRun(
+  const runs = await listLatestWorkflowRun(
     client,
     org,
     { status: "completed" },
