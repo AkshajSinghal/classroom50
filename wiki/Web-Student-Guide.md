@@ -14,6 +14,7 @@ This guide will cover the following topics, roughly in the order a student is li
 - [Viewing Organizations](#viewing-organizations)
 - [Accepting Assignments](#accepting-assignments)
 - [Submitting Assignments](#submitting-assignments)
+- [Group Assignments](#group-assignments)
 
 > As you use Classroom 50, if you have feature requests, discover bugs, or would like to suggest ideas for improvements, please reach out to us in our [discussion forums](https://github.com/foundation50/classroom50/discussions); we look forward to hearing from you!
 
@@ -68,4 +69,28 @@ Once you click to accept the assignment and things go well, you will be shown a 
 
 > All of Classroom 50 is built atop GitHub and has no external server storing your or teachers' data; assignments, classrooms, and everything else are GitHub objects like repos and files that can simply be viewed on GitHub!
 
+Once you've accepted an assignment, visiting your organization page again will show you at least one assignment/repository you now have created and have access to:
+
+![View of student assignment page with one assignment](images/web_assignments_student.png)
+
 # Submitting Assignments
+
+Because Classroom 50 is built atop GitHub, the process for assignment submission is itself as well. Therefore, the process of submission involves [committing](https://github.com/git-guides/git-commit) and [pushing](https://github.com/git-guides/git-push) changes to the repository you created when accepting your assignment. Thankfully, the Classroom 50 CLI has simplified this process for students; [see here](https://github.com/foundation50/classroom50/wiki/CLI-Student-Guide) for further details on how to submit your assignments as a student.
+
+# Group Assignments
+
+Besides just creating a repository for yourself after accepting an assignment, your teacher may want students to work together in groups -- one student may act as the leader or such, accepting the assignment on behalf of several others, and those other students can be added as collaborators by the student who created the repository. Classroom 50 allows teachers to specify this setting as part of the assignment creation process, and when accepting an assignment, you will see it tagged as either "Individual" or "Group" when doing so.
+
+To access the interface for adding collaborators, first click the edit pencil at the top-right of a group assignment, which will take you to the following page:
+
+![View of group assignment page for student](images/web_assignment_edit_student.png)
+
+Then, click the "Manage collaborators" button for the assignment to be taken to the following interface, where you can then add collaborators to your project (note that they must be members of the organization and enrolled in the class for this to work):
+
+![View of managing collaborators for student](images/web_assignment_manage_collaborators_student.png)
+
+# Viewing Submissions
+
+On the same edit URL we were just visiting, it's also possible to view your submissions thus far; simply click the "My Submission" link in the lefthand drawer menu to see them.
+
+
