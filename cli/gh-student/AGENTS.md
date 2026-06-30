@@ -35,7 +35,6 @@ Keep it that way — don't make it strict.
   GUI; the shape is a cross-binary contract (`internal/classroomcfg`).
 - The student repo-name formula (`internal/reponame`) is a forward-only
   cross-binary contract — construct it in one direction, never reverse-parse it.
-  See `web/docs/solutions/architecture-patterns/forward-only-cross-binary-repo-name-contract.md`.
 
 ## Don't
 

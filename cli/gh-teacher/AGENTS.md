@@ -23,16 +23,16 @@ behavior packages:
 - `main.go` + `init*.go` + `autograder_cmd.go`/`autograder_crud.go` stay at the
   **root `package main`**. This is a deliberate **embed terminus**, not debt:
   `//go:embed` can't cross directories and `package main` is unimportable from
-  `internal/*`, so the embedded assets (`skeleton/`, `embed/autograder.py`) pin
-  these files to root. Don't try to "finish" moving them into `internal/`.
+  `internal/*`, so the `//go:embed`-bearing files (`init_skeleton.go` →
+  `skeleton/`, `autograder_cmd.go` → `embed/autograder.py`) are pinned to root,
+  and their sibling command files stay with them. Don't try to "finish" moving
+  them into `internal/`.
 - `internal/githubapi/` is the **only** importer of `go-gh/v2/pkg/api` — the
   transport-verb `Client` seam. Test domain logic against the `githubtest` fake.
 - `internal/<domain>/` (assignment, classroom, roster, autograder, download,
   configrepo, …) hold the behavior; `internal/validate` the shared rules;
   `internal/output`/`internal/ui` the stderr-summary/`--json`/`--quiet`
   conventions.
-
-See `docs/solutions/architecture-patterns/embed-terminus-and-build-as-oracle-in-go-package-extraction.md`.
 
 ## This binary owns the contracts
 

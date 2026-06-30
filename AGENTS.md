@@ -52,8 +52,9 @@ standalone with `GOWORK=off`.
 
 - Domain vocabulary: `CONCEPTS.md` (single glossary for the whole repo). Use the
   defined terms (Autograder, Declarative test, Submission, Roster, etc.).
-- Captured learnings: `docs/solutions/` (and `web/docs/solutions/`). Read the
-  relevant one before reworking an area it covers.
+- Captured learnings: `docs/solutions/`. (The `web/` tree has its own
+  `web/docs/solutions/`, which is not in the public mirror.) Read the relevant
+  one before reworking an area it covers.
 - The public repo `foundation50/classroom50` is a downstream **mirror** of this
   repo (`mirror-to-public.yaml`), excluding `web/`. Don't depend on the mirror at
   runtime.

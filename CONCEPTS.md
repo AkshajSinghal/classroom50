@@ -4,23 +4,17 @@ Shared domain vocabulary for this project — entities, named processes, and sta
 
 ## Autograding
 
-### Autograder
-The per-submission grading program the runner invokes once per push. Resolution is most-specific-first: a per-assignment override, then a declarative test set, then a classroom-wide default, then a Vacuous Pass when none is configured. A hand-written Autograder is the escape hatch when Declarative Tests can't express what's needed.
+- **Autograder** — the per-submission grading program the runner invokes once per push. Resolution is most-specific-first: a per-assignment override, then a declarative test set, then a classroom-wide default, then a Vacuous Pass when none is configured. A hand-written Autograder is the escape hatch when Declarative Tests can't express what's needed.
 
-### Declarative test
-A grading test defined as data (in the assignment manifest) rather than as a hand-written Autograder. The runner grades a Declarative Test with a built-in interpreter, emitting one result row per test. Each is one of three Test Types: io, run, or python.
+- **Declarative test** — a grading test defined as data (in the assignment manifest) rather than as a hand-written Autograder. The runner grades a Declarative Test with a built-in interpreter, emitting one result row per test. Each is one of three Test Types: io, run, or python.
 
-### Test type
-The kind of a Declarative Test, one of: **io** (feed stdin, compare the program's stdout against an expected value per a Comparison Mode), **run** (pass when the program's exit code matches an expected code), and **python** (run pytest; points split across discovered cases). Avoid calling these "checks."
+- **Test type** — the kind of a Declarative Test, one of: **io** (feed stdin, compare the program's stdout against an expected value per a Comparison Mode), **run** (pass when the program's exit code matches an expected code), and **python** (run pytest; points split across discovered cases). Avoid calling these "checks."
 
-### Comparison mode
-For an io Test Type, how the program's captured stdout is matched against the expected value: **included** (expected appears anywhere in stdout, raw substring), **exact** (equal after trimming only the surrounding whitespace of the whole capture), or **regex** (line-anchored search over the full stdout). The comparison always sees the entire stdout, including any prompt text the program prints.
+- **Comparison mode** — for an io Test Type, how the program's captured stdout is matched against the expected value: **included** (expected appears anywhere in stdout, raw substring), **exact** (equal after trimming only the surrounding whitespace of the whole capture), or **regex** (line-anchored search over the full stdout). The comparison always sees the entire stdout, including any prompt text the program prints.
 
-### Vacuous pass
-The synthesized success result (score 0/0, status success) the runner emits when no Autograder is configured for an assignment. A valid mid-setup state, not an error: the Submission still lands as a graded release so the gradebook records it.
+- **Vacuous pass** — the synthesized success result (score 0/0, status success) the runner emits when no Autograder is configured for an assignment. A valid mid-setup state, not an error: the Submission still lands as a graded release so the gradebook records it.
 
-### Submission
-One graded unit: a push to a student repo's default branch, tagged `submit/<timestamp>-<sha>`, graded once, and published as a release with its result attached. Every push is its own Submission with one exception — the **acceptance commit** (the one that lands `.classroom50.yaml` at accept time) is detected and skipped by the runner, so it produces no tag, no grade, and no release. The full Submission history is retained, newest first.
+- **Submission** — one graded unit: a push to a student repo's default branch, tagged `submit/<timestamp>-<sha>`, graded once, and published as a release with its result attached. Every push is its own Submission with one exception — the **acceptance commit** (the one that lands `.classroom50.yaml` at accept time) is detected and skipped by the runner, so it produces no tag, no grade, and no release. The full Submission history is retained, newest first.
 
 ## Onboarding & enrollment
 
