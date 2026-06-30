@@ -18,15 +18,19 @@ import { Route as AuthedIndexRouteImport } from './routes/_authed/index'
 import { Route as AuthedOrgIndexRouteImport } from './routes/_authed/$org/index'
 import { Route as AuthedOrgSetupIndexRouteImport } from './routes/_authed/$org/setup/index'
 import { Route as AuthedOrgSettingsIndexRouteImport } from './routes/_authed/$org/settings/index'
+import { Route as AuthedOrgPublishedIndexRouteImport } from './routes/_authed/$org/published/index'
+import { Route as AuthedOrgMembersIndexRouteImport } from './routes/_authed/$org/members/index'
 import { Route as AuthedOrgClassesIndexRouteImport } from './routes/_authed/$org/classes/index'
 import { Route as AuthedOrgClassroomIndexRouteImport } from './routes/_authed/$org/$classroom/index'
 import { Route as AuthedOrgClassesNewIndexRouteImport } from './routes/_authed/$org/classes/new/index'
 import { Route as AuthedOrgClassroomStudentsIndexRouteImport } from './routes/_authed/$org/$classroom/students/index'
+import { Route as AuthedOrgClassroomOnboardIndexRouteImport } from './routes/_authed/$org/$classroom/onboard/index'
 import { Route as AuthedOrgClassroomEditIndexRouteImport } from './routes/_authed/$org/$classroom/edit/index'
 import { Route as AuthedOrgClassroomAssignmentsIndexRouteImport } from './routes/_authed/$org/$classroom/assignments/index'
 import { Route as AuthedOrgClassroomAssignmentsNewIndexRouteImport } from './routes/_authed/$org/$classroom/assignments/new/index'
 import { Route as AuthedOrgClassroomAssignmentsAssignmentIndexRouteImport } from './routes/_authed/$org/$classroom/assignments/$assignment/index'
 import { Route as AuthedOrgClassroomAssignmentsAssignmentSubmissionsIndexRouteImport } from './routes/_authed/$org/$classroom/assignments/$assignment/submissions/index'
+import { Route as AuthedOrgClassroomAssignmentsAssignmentSubmissionIndexRouteImport } from './routes/_authed/$org/$classroom/assignments/$assignment/submission/index'
 import { Route as AuthedOrgClassroomAssignmentsAssignmentEditIndexRouteImport } from './routes/_authed/$org/$classroom/assignments/$assignment/edit/index'
 import { Route as AuthedOrgClassroomAssignmentsAssignmentAcceptIndexRouteImport } from './routes/_authed/$org/$classroom/assignments/$assignment/accept/index'
 
@@ -74,6 +78,16 @@ const AuthedOrgSettingsIndexRoute = AuthedOrgSettingsIndexRouteImport.update({
   path: '/$org/settings/',
   getParentRoute: () => AuthedRoute,
 } as any)
+const AuthedOrgPublishedIndexRoute = AuthedOrgPublishedIndexRouteImport.update({
+  id: '/$org/published/',
+  path: '/$org/published/',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedOrgMembersIndexRoute = AuthedOrgMembersIndexRouteImport.update({
+  id: '/$org/members/',
+  path: '/$org/members/',
+  getParentRoute: () => AuthedRoute,
+} as any)
 const AuthedOrgClassesIndexRoute = AuthedOrgClassesIndexRouteImport.update({
   id: '/$org/classes/',
   path: '/$org/classes/',
@@ -94,6 +108,12 @@ const AuthedOrgClassroomStudentsIndexRoute =
   AuthedOrgClassroomStudentsIndexRouteImport.update({
     id: '/$org/$classroom/students/',
     path: '/$org/$classroom/students/',
+    getParentRoute: () => AuthedRoute,
+  } as any)
+const AuthedOrgClassroomOnboardIndexRoute =
+  AuthedOrgClassroomOnboardIndexRouteImport.update({
+    id: '/$org/$classroom/onboard/',
+    path: '/$org/$classroom/onboard/',
     getParentRoute: () => AuthedRoute,
   } as any)
 const AuthedOrgClassroomEditIndexRoute =
@@ -126,6 +146,12 @@ const AuthedOrgClassroomAssignmentsAssignmentSubmissionsIndexRoute =
     path: '/$org/$classroom/assignments/$assignment/submissions/',
     getParentRoute: () => AuthedRoute,
   } as any)
+const AuthedOrgClassroomAssignmentsAssignmentSubmissionIndexRoute =
+  AuthedOrgClassroomAssignmentsAssignmentSubmissionIndexRouteImport.update({
+    id: '/$org/$classroom/assignments/$assignment/submission/',
+    path: '/$org/$classroom/assignments/$assignment/submission/',
+    getParentRoute: () => AuthedRoute,
+  } as any)
 const AuthedOrgClassroomAssignmentsAssignmentEditIndexRoute =
   AuthedOrgClassroomAssignmentsAssignmentEditIndexRouteImport.update({
     id: '/$org/$classroom/assignments/$assignment/edit/',
@@ -148,16 +174,20 @@ export interface FileRoutesByFullPath {
   '/$org/': typeof AuthedOrgIndexRoute
   '/$org/$classroom/': typeof AuthedOrgClassroomIndexRoute
   '/$org/classes/': typeof AuthedOrgClassesIndexRoute
+  '/$org/members/': typeof AuthedOrgMembersIndexRoute
+  '/$org/published/': typeof AuthedOrgPublishedIndexRoute
   '/$org/settings/': typeof AuthedOrgSettingsIndexRoute
   '/$org/setup/': typeof AuthedOrgSetupIndexRoute
   '/$org/$classroom/assignments/': typeof AuthedOrgClassroomAssignmentsIndexRoute
   '/$org/$classroom/edit/': typeof AuthedOrgClassroomEditIndexRoute
+  '/$org/$classroom/onboard/': typeof AuthedOrgClassroomOnboardIndexRoute
   '/$org/$classroom/students/': typeof AuthedOrgClassroomStudentsIndexRoute
   '/$org/classes/new/': typeof AuthedOrgClassesNewIndexRoute
   '/$org/$classroom/assignments/$assignment/': typeof AuthedOrgClassroomAssignmentsAssignmentIndexRoute
   '/$org/$classroom/assignments/new/': typeof AuthedOrgClassroomAssignmentsNewIndexRoute
   '/$org/$classroom/assignments/$assignment/accept/': typeof AuthedOrgClassroomAssignmentsAssignmentAcceptIndexRoute
   '/$org/$classroom/assignments/$assignment/edit/': typeof AuthedOrgClassroomAssignmentsAssignmentEditIndexRoute
+  '/$org/$classroom/assignments/$assignment/submission/': typeof AuthedOrgClassroomAssignmentsAssignmentSubmissionIndexRoute
   '/$org/$classroom/assignments/$assignment/submissions/': typeof AuthedOrgClassroomAssignmentsAssignmentSubmissionsIndexRoute
 }
 export interface FileRoutesByTo {
@@ -169,16 +199,20 @@ export interface FileRoutesByTo {
   '/$org': typeof AuthedOrgIndexRoute
   '/$org/$classroom': typeof AuthedOrgClassroomIndexRoute
   '/$org/classes': typeof AuthedOrgClassesIndexRoute
+  '/$org/members': typeof AuthedOrgMembersIndexRoute
+  '/$org/published': typeof AuthedOrgPublishedIndexRoute
   '/$org/settings': typeof AuthedOrgSettingsIndexRoute
   '/$org/setup': typeof AuthedOrgSetupIndexRoute
   '/$org/$classroom/assignments': typeof AuthedOrgClassroomAssignmentsIndexRoute
   '/$org/$classroom/edit': typeof AuthedOrgClassroomEditIndexRoute
+  '/$org/$classroom/onboard': typeof AuthedOrgClassroomOnboardIndexRoute
   '/$org/$classroom/students': typeof AuthedOrgClassroomStudentsIndexRoute
   '/$org/classes/new': typeof AuthedOrgClassesNewIndexRoute
   '/$org/$classroom/assignments/$assignment': typeof AuthedOrgClassroomAssignmentsAssignmentIndexRoute
   '/$org/$classroom/assignments/new': typeof AuthedOrgClassroomAssignmentsNewIndexRoute
   '/$org/$classroom/assignments/$assignment/accept': typeof AuthedOrgClassroomAssignmentsAssignmentAcceptIndexRoute
   '/$org/$classroom/assignments/$assignment/edit': typeof AuthedOrgClassroomAssignmentsAssignmentEditIndexRoute
+  '/$org/$classroom/assignments/$assignment/submission': typeof AuthedOrgClassroomAssignmentsAssignmentSubmissionIndexRoute
   '/$org/$classroom/assignments/$assignment/submissions': typeof AuthedOrgClassroomAssignmentsAssignmentSubmissionsIndexRoute
 }
 export interface FileRoutesById {
@@ -192,16 +226,20 @@ export interface FileRoutesById {
   '/_authed/$org/': typeof AuthedOrgIndexRoute
   '/_authed/$org/$classroom/': typeof AuthedOrgClassroomIndexRoute
   '/_authed/$org/classes/': typeof AuthedOrgClassesIndexRoute
+  '/_authed/$org/members/': typeof AuthedOrgMembersIndexRoute
+  '/_authed/$org/published/': typeof AuthedOrgPublishedIndexRoute
   '/_authed/$org/settings/': typeof AuthedOrgSettingsIndexRoute
   '/_authed/$org/setup/': typeof AuthedOrgSetupIndexRoute
   '/_authed/$org/$classroom/assignments/': typeof AuthedOrgClassroomAssignmentsIndexRoute
   '/_authed/$org/$classroom/edit/': typeof AuthedOrgClassroomEditIndexRoute
+  '/_authed/$org/$classroom/onboard/': typeof AuthedOrgClassroomOnboardIndexRoute
   '/_authed/$org/$classroom/students/': typeof AuthedOrgClassroomStudentsIndexRoute
   '/_authed/$org/classes/new/': typeof AuthedOrgClassesNewIndexRoute
   '/_authed/$org/$classroom/assignments/$assignment/': typeof AuthedOrgClassroomAssignmentsAssignmentIndexRoute
   '/_authed/$org/$classroom/assignments/new/': typeof AuthedOrgClassroomAssignmentsNewIndexRoute
   '/_authed/$org/$classroom/assignments/$assignment/accept/': typeof AuthedOrgClassroomAssignmentsAssignmentAcceptIndexRoute
   '/_authed/$org/$classroom/assignments/$assignment/edit/': typeof AuthedOrgClassroomAssignmentsAssignmentEditIndexRoute
+  '/_authed/$org/$classroom/assignments/$assignment/submission/': typeof AuthedOrgClassroomAssignmentsAssignmentSubmissionIndexRoute
   '/_authed/$org/$classroom/assignments/$assignment/submissions/': typeof AuthedOrgClassroomAssignmentsAssignmentSubmissionsIndexRoute
 }
 export interface FileRouteTypes {
@@ -215,16 +253,20 @@ export interface FileRouteTypes {
     | '/$org/'
     | '/$org/$classroom/'
     | '/$org/classes/'
+    | '/$org/members/'
+    | '/$org/published/'
     | '/$org/settings/'
     | '/$org/setup/'
     | '/$org/$classroom/assignments/'
     | '/$org/$classroom/edit/'
+    | '/$org/$classroom/onboard/'
     | '/$org/$classroom/students/'
     | '/$org/classes/new/'
     | '/$org/$classroom/assignments/$assignment/'
     | '/$org/$classroom/assignments/new/'
     | '/$org/$classroom/assignments/$assignment/accept/'
     | '/$org/$classroom/assignments/$assignment/edit/'
+    | '/$org/$classroom/assignments/$assignment/submission/'
     | '/$org/$classroom/assignments/$assignment/submissions/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -236,16 +278,20 @@ export interface FileRouteTypes {
     | '/$org'
     | '/$org/$classroom'
     | '/$org/classes'
+    | '/$org/members'
+    | '/$org/published'
     | '/$org/settings'
     | '/$org/setup'
     | '/$org/$classroom/assignments'
     | '/$org/$classroom/edit'
+    | '/$org/$classroom/onboard'
     | '/$org/$classroom/students'
     | '/$org/classes/new'
     | '/$org/$classroom/assignments/$assignment'
     | '/$org/$classroom/assignments/new'
     | '/$org/$classroom/assignments/$assignment/accept'
     | '/$org/$classroom/assignments/$assignment/edit'
+    | '/$org/$classroom/assignments/$assignment/submission'
     | '/$org/$classroom/assignments/$assignment/submissions'
   id:
     | '__root__'
@@ -258,16 +304,20 @@ export interface FileRouteTypes {
     | '/_authed/$org/'
     | '/_authed/$org/$classroom/'
     | '/_authed/$org/classes/'
+    | '/_authed/$org/members/'
+    | '/_authed/$org/published/'
     | '/_authed/$org/settings/'
     | '/_authed/$org/setup/'
     | '/_authed/$org/$classroom/assignments/'
     | '/_authed/$org/$classroom/edit/'
+    | '/_authed/$org/$classroom/onboard/'
     | '/_authed/$org/$classroom/students/'
     | '/_authed/$org/classes/new/'
     | '/_authed/$org/$classroom/assignments/$assignment/'
     | '/_authed/$org/$classroom/assignments/new/'
     | '/_authed/$org/$classroom/assignments/$assignment/accept/'
     | '/_authed/$org/$classroom/assignments/$assignment/edit/'
+    | '/_authed/$org/$classroom/assignments/$assignment/submission/'
     | '/_authed/$org/$classroom/assignments/$assignment/submissions/'
   fileRoutesById: FileRoutesById
 }
@@ -344,6 +394,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedOrgSettingsIndexRouteImport
       parentRoute: typeof AuthedRoute
     }
+    '/_authed/$org/published/': {
+      id: '/_authed/$org/published/'
+      path: '/$org/published'
+      fullPath: '/$org/published/'
+      preLoaderRoute: typeof AuthedOrgPublishedIndexRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/$org/members/': {
+      id: '/_authed/$org/members/'
+      path: '/$org/members'
+      fullPath: '/$org/members/'
+      preLoaderRoute: typeof AuthedOrgMembersIndexRouteImport
+      parentRoute: typeof AuthedRoute
+    }
     '/_authed/$org/classes/': {
       id: '/_authed/$org/classes/'
       path: '/$org/classes'
@@ -370,6 +434,13 @@ declare module '@tanstack/react-router' {
       path: '/$org/$classroom/students'
       fullPath: '/$org/$classroom/students/'
       preLoaderRoute: typeof AuthedOrgClassroomStudentsIndexRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/$org/$classroom/onboard/': {
+      id: '/_authed/$org/$classroom/onboard/'
+      path: '/$org/$classroom/onboard'
+      fullPath: '/$org/$classroom/onboard/'
+      preLoaderRoute: typeof AuthedOrgClassroomOnboardIndexRouteImport
       parentRoute: typeof AuthedRoute
     }
     '/_authed/$org/$classroom/edit/': {
@@ -407,6 +478,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedOrgClassroomAssignmentsAssignmentSubmissionsIndexRouteImport
       parentRoute: typeof AuthedRoute
     }
+    '/_authed/$org/$classroom/assignments/$assignment/submission/': {
+      id: '/_authed/$org/$classroom/assignments/$assignment/submission/'
+      path: '/$org/$classroom/assignments/$assignment/submission'
+      fullPath: '/$org/$classroom/assignments/$assignment/submission/'
+      preLoaderRoute: typeof AuthedOrgClassroomAssignmentsAssignmentSubmissionIndexRouteImport
+      parentRoute: typeof AuthedRoute
+    }
     '/_authed/$org/$classroom/assignments/$assignment/edit/': {
       id: '/_authed/$org/$classroom/assignments/$assignment/edit/'
       path: '/$org/$classroom/assignments/$assignment/edit'
@@ -429,16 +507,20 @@ interface AuthedRouteChildren {
   AuthedOrgIndexRoute: typeof AuthedOrgIndexRoute
   AuthedOrgClassroomIndexRoute: typeof AuthedOrgClassroomIndexRoute
   AuthedOrgClassesIndexRoute: typeof AuthedOrgClassesIndexRoute
+  AuthedOrgMembersIndexRoute: typeof AuthedOrgMembersIndexRoute
+  AuthedOrgPublishedIndexRoute: typeof AuthedOrgPublishedIndexRoute
   AuthedOrgSettingsIndexRoute: typeof AuthedOrgSettingsIndexRoute
   AuthedOrgSetupIndexRoute: typeof AuthedOrgSetupIndexRoute
   AuthedOrgClassroomAssignmentsIndexRoute: typeof AuthedOrgClassroomAssignmentsIndexRoute
   AuthedOrgClassroomEditIndexRoute: typeof AuthedOrgClassroomEditIndexRoute
+  AuthedOrgClassroomOnboardIndexRoute: typeof AuthedOrgClassroomOnboardIndexRoute
   AuthedOrgClassroomStudentsIndexRoute: typeof AuthedOrgClassroomStudentsIndexRoute
   AuthedOrgClassesNewIndexRoute: typeof AuthedOrgClassesNewIndexRoute
   AuthedOrgClassroomAssignmentsAssignmentIndexRoute: typeof AuthedOrgClassroomAssignmentsAssignmentIndexRoute
   AuthedOrgClassroomAssignmentsNewIndexRoute: typeof AuthedOrgClassroomAssignmentsNewIndexRoute
   AuthedOrgClassroomAssignmentsAssignmentAcceptIndexRoute: typeof AuthedOrgClassroomAssignmentsAssignmentAcceptIndexRoute
   AuthedOrgClassroomAssignmentsAssignmentEditIndexRoute: typeof AuthedOrgClassroomAssignmentsAssignmentEditIndexRoute
+  AuthedOrgClassroomAssignmentsAssignmentSubmissionIndexRoute: typeof AuthedOrgClassroomAssignmentsAssignmentSubmissionIndexRoute
   AuthedOrgClassroomAssignmentsAssignmentSubmissionsIndexRoute: typeof AuthedOrgClassroomAssignmentsAssignmentSubmissionsIndexRoute
 }
 
@@ -447,11 +529,14 @@ const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedOrgIndexRoute: AuthedOrgIndexRoute,
   AuthedOrgClassroomIndexRoute: AuthedOrgClassroomIndexRoute,
   AuthedOrgClassesIndexRoute: AuthedOrgClassesIndexRoute,
+  AuthedOrgMembersIndexRoute: AuthedOrgMembersIndexRoute,
+  AuthedOrgPublishedIndexRoute: AuthedOrgPublishedIndexRoute,
   AuthedOrgSettingsIndexRoute: AuthedOrgSettingsIndexRoute,
   AuthedOrgSetupIndexRoute: AuthedOrgSetupIndexRoute,
   AuthedOrgClassroomAssignmentsIndexRoute:
     AuthedOrgClassroomAssignmentsIndexRoute,
   AuthedOrgClassroomEditIndexRoute: AuthedOrgClassroomEditIndexRoute,
+  AuthedOrgClassroomOnboardIndexRoute: AuthedOrgClassroomOnboardIndexRoute,
   AuthedOrgClassroomStudentsIndexRoute: AuthedOrgClassroomStudentsIndexRoute,
   AuthedOrgClassesNewIndexRoute: AuthedOrgClassesNewIndexRoute,
   AuthedOrgClassroomAssignmentsAssignmentIndexRoute:
@@ -462,6 +547,8 @@ const AuthedRouteChildren: AuthedRouteChildren = {
     AuthedOrgClassroomAssignmentsAssignmentAcceptIndexRoute,
   AuthedOrgClassroomAssignmentsAssignmentEditIndexRoute:
     AuthedOrgClassroomAssignmentsAssignmentEditIndexRoute,
+  AuthedOrgClassroomAssignmentsAssignmentSubmissionIndexRoute:
+    AuthedOrgClassroomAssignmentsAssignmentSubmissionIndexRoute,
   AuthedOrgClassroomAssignmentsAssignmentSubmissionsIndexRoute:
     AuthedOrgClassroomAssignmentsAssignmentSubmissionsIndexRoute,
 }

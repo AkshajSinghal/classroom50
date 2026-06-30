@@ -52,10 +52,12 @@ export function createGitHubClient(args: {
     })
 
     const rateLimit = readGitHubRateLimitHeaders(res)
-    console.warn("rate limit headers", rateLimit)
+    if (import.meta.env.DEV) {
+      console.warn("rate limit headers", rateLimit)
+    }
 
     if (!res.ok) {
-      let body: unknown = null
+      let body: unknown
       const text = await res.text()
 
       try {
@@ -64,7 +66,9 @@ export function createGitHubClient(args: {
         body = text
       }
 
-      console.log("body when request fail", body)
+      if (import.meta.env.DEV) {
+        console.warn("body when request fail", body)
+      }
 
       const message =
         typeof body === "object" &&
@@ -87,7 +91,7 @@ export function createGitHubClient(args: {
   }
 
   return {
-    async request<T>(path, options) {
+    async request<T>(path: string, options?: GitHubRequestOptions) {
       const res = await requestInternal(path, options)
 
       if (res.status === 204 || res.status === 205) {
@@ -103,8 +107,9 @@ export function createGitHubClient(args: {
       return JSON.parse(text) as T
     },
 
-    async requestRaw(path, options) {
+    async requestRaw(path: string, options?: GitHubRequestOptions) {
       const res = await requestInternal(path, {
+        method: options?.method ?? "GET",
         ...options,
         accept: options?.accept ?? "application/vnd.github.raw+json",
       })

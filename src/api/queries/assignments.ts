@@ -71,13 +71,13 @@ export async function fetchAssignmentFromPages(
   org: string,
   classroom: string,
   assignmentSlug: string,
+  secret?: string,
 ): Promise<Assignment> {
   const json = await fetchJson<AssignmentsJson>(
-    pagesAssignmentUrl(org, classroom),
+    pagesAssignmentUrl(org, classroom, secret),
   )
 
   const assignments = extractAssignments(json)
-  console.log("assignments", assignments)
   const assignment = assignments.find((entry) => entry.slug === assignmentSlug)
 
   if (!assignment) {
@@ -86,12 +86,3 @@ export async function fetchAssignmentFromPages(
 
   return assignment
 }
-
-export async function getAssignmentsJson(
-  client: GitHubClient,
-  input: {
-    org: string
-    classroom: string
-    ref?: string
-  },
-) {}

@@ -1,60 +1,82 @@
 import Breadcrumb from "@/components/breadcrumb"
+import MissingParams from "@/components/MissingParams"
 import Drawer, {
   DrawerContent,
   DrawerSidebar,
   DrawerToggle,
 } from "@/components/drawer"
-import { Link, useParams } from "@tanstack/react-router"
+import { useParams } from "@tanstack/react-router"
 import EditClassroomForm from "./classes/EditClassroomForm"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { GitHubAPIError } from "@/hooks/github/errors"
-import { useState } from "react"
 import { githubKeys } from "@/hooks/github/queries"
 import useGetClassroom from "@/hooks/useGetClassroom"
-import { editClassroom } from "@/hooks/github/mutations"
+import {
+  type EditClassroomInput,
+  type EditClassroomResult,
+} from "@/hooks/github/mutations"
+import { editClassroomWithConflictRetry } from "@/api/mutations/classrooms"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
+import { useToast } from "@/context/notifications/NotificationProvider"
+import { useSafeSubmit } from "@/hooks/useSafeSubmit"
+import RequireTeacher from "@/components/RequireTeacher"
 
-const EditClassroomPage = () => {
+const EditClassroomContent = ({
+  org,
+  classroom,
+}: {
+  org: string
+  classroom: string
+}) => {
   const client = useGitHubClient()
   const queryClient = useQueryClient()
-  const { org, classroom } = useParams({ strict: false })
+  const { notify } = useToast()
+  const runSave = useSafeSubmit()
   const { data: cl, isLoading: loadingClassroom } = useGetClassroom(
     org,
     classroom,
   )
-  const [classroomEdited, setClassroomEdited] = useState(false)
 
   const editClassroomMutation = useMutation<
     EditClassroomResult,
     GitHubAPIError,
     EditClassroomInput
   >({
-    mutationFn: (input) => editClassroom(client, input),
+    mutationFn: (input) => editClassroomWithConflictRetry(client, input),
     onError: (err) => {
-      if (err instanceof GitHubAPIError) {
-        switch (err.status) {
-          case 409:
-            // conflict
-            break
-          case 404:
-            // not found
-            break
-          case 422:
-            // validation
-            break
-          default:
-            // unspecified
-            break
-        }
-      } else {
-        console.error("non-GitHub API error:", err)
-      }
+      notify({
+        tone: "error",
+        message:
+          err instanceof GitHubAPIError && err.status === 409
+            ? "Couldn't save — another change landed first. Please try again."
+            : `Couldn't save classroom settings: ${err.message}`,
+      })
     },
     onSuccess: () => {
+      // Refresh the exact classroom.json query useGetClassroom reads (so a
+      // renamed name/term updates in place), plus the classes-list listing.
+      // A bare rawFile("/") key matched no live query — useGetClassroom keys on
+      // jsonFile(org,"classroom50",`${classroom}/classroom.json`).
       queryClient.invalidateQueries({
-        queryKey: githubKeys.rawFile(org, "classroom50", `/`),
+        queryKey: githubKeys.jsonFile(
+          org ?? "",
+          "classroom50",
+          `${classroom}/classroom.json`,
+        ),
       })
-      setClassroomEdited(true)
+      queryClient.invalidateQueries({
+        queryKey: githubKeys.jsonFile(org ?? "", "classroom50"),
+      })
+      // Plain-text message only: the toast surface (NotificationProvider) is
+      // mounted ABOVE the RouterProvider, so a TanStack <Link> here has no
+      // router context and throws on render, blanking the whole app (the throw
+      // escapes the route-level errorComponent). The settings already update in
+      // place via the invalidations above, so no navigation link is needed.
+      notify({
+        tone: "success",
+        durationMs: 5000,
+        message: "Classroom settings saved.",
+      })
     },
   })
 
@@ -73,46 +95,59 @@ const EditClassroomPage = () => {
   }
 
   return (
+    <>
+      <div className="flex justify-between">
+        <div>
+          <h1 className="text-xl pt-8 pb-2 font-bold">Classroom Settings</h1>
+          <p className="pb-10 text-sm text-base-content/60">
+            Configuration for the{" "}
+            <span className="font-semibold">
+              {cl.name || cl.short_name || classroom}
+            </span>{" "}
+            classroom.
+          </p>
+        </div>
+      </div>
+      <div className="flex flex-col">
+        <div className="mb-8">
+          <EditClassroomForm
+            cl={cl}
+            onSubmit={(values) =>
+              runSave(() =>
+                editClassroomMutation.mutateAsync({
+                  name: values.name,
+                  slug: classroom,
+                  org,
+                  term: values.term,
+                  onboarding_cleanup: values.onboarding_cleanup,
+                }),
+              )
+            }
+          />
+        </div>
+      </div>
+    </>
+  )
+}
+
+const EditClassroomPage = () => {
+  const { org, classroom } = useParams({ strict: false })
+
+  return (
     <div className="min-h-screen">
       <Drawer>
         <DrawerToggle />
         <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
-          <Breadcrumb endpoint="Edit Classroom" />
-          <div className="flex justify-between">
-            <div>
-              <h1 className="text-xl pt-8 pb-10 font-bold">Edit Classroom</h1>
-            </div>
-          </div>
-          {classroomEdited ? (
-            <div className="alert alert-success mb-4">
-              <div>
-                Your classroom has been edited successfully. Click{" "}
-                <Link className="underline" to={`/${org}/${classroom}`}>
-                  here
-                </Link>{" "}
-                to view your new classroom.
-              </div>
-            </div>
-          ) : (
-            <></>
-          )}
-          <div className="flex flex-col">
-            <div className="mb-8">
-              <EditClassroomForm
-                cl={cl}
-                onSubmit={(values) => {
-                  editClassroomMutation.mutateAsync({
-                    name: values.name,
-                    slug: classroom,
-                    org,
-                    term: values.term,
-                  })
-                }}
-              />
-            </div>
-          </div>
+          <Breadcrumb endpoint="Settings" />
+          <RequireTeacher>
+            {!org || !classroom ? (
+              <MissingParams message="Missing organization or classroom." />
+            ) : (
+              <EditClassroomContent org={org} classroom={classroom} />
+            )}
+          </RequireTeacher>
         </DrawerContent>
-        <DrawerSidebar selected="classes" page="classes" />
+        <DrawerSidebar selected="settings" />
       </Drawer>
     </div>
   )
