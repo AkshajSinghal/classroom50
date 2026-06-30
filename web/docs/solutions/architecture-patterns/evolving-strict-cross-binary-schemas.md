@@ -34,8 +34,8 @@ related_docs:
 > the laggard with tracked issues" dance below no longer applies to changes that
 > go out together — the policy is now **web-priority** (update the schema/TS
 > mirror immediately, CLI follows in the same release). The **tolerate-AND-
-> preserve** rule (§4) still applies: it guards documents written by an *older
-> deployed* release, which a synchronized build does not eliminate. See
+> preserve** rule (§4) still applies: it guards documents written by an _older
+> deployed_ release, which a synchronized build does not eliminate. See
 > `docs/solutions/architecture-patterns/monorepo-synchronized-release-web-priority-bundled-skeleton.md`.
 
 ## Context
