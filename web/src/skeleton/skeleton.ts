@@ -106,12 +106,6 @@ export function buildSkeletonFiles(defaultBranch: string): SkeletonFile[] {
   )
 }
 
-// The target-repo paths (".github/...") the GUI deploys, independent of the
-// default branch. Lets callers check existence before fetching the branch.
-export function skeletonTargetPaths(): string[] {
-  return SKELETON_PATHS.map((rel) => `${ORG_GITHUB_DIR}/${rel}`)
-}
-
 // Org-relative paths present in the bundle; for the parity test.
 export function bundledSkeletonPaths(): string[] {
   return [...BUNDLED_SKELETON.keys()].sort()

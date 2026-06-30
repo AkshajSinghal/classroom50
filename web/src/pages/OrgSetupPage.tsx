@@ -18,6 +18,10 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { OrgSettingsPane } from "./OrgSettingsPage"
 import {
+  SkeletonOverwriteModal,
+  useSkeletonOverwriteConfirm,
+} from "./orgSettings/skeletonOverwriteUi"
+import {
   InitStepBoard,
   applyStepUpdate,
   initialInitSteps,
@@ -74,7 +78,7 @@ const OrgSteps = ({
         </div>
 
         {stage === 1 ? (
-          <InitStepBoard steps={steps} />
+          <InitStepBoard steps={steps} org={org} />
         ) : stage === 2 ? (
           <div className="px-20">
             <OrgSettingsPane onSubmit={() => setStage(3)} />
@@ -132,6 +136,14 @@ const OrgSetupPage = () => {
   // 3 = finished
   const [currentStage, setCurrentStage] = useState(1)
 
+  // Skeleton-overwrite confirmation, mirroring RerunOnboarding. The wizard
+  // usually runs on a fresh repo (nothing pre-exists), but the /setup route has
+  // no re-entry guard, so a re-run on an already-set-up org can hit drifted,
+  // hand-edited skeleton files — prompt before overwriting those rather than
+  // clobbering them silently.
+  const { overwritePaths, resolveOverwrite, confirmSkeletonOverwrite } =
+    useSkeletonOverwriteConfirm()
+
   const mutation = useMutation({
     mutationFn: async () => {
       if (!org) {
@@ -144,6 +156,7 @@ const OrgSetupPage = () => {
         onStepUpdate: (update) => {
           setSteps((steps) => applyStepUpdate(steps, update))
         },
+        confirmSkeletonOverwrite,
       })
     },
     onSuccess: (data) => {
@@ -191,6 +204,12 @@ const OrgSetupPage = () => {
               stage={currentStage}
             />
           )}
+
+          <SkeletonOverwriteModal
+            paths={overwritePaths}
+            onConfirm={() => resolveOverwrite(true)}
+            onClose={() => resolveOverwrite(false)}
+          />
         </DrawerContent>
         <DrawerSidebar page="classes" selected="assignments" />
       </Drawer>

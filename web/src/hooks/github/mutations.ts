@@ -19,7 +19,8 @@ import { STUDENT_CSV_FIELDS } from "@/api/mutations/students"
 import { getRepo } from "./queries"
 import { CONFIG_REPO, checkPages, repairOrgDefaults } from "./orgChecks"
 import { repairRulesets } from "./rulesets"
-import { buildSkeletonFiles, skeletonTargetPaths } from "@/skeleton/skeleton"
+import { buildSkeletonFiles, type SkeletonFile } from "@/skeleton/skeleton"
+import { bytesToHex } from "@/util/hex"
 
 const ASSIGNMENTS_TEMPLATE = {
   schema: "classroom50/assignments/v1",
@@ -1046,11 +1047,11 @@ export type GitHubTreeResponse = {
   truncated: boolean
 }
 
-export async function listTargetRepoPaths(
+async function listTargetRepoBlobs(
   client: GitHubClient,
   org: string,
   branch = "main",
-): Promise<Set<string>> {
+): Promise<Map<string, string>> {
   const ref = await client.request<{
     object: { sha: string }
   }>(`/repos/${org}/${CONFIG_REPO}/git/ref/heads/${branch}`)
@@ -1069,75 +1070,210 @@ export async function listTargetRepoPaths(
     )
   }
 
-  return new Set(
-    tree.tree.filter((item) => item.type === "blob").map((item) => item.path),
+  return new Map(
+    tree.tree
+      .filter((item) => item.type === "blob")
+      .map((item) => [item.path, item.sha]),
   )
 }
 
-export async function findMissingSkeletonFiles(
+// The git blob SHA-1 GitHub reports for a file: sha1("blob <bytelen>\0" + body),
+// over the UTF-8 bytes. Lets us compare a bundled skeleton file against the
+// repo's tree entry by SHA, mirroring `git hash-object`. (See the CLI's
+// gitBlobSHA in autograder_crud.go.)
+export async function gitBlobSha(content: string): Promise<string> {
+  const body = new TextEncoder().encode(content)
+  const header = new TextEncoder().encode(`blob ${body.length}\0`)
+  const payload = new Uint8Array(header.length + body.length)
+  payload.set(header)
+  payload.set(body, header.length)
+  const digest = await crypto.subtle.digest("SHA-1", payload)
+  return bytesToHex(new Uint8Array(digest))
+}
+
+// A bundled skeleton file that needs writing, tagged with whether a file
+// already exists at that path in the repo. `exists: false` is a create (always
+// safe); `exists: true` is an overwrite of a drifted file (the GUI confirms
+// these with the teacher first, mirroring the CLI's refresh prompt).
+export type StaleSkeletonFile = SkeletonFile & { exists: boolean }
+
+// Bounded retries for the skeleton commit's optimistic-rebase loop: re-diff
+// against the freshly-read parent and re-PATCH the ref when a concurrent writer
+// advances the tip during the (possibly long) overwrite-confirm pause.
+const SKELETON_COMMIT_ATTEMPTS = 3
+
+// A ref PATCH with force:false that loses a race returns 422 "Update is not a
+// fast forward". Treat that (and only that) as retryable; everything else is a
+// real error the caller should see.
+function isNonFastForward(err: unknown): boolean {
+  if (!(err instanceof GitHubAPIError) || err.status !== 422) return false
+  const message =
+    err.message + " " + (typeof err.body === "string" ? err.body : "")
+  return /fast forward|fast-forward/i.test(message)
+}
+
+// Skeleton files whose repo content is missing OR differs from the bundled
+// version. Mirrors the CLI's diffSkeleton/refreshSkeleton: re-running setup
+// picks up skeleton updates (new workflows, updated runner/scripts) instead of
+// only filling in absent paths. Skeleton files are not teacher-editable, so a
+// drifted file is treated as stale; callers decide whether to overwrite.
+export async function findStaleSkeletonFiles(
   client: GitHubClient,
   org: string,
-) {
-  const existingPaths = await listTargetRepoPaths(client, org)
-
-  // Target paths are static (branch-independent), so check existence before
-  // fetching the branch and skip the repo read entirely when nothing is missing.
-  const missing = new Set(
-    skeletonTargetPaths().filter((path) => !existingPaths.has(path)),
-  )
-  if (missing.size === 0) return []
-
+): Promise<StaleSkeletonFile[]> {
+  // The tree read and the default-branch read are independent — overlap them.
+  const [existingBlobs, repo] = await Promise.all([
+    listTargetRepoBlobs(client, org),
+    client.request<GitHubRepo>(`/repos/${org}/${CONFIG_REPO}`),
+  ])
   // Use the config repo's actual default branch (org policy can rename `main`).
-  const repo = await client.request<GitHubRepo>(`/repos/${org}/${CONFIG_REPO}`)
   const defaultBranch = repo.default_branch || "main"
 
   // From the bundled skeleton — no runtime fetch from the CLI repo.
-  return buildSkeletonFiles(defaultBranch).filter((file) =>
-    missing.has(file.path),
+  const bundled = buildSkeletonFiles(defaultBranch)
+  const bundledShas = await Promise.all(
+    bundled.map((file) => gitBlobSha(file.content)),
   )
+
+  const stale: StaleSkeletonFile[] = []
+  bundled.forEach((file, i) => {
+    const existingSha = existingBlobs.get(file.path)
+    if (existingSha === undefined) {
+      stale.push({ ...file, exists: false })
+    } else if (bundledShas[i] !== existingSha) {
+      stale.push({ ...file, exists: true })
+    }
+  })
+  return stale
 }
 
-export async function ensureSkeletonFiles(client: GitHubClient, org: string) {
-  const missing = await findMissingSkeletonFiles(client, org)
+// Commits missing skeleton files and refreshes drifted ones. Overwriting an
+// existing (drifted) file resets it to the bundled version, so callers can gate
+// that with confirmOverwrite: it's invoked with the existing paths about to be
+// overwritten, and resolving false leaves those files untouched while still
+// creating any missing ones. Omitting the hook overwrites without asking (the
+// first-time wizard, where nothing pre-exists).
+export async function ensureSkeletonFiles(
+  client: GitHubClient,
+  org: string,
+  confirmOverwrite?: (paths: string[]) => Promise<boolean>,
+) {
+  const stale = await findStaleSkeletonFiles(client, org)
 
-  if (missing.length === 0) {
-    return { status: "complete", created: [] }
+  if (stale.length === 0) {
+    return { status: "complete" as const, created: [], skippedOverwrite: [] }
   }
 
-  const branch = await getBranchRef(client, org)
-  const commit = await getCommit(client, org, branch.object.sha)
+  const overwritePaths = stale.filter((f) => f.exists).map((f) => f.path)
+  let toWrite = stale
+  let skippedOverwrite: string[] = []
 
-  const tree = await createTreeRepo(client, {
-    org,
-    repo: "classroom50",
-    base_tree: commit.tree.sha,
-    tree: missing.map((file) => ({
-      path: file.path,
-      mode: "100644",
-      type: "blob",
-      content: file.content,
-    })),
-  })
+  if (overwritePaths.length > 0 && confirmOverwrite) {
+    const ok = await confirmOverwrite(overwritePaths)
+    if (!ok) {
+      // Declined: still create missing files, but leave drifted ones as-is.
+      toWrite = stale.filter((f) => !f.exists)
+      skippedOverwrite = overwritePaths
+    }
+  }
 
-  const newCommit = await createCommitRepo(client, {
-    org,
-    repo: "classroom50",
-    message: "Bootstrap Classroom 50 skeleton",
-    tree: tree.sha,
-    parents: [commit.sha],
-  })
+  if (toWrite.length === 0) {
+    return {
+      status: "complete" as const,
+      created: [],
+      skippedOverwrite,
+      message:
+        skippedOverwrite.length === 1
+          ? "Left 1 customized skeleton file untouched."
+          : `Left ${skippedOverwrite.length} customized skeleton files untouched.`,
+    }
+  }
 
-  await updateRefForRepo({
-    client,
-    owner: org,
-    repo: "classroom50",
-    branch: "main",
-    commitSha: newCommit.sha,
-  })
+  // Commit the stale files. The confirm modal can park this for an arbitrarily
+  // long time, so the branch tip may have advanced (another tab/owner, any
+  // push) by the time we write; updateRefForRepo uses force:false and rejects a
+  // non-fast-forward rather than clobbering. On such a rejection we re-diff
+  // against the new parent and retry, mirroring the CLI's refreshSkeleton
+  // (init_skeleton.go): the retry sees the new parent and never re-commits an
+  // already-current file.
+  const writePaths = new Set(toWrite.map((f) => f.path))
+  let changed = toWrite.map((f) => f.path)
 
+  for (let attempt = 0; attempt < SKELETON_COMMIT_ATTEMPTS; attempt++) {
+    // Attempt 0 reuses the diff we already computed; only a retry re-diffs,
+    // where a concurrent writer may have advanced the tip during the confirm
+    // pause (the force:false PATCH's 422 below is what catches that race). The
+    // re-diff avoids reverting that writer's changes and never re-commits an
+    // already-current file; an empty re-diff is a clean no-op.
+    const stillStale =
+      attempt === 0
+        ? toWrite
+        : (await findStaleSkeletonFiles(client, org)).filter((f) =>
+            writePaths.has(f.path),
+          )
+    if (stillStale.length === 0) {
+      // A concurrent writer already brought our files up to date.
+      changed = []
+      break
+    }
+    changed = stillStale.map((f) => f.path)
+
+    const branch = await getBranchRef(client, org)
+    const commit = await getCommit(client, org, branch.object.sha)
+
+    const tree = await createTreeRepo(client, {
+      org,
+      repo: "classroom50",
+      base_tree: commit.tree.sha,
+      tree: stillStale.map((file) => ({
+        path: file.path,
+        mode: "100644",
+        type: "blob",
+        content: file.content,
+      })),
+    })
+
+    const newCommit = await createCommitRepo(client, {
+      org,
+      repo: "classroom50",
+      message: "Bootstrap or refresh Classroom 50 skeleton",
+      tree: tree.sha,
+      parents: [commit.sha],
+    })
+
+    try {
+      await updateRefForRepo({
+        client,
+        owner: org,
+        repo: "classroom50",
+        branch: "main",
+        commitSha: newCommit.sha,
+      })
+      break
+    } catch (err) {
+      // A non-fast-forward rejection means the tip moved between our read and
+      // the PATCH; re-diff and retry. Any other error is real — rethrow it.
+      if (!isNonFastForward(err) || attempt === SKELETON_COMMIT_ATTEMPTS - 1) {
+        throw err
+      }
+    }
+  }
+
+  const updatedMsg =
+    changed.length === 1
+      ? "Updated 1 skeleton file to the latest version."
+      : `Updated ${changed.length} skeleton files to the latest version.`
+  const skippedMsg =
+    skippedOverwrite.length > 0
+      ? ` Left ${skippedOverwrite.length} customized file${
+          skippedOverwrite.length === 1 ? "" : "s"
+        } untouched.`
+      : ""
   return {
-    status: "complete",
-    created: missing.map((f) => f.path),
+    status: "complete" as const,
+    created: changed,
+    skippedOverwrite,
+    message: `${updatedMsg}${skippedMsg}`,
   }
 }
 
@@ -2130,11 +2266,17 @@ export async function initClassroom50({
   org,
   plan,
   onStepUpdate,
+  confirmSkeletonOverwrite,
 }: {
   client: GitHubClient
   org: string
   plan?: string
   onStepUpdate: (update: InitStepUpdate) => void
+  // Invoked before drifted skeleton files are overwritten, with the paths at
+  // risk. Resolving false skips the overwrite (missing files are still created)
+  // — the GUI's "are you sure" prompt. Omitted on the first-time wizard, where
+  // the repo is fresh and nothing pre-exists to overwrite.
+  confirmSkeletonOverwrite?: (paths: string[]) => Promise<boolean>
 }) {
   const results: Partial<Record<InitStepId, unknown>> = {}
 
@@ -2187,7 +2329,7 @@ export async function initClassroom50({
   results.skeleton = await tryStep({
     id: "skeleton",
     onStepUpdate,
-    fn: () => ensureSkeletonFiles(client, org),
+    fn: () => ensureSkeletonFiles(client, org, confirmSkeletonOverwrite),
   })
 
   // skeleton (workflows + scripts) — same hard-prerequisite gate.

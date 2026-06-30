@@ -4,13 +4,17 @@ import {
   buildClassroomUpdate,
   editClassroom,
   ensurePages,
+  ensureSkeletonFiles,
   ensureWorkflowPermissions,
+  findStaleSkeletonFiles,
+  gitBlobSha,
   triggerRegrade,
   validateServiceToken,
   REGRADE_WORKFLOW,
 } from "./mutations"
 import { GitHubAPIError } from "./errors"
 import { createGitHubClient } from "./client"
+import { buildSkeletonFiles } from "@/skeleton/skeleton"
 
 // validateServiceToken builds its own client from the pasted token via
 // createGitHubClient; mock the module so the test can drive that client's
@@ -514,5 +518,352 @@ describe("validateServiceToken", () => {
     await expect(validateServiceToken("   ", "acme")).rejects.toThrow(
       /Enter a token/,
     )
+  })
+})
+
+// gitBlobSha must match `git hash-object` so a skeleton file's bundled content
+// can be compared against the SHA GitHub reports for the repo's tree entry.
+describe("gitBlobSha", () => {
+  it("matches git hash-object for a known body", async () => {
+    // echo -n "hello\n" | git hash-object --stdin
+    expect(await gitBlobSha("hello\n")).toBe(
+      "ce013625030ba8dba906f756967f9e9ca394464a",
+    )
+  })
+
+  it("hashes the empty blob", async () => {
+    expect(await gitBlobSha("")).toBe(
+      "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+    )
+  })
+})
+
+// The web re-run must upgrade drifted skeleton files (not just fill in missing
+// paths), mirroring the CLI's diffSkeleton. These pin the content-diff: a file
+// whose tree SHA matches the bundled content is left alone; a missing or
+// drifted one is flagged stale.
+describe("findStaleSkeletonFiles", () => {
+  const org = "acme"
+
+  // A client whose recursive-tree read reports `treeBlobs` (path -> sha) and
+  // whose repo read reports the default branch. No writes happen here — the
+  // diff is read-only.
+  function diffClient(treeBlobs: Record<string, string>) {
+    const request = vi.fn(async (url: string) => {
+      if (url.includes("/git/ref/heads/")) return { object: { sha: "refsha" } }
+      if (url.includes("/git/commits/")) return { tree: { sha: "treesha" } }
+      if (url.includes("/git/trees/")) {
+        return {
+          truncated: false,
+          tree: Object.entries(treeBlobs).map(([path, sha]) => ({
+            path,
+            type: "blob",
+            sha,
+          })),
+        }
+      }
+      if (/\/repos\/[^/]+\/classroom50$/.test(url)) {
+        return { default_branch: "main" }
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    return { request } as unknown as GitHubClient
+  }
+
+  async function bundledShas() {
+    const files = buildSkeletonFiles("main")
+    const entries = await Promise.all(
+      files.map(async (f) => [f.path, await gitBlobSha(f.content)] as const),
+    )
+    return { files, shas: Object.fromEntries(entries) }
+  }
+
+  it("reports nothing stale when every tree SHA matches the bundle", async () => {
+    const { shas } = await bundledShas()
+    const stale = await findStaleSkeletonFiles(diffClient(shas), org)
+    expect(stale).toEqual([])
+  })
+
+  it("flags a file whose content drifted from the bundle", async () => {
+    const { files, shas } = await bundledShas()
+    const drifted = files[0].path
+    const stale = await findStaleSkeletonFiles(
+      diffClient({ ...shas, [drifted]: "0".repeat(40) }),
+      org,
+    )
+    expect(stale.map((f) => f.path)).toEqual([drifted])
+  })
+
+  it("flags a file absent from the tree", async () => {
+    const { files, shas } = await bundledShas()
+    const missing = files[0].path
+    const without = { ...shas }
+    delete without[missing]
+    const stale = await findStaleSkeletonFiles(diffClient(without), org)
+    expect(stale.map((f) => f.path)).toContain(missing)
+  })
+
+  it("tags missing files as creates and drifted files as overwrites", async () => {
+    const { files, shas } = await bundledShas()
+    const drifted = files[0].path
+    const missing = files[1].path
+    const tree = { ...shas, [drifted]: "0".repeat(40) }
+    delete tree[missing]
+    const stale = await findStaleSkeletonFiles(diffClient(tree), org)
+    const byPath = Object.fromEntries(stale.map((f) => [f.path, f.exists]))
+    expect(byPath[drifted]).toBe(true)
+    expect(byPath[missing]).toBe(false)
+  })
+})
+
+// The overwrite confirmation: drifted (existing) skeleton files are only
+// re-committed when confirmOverwrite resolves true; declining leaves them
+// untouched but still creates any missing files. Mirrors the CLI's refresh
+// prompt, surfaced as a GUI modal.
+describe("ensureSkeletonFiles overwrite confirmation", () => {
+  const org = "acme"
+
+  // A client that answers the read endpoints (ref/commit/tree/repo) from
+  // `treeBlobs` and records every write (POST/PATCH) so a test can assert
+  // whether the overwrite commit happened. The tree-read SHA the writes need is
+  // served too. getBranchRef/getCommit hit the same ref/commit URLs.
+  function rwClient(treeBlobs: Record<string, string>) {
+    const writes: string[] = []
+    const request = vi.fn(async (url: string, opts?: { method?: string }) => {
+      const method = opts?.method ?? "GET"
+      if (method !== "GET") {
+        writes.push(`${method} ${url}`)
+        if (url.includes("/git/trees")) return { sha: "newtree" }
+        if (url.includes("/git/commits")) return { sha: "newcommit" }
+        if (url.includes("/git/refs/")) return { object: { sha: "newcommit" } }
+        return {}
+      }
+      if (url.includes("/git/ref/heads/")) return { object: { sha: "refsha" } }
+      if (url.includes("/git/commits/"))
+        return { sha: "refsha", tree: { sha: "basetree" } }
+      if (url.includes("/git/trees/")) {
+        return {
+          truncated: false,
+          tree: Object.entries(treeBlobs).map(([path, sha]) => ({
+            path,
+            type: "blob",
+            sha,
+          })),
+        }
+      }
+      if (/\/repos\/[^/]+\/classroom50$/.test(url)) {
+        return { default_branch: "main" }
+      }
+      throw new Error(`unexpected request: ${method} ${url}`)
+    })
+    return { client: { request } as unknown as GitHubClient, writes }
+  }
+
+  async function bundledShas() {
+    const files = buildSkeletonFiles("main")
+    const entries = await Promise.all(
+      files.map(async (f) => [f.path, await gitBlobSha(f.content)] as const),
+    )
+    return { files, shas: Object.fromEntries(entries) }
+  }
+
+  it("does nothing (no confirm) when the skeleton is up to date", async () => {
+    const { shas } = await bundledShas()
+    const { client, writes } = rwClient(shas)
+    const confirm = vi.fn(async () => true)
+    const result = await ensureSkeletonFiles(client, org, confirm)
+    expect(confirm).not.toHaveBeenCalled()
+    expect(writes).toEqual([])
+    expect(result.created).toEqual([])
+  })
+
+  it("overwrites drifted files when the teacher confirms", async () => {
+    const { files, shas } = await bundledShas()
+    const drifted = files[0].path
+    const { client, writes } = rwClient({ ...shas, [drifted]: "0".repeat(40) })
+    const confirm = vi.fn(async () => true)
+    const result = await ensureSkeletonFiles(client, org, confirm)
+    expect(confirm).toHaveBeenCalledWith([drifted])
+    expect(result.created).toEqual([drifted])
+    expect(result.skippedOverwrite).toEqual([])
+    expect(writes.some((w) => w.includes("/git/trees"))).toBe(true)
+  })
+
+  it("skips drifted files but still creates missing ones when declined", async () => {
+    const { files, shas } = await bundledShas()
+    const drifted = files[0].path
+    const missing = files[1].path
+    const tree = { ...shas, [drifted]: "0".repeat(40) }
+    delete tree[missing]
+    const { client, writes } = rwClient(tree)
+    const confirm = vi.fn(async () => false)
+
+    const result = await ensureSkeletonFiles(client, org, confirm)
+
+    expect(confirm).toHaveBeenCalledWith([drifted])
+    // The missing file is still created; the drifted one is left untouched.
+    expect(result.created).toEqual([missing])
+    expect(result.skippedOverwrite).toEqual([drifted])
+    // A commit still lands (for the created file), but it must not include the
+    // declined path — verified via created above; here we assert a write ran.
+    expect(writes.some((w) => w.includes("/git/trees"))).toBe(true)
+  })
+
+  it("makes no commit when the only change is a declined overwrite", async () => {
+    const { files, shas } = await bundledShas()
+    const drifted = files[0].path
+    const { client, writes } = rwClient({ ...shas, [drifted]: "0".repeat(40) })
+    const confirm = vi.fn(async () => false)
+
+    const result = await ensureSkeletonFiles(client, org, confirm)
+
+    expect(result.created).toEqual([])
+    expect(result.skippedOverwrite).toEqual([drifted])
+    expect(writes).toEqual([])
+  })
+
+  it("without a confirm hook, overwrites drifted files unprompted", async () => {
+    const { files, shas } = await bundledShas()
+    const drifted = files[0].path
+    const { client, writes } = rwClient({ ...shas, [drifted]: "0".repeat(40) })
+    const result = await ensureSkeletonFiles(client, org)
+    expect(result.created).toEqual([drifted])
+    expect(writes.some((w) => w.includes("/git/trees"))).toBe(true)
+  })
+})
+
+// The skeleton commit uses a force:false ref PATCH and retries on a 422
+// non-fast-forward (the concurrent-writer race the confirm-modal pause opens),
+// re-diffing against the freshly-read parent each attempt; a non-422 error and
+// retry exhaustion both surface to the caller. This is the PR's concurrency
+// safety claim, so it gets its own coverage.
+describe("ensureSkeletonFiles non-fast-forward retry", () => {
+  const org = "acme"
+
+  const rateLimit = {
+    limit: null,
+    remaining: null,
+    used: null,
+    reset: null,
+    resource: null,
+    retryAfter: null,
+  }
+  const apiError = (status: number, message: string, body: unknown = {}) =>
+    new GitHubAPIError({
+      status,
+      url: `/repos/${org}/classroom50/git/refs/heads/main`,
+      message,
+      body,
+      rateLimit,
+    })
+
+  async function bundledShas() {
+    const files = buildSkeletonFiles("main")
+    const entries = await Promise.all(
+      files.map(async (f) => [f.path, await gitBlobSha(f.content)] as const),
+    )
+    return { files, shas: Object.fromEntries(entries) }
+  }
+
+  // Like rwClient, but the ref PATCH (the optimistic-rebase step) rejects with
+  // `patchError` for its first `failRefPatches` calls before succeeding. The
+  // tree read keeps reporting `treeBlobs` so the re-diff on a retry still sees
+  // the file as drifted (a stuck race, not a concurrent writer that converged).
+  function retryingClient(
+    treeBlobs: Record<string, string>,
+    failRefPatches: number,
+    patchError: unknown,
+  ) {
+    let refPatchCount = 0
+    const refPatches: number[] = []
+    const request = vi.fn(async (url: string, opts?: { method?: string }) => {
+      const method = opts?.method ?? "GET"
+      if (method !== "GET") {
+        if (url.includes("/git/refs/")) {
+          refPatchCount++
+          refPatches.push(refPatchCount)
+          if (refPatchCount <= failRefPatches) throw patchError
+          return { object: { sha: "newcommit" } }
+        }
+        if (url.includes("/git/trees")) return { sha: "newtree" }
+        if (url.includes("/git/commits")) return { sha: "newcommit" }
+        return {}
+      }
+      if (url.includes("/git/ref/heads/")) return { object: { sha: "refsha" } }
+      if (url.includes("/git/commits/"))
+        return { sha: "refsha", tree: { sha: "basetree" } }
+      if (url.includes("/git/trees/")) {
+        return {
+          truncated: false,
+          tree: Object.entries(treeBlobs).map(([path, sha]) => ({
+            path,
+            type: "blob",
+            sha,
+          })),
+        }
+      }
+      if (/\/repos\/[^/]+\/classroom50$/.test(url)) {
+        return { default_branch: "main" }
+      }
+      throw new Error(`unexpected request: ${method} ${url}`)
+    })
+    return { client: { request } as unknown as GitHubClient, refPatches }
+  }
+
+  it("retries on a 422 non-fast-forward and succeeds on the next attempt", async () => {
+    const { files, shas } = await bundledShas()
+    const drifted = files[0].path
+    const { client, refPatches } = retryingClient(
+      { ...shas, [drifted]: "0".repeat(40) },
+      1,
+      apiError(422, "Update is not a fast forward"),
+    )
+    const result = await ensureSkeletonFiles(client, org)
+    expect(result.created).toEqual([drifted])
+    // First PATCH 422s, the loop re-diffs and the second PATCH lands.
+    expect(refPatches).toEqual([1, 2])
+  })
+
+  it("rethrows when every attempt loses the non-fast-forward race", async () => {
+    const { files, shas } = await bundledShas()
+    const drifted = files[0].path
+    const err = apiError(422, "Update is not a fast forward")
+    const { client, refPatches } = retryingClient(
+      { ...shas, [drifted]: "0".repeat(40) },
+      Infinity,
+      err,
+    )
+    await expect(ensureSkeletonFiles(client, org)).rejects.toBe(err)
+    // Bounded to SKELETON_COMMIT_ATTEMPTS (3).
+    expect(refPatches).toEqual([1, 2, 3])
+  })
+
+  it("rethrows a non-422 error immediately without retrying", async () => {
+    const { files, shas } = await bundledShas()
+    const drifted = files[0].path
+    const err = apiError(500, "boom")
+    const { client, refPatches } = retryingClient(
+      { ...shas, [drifted]: "0".repeat(40) },
+      Infinity,
+      err,
+    )
+    await expect(ensureSkeletonFiles(client, org)).rejects.toBe(err)
+    // No retry: the loop rethrows on the first non-fast-forward-miss.
+    expect(refPatches).toEqual([1])
+  })
+
+  it("does not retry a 422 that is not a non-fast-forward", async () => {
+    const { files, shas } = await bundledShas()
+    const drifted = files[0].path
+    // A 422 whose message/body don't mention a fast-forward race is a real
+    // error (e.g. validation), not the optimistic-rebase loss — rethrow it.
+    const err = apiError(422, "Validation failed", { message: "Invalid ref" })
+    const { client, refPatches } = retryingClient(
+      { ...shas, [drifted]: "0".repeat(40) },
+      Infinity,
+      err,
+    )
+    await expect(ensureSkeletonFiles(client, org)).rejects.toBe(err)
+    expect(refPatches).toEqual([1])
   })
 })
