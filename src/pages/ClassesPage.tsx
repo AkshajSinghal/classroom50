@@ -254,7 +254,7 @@ const RepoCard = ({ org, repo }: { org: string; repo: GitHubRepo }) => {
               <Link
                 to="/$org/$classroom"
                 params={{ org, classroom }}
-                className="group inline-flex w-fit gap-1.5 text-sm text-base-content/60 transition hover:text-primary"
+                className="max-w-full truncate group inline-flex w-fit gap-1.5 text-sm text-base-content/60 transition hover:text-primary"
               >
                 <GraduationCap className="size-4" />
                 <span className="truncate">
@@ -270,7 +270,7 @@ const RepoCard = ({ org, repo }: { org: string; repo: GitHubRepo }) => {
               <Link
                 to="/$org/$classroom/assignments/$assignment"
                 params={{ org, classroom, assignment }}
-                className="group inline-flex w-fit gap-1.5 text-sm text-base-content/60 transition hover:text-primary"
+                className="max-w-full truncate group inline-flex w-fit gap-1.5 text-sm text-base-content/60 transition hover:text-primary"
               >
                 <BookOpen className="size-4" />
                 <span className="truncate">
