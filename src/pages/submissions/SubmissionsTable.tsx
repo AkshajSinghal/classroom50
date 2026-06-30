@@ -18,6 +18,7 @@ import {
 import { studentRepoName, studentRepoUrl } from "@/util/studentRepo"
 import { safeHttpUrl } from "@/util/url"
 import Avatar from "@/components/avatar"
+import { ConfirmModal } from "@/components/modals"
 import { GroupCollaboratorsModal } from "@/components/modals/GroupCollaboratorsModal"
 import { StudentProfileModal } from "@/components/modals/StudentProfileModal"
 import type { SubmissionAttempt, SubmissionRow } from "@/hooks/useGetScores"
@@ -296,22 +297,24 @@ const ReviewButton = ({ org, repo }: { org: string; repo: string }) => {
   )
 }
 
-// Per-row regrade: re-runs the autograder against this repo's latest commit by
-// dispatching the regrade.yaml workflow scoped to a single owner. Tracks the
-// dispatch run via useTriggerRegrade so the icon shows progress and disables
-// while in flight. A confirm guards the (potentially minutes-long, async)
-// grading kickoff. Grading runs in the student repo afterward, so the gradebook
-// refreshes on the next collect — the button only kicks it off.
+// Per-row regrade: dispatches regrade.yaml scoped to one owner and tracks the
+// run via useTriggerRegrade (icon shows progress; disabled while any regrade is
+// in flight). The button only kicks off grading — the gradebook refreshes on
+// the next collect.
 const RegradeButton = ({
   org,
   classroom,
   assignment,
   owner,
+  displayName,
 }: {
   org: string
   classroom: string
   assignment: string
   owner: string
+  // The student's display name (individual assignments) when known; falls back
+  // to the `owner` login. Omitted for group repos (owner is the founder/group).
+  displayName?: string
 }) => {
   const { regrade, phase, anyRegrading } = useTriggerRegrade({
     org,
@@ -324,6 +327,7 @@ const RegradeButton = ({
   // flight: trackers share one regrade.yaml run list and bind by monotonic id,
   // so only one outstanding dispatch at a time keeps the binding unambiguous.
   const blocked = anyRegrading && !inFlight
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
   const title = inFlight
     ? "Regrade in progress…"
@@ -337,34 +341,56 @@ const RegradeButton = ({
 
   const handleClick = () => {
     if (inFlight || blocked) return
-    if (
-      window.confirm(
-        `Re-run the autograder on ${owner}'s latest commit for this assignment?\n\n` +
-          "Grading runs in the background and can take a few minutes; use " +
-          '"Collect now" afterward to pull the new score.',
-      )
-    ) {
-      regrade()
-    }
+    setConfirmOpen(true)
   }
 
   return (
-    <button
-      type="button"
-      className={`${ACTION_BTN} text-base-content/70 disabled:opacity-60`}
-      disabled={inFlight || blocked}
-      onClick={handleClick}
-      aria-label={`Regrade ${owner}'s submission`}
-      title={title}
-    >
-      {inFlight ? (
-        <span className="loading loading-spinner loading-xs" />
-      ) : (
-        <RefreshCw
-          className={`size-4 ${phase === "completed" ? "text-success" : phase === "failed" ? "text-error" : ""}`}
-        />
-      )}
-    </button>
+    <>
+      <button
+        type="button"
+        className={`${ACTION_BTN} text-base-content/70 disabled:opacity-60`}
+        disabled={inFlight || blocked}
+        onClick={handleClick}
+        aria-label={`Regrade ${owner}'s submission`}
+        title={title}
+      >
+        {inFlight ? (
+          <span className="loading loading-spinner loading-xs" />
+        ) : (
+          <RefreshCw
+            className={`size-4 ${phase === "completed" ? "text-success" : phase === "failed" ? "text-error" : ""}`}
+          />
+        )}
+      </button>
+      <ConfirmModal
+        open={confirmOpen}
+        title={`Regrade ${displayName || owner}'s submission?`}
+        description={
+          <>
+            This re-runs the autograder on{" "}
+            <span className="font-semibold text-base-content">
+              {displayName || owner}
+            </span>
+            {displayName ? ` (${owner})` : ""}&apos;s latest commit for this
+            assignment. Their submission time doesn&apos;t change.
+            <br />
+            <br />
+            Grading runs in the background and can take a few minutes; use{" "}
+            <span className="font-semibold">Collect now</span> afterward to pull
+            the new score.
+          </>
+        }
+        confirmText="regrade"
+        confirmLabel="Regrade"
+        cancelLabel="Cancel"
+        dangerous={false}
+        needsConfirm={false}
+        onConfirm={async () => {
+          regrade()
+        }}
+        onClose={() => setConfirmOpen(false)}
+      />
+    </>
   )
 }
 
@@ -654,6 +680,11 @@ const SubmissionsTable = ({
                             classroom={classroom}
                             assignment={assignment}
                             owner={rest.owner}
+                            displayName={
+                              isGroup
+                                ? undefined
+                                : getName(rest.owner, students) || undefined
+                            }
                           />
                         </div>
                       </td>

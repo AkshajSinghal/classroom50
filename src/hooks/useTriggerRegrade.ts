@@ -89,9 +89,10 @@ const saveDispatch = (t: RegradeTarget, state: DispatchState | null) => {
  * persisted to sessionStorage so a remount re-attaches; `phase` latches at
  * completed/failed/timeout until the next dispatch.
  *
- * The tracked run only re-tags the repos — grading runs asynchronously after —
- * so a "completed" phase means grading has been kicked off, not that scores are
- * ready. Callers surface that and refresh via the existing collect-scores path.
+ * The tracked run only kicks off grading (re-running each repo's autograde
+ * workflow) — grading itself runs asynchronously after — so a "completed" phase
+ * means grading was started, not that scores are ready. Callers surface that and
+ * refresh via the existing collect-scores path.
  */
 const useTriggerRegrade = (target: RegradeTarget) => {
   const client = useGitHubClient()
