@@ -1,0 +1,204 @@
+name: CLI extension release
+
+# Cross-compiles the two `gh` CLI extensions and publishes per-platform
+# binaries as Releases on the standalone extension repos (gh-teacher,
+# gh-student) so users can `gh extension install foundation50/gh-teacher`.
+#
+# Why build here and push out (vs per-repo gh-extension-precompile): the
+# relative `replace => ../shared` already yields self-contained binaries, so
+# there is one source of truth and no need to publish cli/shared. Build
+# provenance is attested so the source-less target repos' binaries are
+# verifiable (see wiki/Installation.md for the verify command).
+#
+# Trigger tag `cli-vX.Y.Z` on this repo; VERSION is the tag with `cli-`
+# stripped (the prefix scopes it apart from the `v1` branch / web tags). A
+# VERSION containing `-` (v1.0.0-rc.1) publishes as a prerelease.
+#
+# Setup (repo Settings, before the first release):
+#   - Secret `CLI_RELEASE_PAT`: a dedicated fine-grained PAT, `contents:write`
+#     on gh-teacher + gh-student only, short expiry. Not MIRROR_PAT — separate
+#     scopes limit blast radius.
+#   - Environment `cli-release` with required reviewers (gates PAT use on human
+#     approval; combined with a `cli-v*` maintainers-only tag protection rule,
+#     tag-push authority == release authority).
+#   - Target repos must be named exactly gh-teacher / gh-student for
+#     `gh extension install <owner>/<repo>` to resolve.
+
+on:
+  push:
+    tags: ['cli-v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. cli-v1.0.0). VERSION is this with the cli- prefix stripped.'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cli-release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  # Resolve VERSION once so the cli- tag scheme has a single source of truth.
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - name: Resolve VERSION
+        id: ver
+        # Bind the untrusted tag to env and use the shell var — never
+        # interpolate ${{ }} into run: (script injection; the dispatch input
+        # bypasses the cli-v* push filter).
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#cli-}"
+          if [ "$version" = "$TAG" ]; then
+            echo "::error::Tag '$TAG' does not start with the 'cli-' prefix; expected e.g. cli-v1.0.0."
+            exit 1
+          fi
+          # Restrict VERSION to a semver shape and charset before it reaches
+          # ldflags, the asset filename, and the release tag.
+          case "$version" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *)
+              echo "::error::VERSION '$version' is not a vMAJOR.MINOR.PATCH[-prerelease] release tag (got from tag '$TAG')."
+              exit 1
+              ;;
+          esac
+          case "$version" in
+            *[!0-9A-Za-z.+_-]*)
+              echo "::error::VERSION '$version' contains characters outside the allowed semver set [0-9A-Za-z.+_-] (got from tag '$TAG')."
+              exit 1
+              ;;
+          esac
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
+  build:
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      # Independent per leg: one target's failure must not cancel the rest.
+      fail-fast: false
+      matrix:
+        extension: [gh-teacher, gh-student]
+        target:
+          - { os: darwin, arch: arm64 }
+          - { os: darwin, arch: amd64 }
+          - { os: linux, arch: amd64 }
+          - { os: linux, arch: arm64 }
+          - { os: windows, arch: amd64 }
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: cli/${{ matrix.extension }}/go.mod
+          cache-dependency-path: cli/${{ matrix.extension }}/go.sum
+
+      - name: Build
+        working-directory: cli/${{ matrix.extension }}
+        env:
+          GOWORK: 'off'
+          CGO_ENABLED: '0'
+          GOOS: ${{ matrix.target.os }}
+          GOARCH: ${{ matrix.target.arch }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          ext=""
+          if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
+          out="${GITHUB_WORKSPACE}/dist/${{ matrix.extension }}_${VERSION}_${GOOS}-${GOARCH}${ext}"
+          mkdir -p "$(dirname "$out")"
+          go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "$out" .
+          ls -l "$out"
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.extension }}-${{ matrix.target.os }}-${{ matrix.target.arch }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [resolve, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: cli-release
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        extension: [gh-teacher, gh-student]
+    steps:
+      - name: Download this extension's binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dist-${{ matrix.extension }}-*
+          merge-multiple: true
+          path: dist
+
+      - name: Generate checksums
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          sha256sum gh-* >checksums.txt
+          cat checksums.txt
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'dist/gh-*'
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.CLI_RELEASE_PAT }}
+          REPO: foundation50/${{ matrix.extension }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::CLI_RELEASE_PAT secret is missing. Create a fine-grained PAT with contents:write on foundation50/gh-teacher and foundation50/gh-student and add it as repository secret CLI_RELEASE_PAT."
+            exit 1
+          fi
+
+          prerelease="false"
+          case "$VERSION" in
+            *-*) prerelease="true" ;;
+          esac
+
+          # Crash-safe idempotency: ensure the release exists (notes generated
+          # once), reconcile prerelease state, then always clobber assets — so a
+          # run that died mid-upload is repaired on re-run without dup notes.
+          if ! gh release view "$VERSION" --repo "$REPO" >/dev/null 2>&1; then
+            gh release create "$VERSION" \
+              --repo "$REPO" \
+              --title "$VERSION" \
+              --generate-notes \
+              --prerelease="$prerelease"
+          else
+            echo "Release $VERSION already exists on $REPO; reconciling metadata and assets."
+            gh release edit "$VERSION" --repo "$REPO" --prerelease="$prerelease"
+          fi
+          gh release upload "$VERSION" dist/* --repo "$REPO" --clobber
+
+  # gh-teacher and gh-student ship together — fail the run if only one leg
+  # published, so cross-repo version skew can't pass silently.
+  publish-complete:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Assert both extensions published
+        run: echo "Both gh-teacher and gh-student published successfully."
