@@ -29,6 +29,15 @@ related_docs:
 
 # Evolving a strict cross-binary schema: advance the web client first, keep parsing forward-compatible
 
+> **Update (2026-06-30, monorepo):** the web app and the CLI now ship in one
+> monorepo on a **synchronized release**, so the "advance the leader, coordinate
+> the laggard with tracked issues" dance below no longer applies to changes that
+> go out together — the policy is now **web-priority** (update the schema/TS
+> mirror immediately, CLI follows in the same release). The **tolerate-AND-
+> preserve** rule (§4) still applies: it guards documents written by an _older
+> deployed_ release, which a synchronized build does not eliminate. See
+> `docs/solutions/architecture-patterns/monorepo-synchronized-release-web-priority-bundled-skeleton.md`.
+
 ## Context
 
 `classroom50-web` is a 100% client-side app over GitHub: no backend, all state
