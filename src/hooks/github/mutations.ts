@@ -1691,10 +1691,9 @@ export async function validateServiceToken(
 export const COLLECT_SCORES_WORKFLOW = "collect-scores.yaml"
 
 // The regrade fan-out workflow in <org>/classroom50 (classroom50-cli#208).
-// Dispatched per assignment (optionally per repo owner); it re-tags the
-// targeted student repos so each repo's autograde workflow re-runs. Grading
-// then happens asynchronously inside the student repos, so a follow-up
-// collect-scores run is what refreshes the gradebook.
+// Dispatched per assignment (optionally per repo owner); it re-runs each
+// student repo's autograde workflow. Grading then happens asynchronously inside
+// the student repos, so a follow-up collect-scores run refreshes the gradebook.
 export const REGRADE_WORKFLOW = "regrade.yaml"
 
 /**
@@ -1749,21 +1748,18 @@ export async function triggerScoreCollection(
 /**
  * Dispatches the classroom50 repo's `regrade.yaml` workflow (classroom50-cli
  * #208) to re-run the autograder for an assignment — the whole assignment, or
- * a single student when `owner` is supplied. The workflow re-tags the targeted
- * student repos; each repo's autograde workflow then re-grades its current
- * `main` HEAD and publishes a fresh release. Grading runs asynchronously in the
- * student repos, so the gradebook is refreshed by a subsequent collect-scores
- * run (the UI chains "Collect now" once the regrade dispatch finishes).
+ * a single student when `owner` is supplied. Each targeted repo re-grades its
+ * current `main` HEAD; grading runs asynchronously, so the gradebook is
+ * refreshed by a subsequent collect-scores run.
  *
  * Returns `sinceRunId`: the newest regrade dispatch run before this POST (null
  * if none). The dispatch API returns no run id, so the caller binds to its own
- * run as the oldest dispatch run with a larger id — monotonic, so no clock
- * comparison and unambiguous when dispatches race. Mirrors
- * triggerScoreCollection.
+ * run as the oldest dispatch run with a larger id (monotonic — no clock needed,
+ * unambiguous when dispatches race). Mirrors triggerScoreCollection.
  *
- * @param classroom dispatch input — the classroom short-name (required by the
- *   regrade workflow, unlike collect which can sweep org-wide).
- * @param assignment dispatch input — the assignment slug (required).
+ * @param classroom required dispatch input (the regrade workflow is always
+ *   classroom-scoped, unlike collect which can sweep org-wide).
+ * @param assignment required dispatch input (the assignment slug).
  * @param owner optional dispatch input — a single repo-owner login to regrade;
  *   omitted regrades every rostered student for the assignment.
  */

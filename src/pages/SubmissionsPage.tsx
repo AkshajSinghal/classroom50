@@ -22,6 +22,7 @@ import Drawer, {
 } from "@/components/drawer"
 import SubmissionsTable from "@/pages/submissions/SubmissionsTable"
 import SubmissionsControls from "@/pages/submissions/SubmissionsControls"
+import { ConfirmModal } from "@/components/modals"
 import {
   DEFAULT_FILTERS,
   DEFAULT_SORT,
@@ -188,6 +189,8 @@ const SubmissionsPageContent = () => {
   // Dashboard controls (#59) — all client-side over already-loaded data.
   const [query, setQuery] = useState("")
   const [filters, setFilters] = useState<SubmissionFilters>(DEFAULT_FILTERS)
+  // Drives the "Regrade all" confirmation modal (replaces window.confirm).
+  const [regradeConfirmOpen, setRegradeConfirmOpen] = useState(false)
   const [sort, setSort] = useState<SubmissionSort>(DEFAULT_SORT)
 
   // Deterministic acceptance from the org repo list (see acceptedUsernames);
@@ -347,7 +350,9 @@ const SubmissionsPageContent = () => {
 
   const isRegradeView = activeAction === "regrade"
   const viewRun = isRegradeView ? regradeAll.run : collectScores.run
-  const viewWorkflowUrl = isRegradeView ? regradeWorkflowUrl : collectWorkflowUrl
+  const viewWorkflowUrl = isRegradeView
+    ? regradeWorkflowUrl
+    : collectWorkflowUrl
   const viewLabel = isRegradeView
     ? viewRun
       ? "View regrade run"
@@ -516,16 +521,7 @@ const SubmissionsPageContent = () => {
                   }
                   onClick={() => {
                     if (regrading || collecting) return
-                    if (
-                      window.confirm(
-                        `Re-run the autograder on every submitted repo for "${assignmentInfo?.name ?? assignment}"?\n\n` +
-                          "This re-grades each student's latest commit (useful after fixing a test). " +
-                          'Grading runs in the background and can take several minutes; use "Collect now" ' +
-                          "afterward to pull the new scores.",
-                      )
-                    ) {
-                      regradeAll.regrade()
-                    }
+                    setRegradeConfirmOpen(true)
                   }}
                 >
                   {regradeAllActive && (
@@ -830,6 +826,31 @@ const SubmissionsPageContent = () => {
             maxGroupSize={assignmentInfo?.max_group_size}
             acceptedUsernames={acceptedAvailable ? acceptedSet : undefined}
             thresholdFraction={thresholdFraction}
+          />
+          <ConfirmModal
+            open={regradeConfirmOpen}
+            title={`Regrade all submissions for “${assignmentInfo?.name ?? assignment}”?`}
+            description={
+              <>
+                This re-runs the autograder on every submitted repo&apos;s
+                latest commit — useful after fixing a test or updating the
+                autograder. Submission times don&apos;t change.
+                <br />
+                <br />
+                Grading runs in the background and can take several minutes; use{" "}
+                <span className="font-semibold">Collect now</span> afterward to
+                pull the new scores.
+              </>
+            }
+            confirmText="regrade"
+            confirmLabel="Regrade all"
+            cancelLabel="Cancel"
+            dangerous={false}
+            needsConfirm={false}
+            onConfirm={async () => {
+              regradeAll.regrade()
+            }}
+            onClose={() => setRegradeConfirmOpen(false)}
           />
         </DrawerContent>
         <DrawerSidebar selected="assignments" />
