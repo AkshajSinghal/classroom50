@@ -313,25 +313,31 @@ const RegradeButton = ({
   assignment: string
   owner: string
 }) => {
-  const { regrade, phase } = useTriggerRegrade({
+  const { regrade, phase, anyRegrading } = useTriggerRegrade({
     org,
     classroom,
     assignment,
     owner,
   })
   const inFlight = phase === "dispatching" || phase === "running"
+  // Disable while ANY regrade (this row, another row, or "Regrade all") is in
+  // flight: trackers share one regrade.yaml run list and bind by monotonic id,
+  // so only one outstanding dispatch at a time keeps the binding unambiguous.
+  const blocked = anyRegrading && !inFlight
 
   const title =
     phase === "dispatching" || phase === "running"
       ? "Regrade in progress…"
-      : phase === "completed"
-        ? "Regrade started — grading runs in the background; collect to see new scores"
-        : phase === "failed"
-          ? "Regrade failed to start — try again"
-          : "Regrade this submission"
+      : blocked
+        ? "Another regrade is in progress"
+        : phase === "completed"
+          ? "Regrade started — grading runs in the background; collect to see new scores"
+          : phase === "failed"
+            ? "Regrade failed to start — try again"
+            : "Regrade this submission"
 
   const handleClick = () => {
-    if (inFlight) return
+    if (inFlight || blocked) return
     if (
       window.confirm(
         `Re-run the autograder on ${owner}'s latest commit for this assignment?\n\n` +
@@ -347,7 +353,7 @@ const RegradeButton = ({
     <button
       type="button"
       className={`${ACTION_BTN} text-base-content/70 disabled:opacity-60`}
-      disabled={inFlight}
+      disabled={inFlight || blocked}
       onClick={handleClick}
       aria-label={`Regrade ${owner}'s submission`}
       title={title}

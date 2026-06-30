@@ -47,6 +47,7 @@ import useGetStudents from "@/hooks/useGetStudents"
 import useGetOrgRepos from "@/hooks/useGetMyOrgRepos"
 import useTriggerScoreCollection from "@/hooks/useTriggerScoreCollection"
 import useTriggerRegrade from "@/hooks/useTriggerRegrade"
+import { RegradeCoordinatorProvider } from "@/context/regrade/RegradeCoordinator"
 import useGetLastCollectScoresRun from "@/hooks/useGetLastCollectScoresRun"
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
 import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
@@ -317,7 +318,13 @@ const SubmissionsPageContent = () => {
 
   const collectScores = useTriggerScoreCollection(org)
   const regradeAll = useTriggerRegrade({ org, classroom, assignment })
-  const regrading =
+  // `anyRegrading` covers the whole-assignment regrade AND every per-row
+  // regrade (shared via the page coordinator), so collect/regrade controls
+  // disable while any regrade is in flight — not just the assignment-wide one.
+  const regrading = regradeAll.anyRegrading
+  // Whether the assignment-wide "Regrade all" specifically is mid-dispatch, for
+  // its own spinner/label (distinct from the page-wide `regrading` gate).
+  const regradeAllActive =
     regradeAll.phase === "dispatching" || regradeAll.phase === "running"
   const { data: lastRun, refetch: refetchLastRun } =
     useGetLastCollectScoresRun(org)
@@ -506,7 +513,9 @@ const SubmissionsPageContent = () => {
                   title={
                     collecting
                       ? "Wait for collection to finish before regrading"
-                      : "Re-run the autograder on every submitted repo (submission times don’t change)"
+                      : regrading
+                        ? "A regrade is already in progress"
+                        : "Re-run the autograder on every submitted repo (submission times don’t change)"
                   }
                   onClick={() => {
                     if (regrading || collecting) return
@@ -522,10 +531,10 @@ const SubmissionsPageContent = () => {
                     }
                   }}
                 >
-                  {regrading && (
+                  {regradeAllActive && (
                     <span className="loading loading-spinner loading-xs" />
                   )}
-                  {regrading ? "Regrading…" : "Regrade all"}
+                  {regradeAllActive ? "Regrading…" : "Regrade all"}
                 </button>
                 <button
                   type="button"
@@ -854,7 +863,11 @@ const SubmissionsPage = () => {
     )
   }
 
-  return <SubmissionsPageContent />
+  return (
+    <RegradeCoordinatorProvider>
+      <SubmissionsPageContent />
+    </RegradeCoordinatorProvider>
+  )
 }
 
 export default SubmissionsPage
