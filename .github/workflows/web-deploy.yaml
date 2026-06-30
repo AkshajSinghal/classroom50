@@ -1,0 +1,74 @@
+name: web Deploy to GitHub Pages
+
+# Builds the web app (web/) and publishes it to this repo's GitHub Pages.
+#
+# DORMANT BY DESIGN (monorepo migration): the production domain
+# classroom50.org is currently served by GitHub Pages from the standalone
+# foundation50/classroom50-web repo. GitHub Pages allows only ONE repo per
+# custom domain, so this workflow is intentionally `workflow_dispatch`-only
+# (no push trigger) until the domain is cut over to this monorepo. Enabling a
+# push trigger before retiring the old repo's Pages would conflict on the
+# custom domain. The Vite build serves from root "/" (default base), which is
+# correct for classroom50.org once cut over.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+
+      # `npm run build` runs `tsc -b && vite build`; the type-check is
+      # blocking, so a regression fails the deploy instead of silently
+      # shipping. Served from the root of the custom domain (classroom50.org),
+      # so the default base of "/" is correct.
+      - run: npm run build
+        env:
+          # OAuth client IDs are public identifiers, so a repo variable
+          # (Settings -> Secrets and variables -> Actions -> Variables)
+          # is sufficient; no secret needed.
+          VITE_GITHUB_CLIENT_ID: ${{ vars.VITE_GITHUB_CLIENT_ID }}
+
+      # GitHub Pages has no SPA rewrites; serve the app for unknown deep links.
+      - name: Add SPA fallback
+        run: cp dist/index.html dist/404.html
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          # Path is repo-root-relative, not affected by working-directory.
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
