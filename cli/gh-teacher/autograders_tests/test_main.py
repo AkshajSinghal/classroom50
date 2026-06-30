@@ -133,13 +133,21 @@ def harness(tmp_path, monkeypatch):
             ag, "_baseline_scan", lambda workspace: (baseline, eff_source)
         )
 
-        def fake_subprocess_run(cmd, cwd, env, check):
+        def fake_subprocess_run(cmd, cwd=None, env=None, check=False, **kwargs):
+            # commit_submitted_at reads the graded commit's committer date via
+            # `git show -s --format=%cI <sha>`. The workspace isn't a real git
+            # repo here, so stub a deterministic committer date (capture_output
+            # style call) → main() stamps a fixed `datetime`.
+            if isinstance(cmd, (list, tuple)) and cmd[:2] == ["git", "show"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="2026-06-01T14:33:11+00:00\n"
+                )
             if subprocess_raises is not None:
                 raise subprocess_raises
             state["exec_env"] = env
             if autograder_writes:
                 autograder_writes()
-            # subprocess.CompletedProcess shim
+            # subprocess.CompletedProcess shim for the autograder exec.
             return subprocess.CompletedProcess(args=cmd, returncode=autograder_rc)
 
         monkeypatch.setattr(ag.subprocess, "run", fake_subprocess_run)

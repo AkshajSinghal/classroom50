@@ -771,6 +771,109 @@ class TestEmptyResult:
         assert result["submitted_by"] == {"username": "bob", "id": 222}
 
 
+class TestSubmissionVsGradedTime:
+    """The submission time (`datetime`) is the graded commit's committer
+    date — invariant across regrades; `graded_at` is the wall-clock instant
+    grading ran — moves on every regrade. This is what keeps a teacher
+    regrade from changing a student's submission time / late flag."""
+
+    WHEN = datetime.datetime(2026, 6, 1, 14, 33, 11, tzinfo=datetime.timezone.utc)
+
+    BASE_KWARGS = dict(
+        classroom="cs-principles",
+        assignment="hello",
+        username="alice",
+        submission="submit/2026-06-01T14-32-05Z-a1b2c3d",
+        commit_link="https://github.com/x/commit/abc",
+        release_link="https://github.com/x/releases/tag/y",
+        assignment_type="individual",
+    )
+
+    def test_graded_at_present_and_defaults_to_now(self, monkeypatch):
+        fixed = datetime.datetime(2027, 1, 2, 3, 4, 5, tzinfo=datetime.timezone.utc)
+        monkeypatch.setattr(ag, "now_utc", lambda: fixed)
+        result = ag.empty_result(when=self.WHEN, **self.BASE_KWARGS)
+        # datetime = submission instant (passed `when`); graded_at = now.
+        assert result["datetime"] == "2026-06-01T14:33:11Z"
+        assert result["graded_at"] == "2027-01-02T03:04:05Z"
+
+    def test_graded_at_explicit_value_used(self):
+        graded = datetime.datetime(2027, 5, 5, 5, 5, 5, tzinfo=datetime.timezone.utc)
+        result = ag.make_result(
+            when=self.WHEN,
+            score=0,
+            max_score=0,
+            tests=[],
+            graded_at=graded,
+            **self.BASE_KWARGS,
+        )
+        assert result["datetime"] == "2026-06-01T14:33:11Z"
+        assert result["graded_at"] == "2027-05-05T05:05:05Z"
+
+    def test_regrade_invariant_datetime_stable_graded_at_moves(self, monkeypatch):
+        # The core regrade promise: grading the SAME commit twice yields an
+        # IDENTICAL `datetime` (the committer-date submission instant) while
+        # `graded_at` moves to each run's wall clock. Asserting them together
+        # guards against a regression that re-derives `datetime` from now_utc.
+        first_now = datetime.datetime(2027, 1, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        second_now = datetime.datetime(2027, 3, 3, 9, 9, 9, tzinfo=datetime.timezone.utc)
+
+        monkeypatch.setattr(ag, "now_utc", lambda: first_now)
+        first = ag.make_result(
+            when=self.WHEN, score=0, max_score=0, tests=[], **self.BASE_KWARGS
+        )
+        monkeypatch.setattr(ag, "now_utc", lambda: second_now)
+        second = ag.make_result(
+            when=self.WHEN, score=0, max_score=0, tests=[], **self.BASE_KWARGS
+        )
+
+        # Same commit (same `when`) -> identical submission time across regrades.
+        assert first["datetime"] == second["datetime"] == "2026-06-01T14:33:11Z"
+        # graded_at moves on every (re)grade.
+        assert first["graded_at"] == "2027-01-01T00:00:00Z"
+        assert second["graded_at"] == "2027-03-03T09:09:09Z"
+        assert first["graded_at"] != second["graded_at"]
+
+    def test_commit_submitted_at_reads_committer_date(self, monkeypatch, tmp_path):
+        # %cI with a non-UTC offset must normalize to UTC Z form.
+        class _Proc:
+            returncode = 0
+            stdout = "2026-06-30T12:00:00+01:00\n"
+
+        monkeypatch.setattr(ag.subprocess, "run", lambda *a, **k: _Proc())
+        got = ag.commit_submitted_at("deadbeef", tmp_path)
+        assert got == datetime.datetime(
+            2026, 6, 30, 11, 0, 0, tzinfo=datetime.timezone.utc
+        )
+
+    def test_commit_submitted_at_falls_back_on_empty_sha(self, monkeypatch, tmp_path):
+        fixed = datetime.datetime(2027, 1, 1, tzinfo=datetime.timezone.utc)
+        monkeypatch.setattr(ag, "now_utc", lambda: fixed)
+        assert ag.commit_submitted_at("", tmp_path) == fixed
+
+    def test_commit_submitted_at_falls_back_on_git_failure(self, monkeypatch, tmp_path):
+        fixed = datetime.datetime(2027, 1, 1, tzinfo=datetime.timezone.utc)
+        monkeypatch.setattr(ag, "now_utc", lambda: fixed)
+
+        class _Proc:
+            returncode = 128
+            stdout = ""
+
+        monkeypatch.setattr(ag.subprocess, "run", lambda *a, **k: _Proc())
+        assert ag.commit_submitted_at("deadbeef", tmp_path) == fixed
+
+    def test_commit_submitted_at_falls_back_on_unparseable(self, monkeypatch, tmp_path):
+        fixed = datetime.datetime(2027, 1, 1, tzinfo=datetime.timezone.utc)
+        monkeypatch.setattr(ag, "now_utc", lambda: fixed)
+
+        class _Proc:
+            returncode = 0
+            stdout = "not-a-date\n"
+
+        monkeypatch.setattr(ag.subprocess, "run", lambda *a, **k: _Proc())
+        assert ag.commit_submitted_at("deadbeef", tmp_path) == fixed
+
+
 # ---------------------------------------------------------------------------
 # derive_status_and_summary
 # ---------------------------------------------------------------------------
@@ -1530,6 +1633,29 @@ class TestFinalizeResult:
         result = json.loads((tmp_path / "result.json").read_text())
         assert result["owner"] == "alice"
         assert result["assignment_type"] == "individual"
+
+    def test_overwrites_datetime_with_submission_time_and_stamps_graded_at(
+        self, tmp_path, monkeypatch
+    ):
+        # The runner stamps `datetime` (the invariant submission instant) and
+        # `graded_at` (this run's wall clock) authoritatively — a custom
+        # autograder can't set its own submission time / late flag.
+        graded_now = datetime.datetime(2027, 9, 9, 9, 9, 9, tzinfo=datetime.timezone.utc)
+        monkeypatch.setattr(ag, "now_utc", lambda: graded_now)
+        (tmp_path / "result.json").write_text(json.dumps(
+            self._autograder_result(datetime="2099-01-01T00:00:00Z")
+        ))
+        f = self._finalizer(tmp_path)
+        # Pin a known submission instant (committer date) on the finalizer.
+        f.submitted_at = datetime.datetime(
+            2026, 6, 1, 14, 33, 11, tzinfo=datetime.timezone.utc
+        )
+        assert ag.finalize_result(f, is_group=False) == 0
+        result = json.loads((tmp_path / "result.json").read_text())
+        # The autograder's forged far-future datetime is replaced by the
+        # committer-date submission instant; graded_at records "now".
+        assert result["datetime"] == "2026-06-01T14:33:11Z"
+        assert result["graded_at"] == "2027-09-09T09:09:09Z"
 
     def test_drops_forged_submitted_by_when_actor_unknown(self, tmp_path):
         # submitted_by is stamped unconditionally: when the runner couldn't

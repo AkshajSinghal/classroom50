@@ -56,22 +56,28 @@ func TestValidateServiceToken(t *testing.T) {
 	cases := []struct {
 		name      string
 		status    int
+		canPush   bool // permissions.push on the 200 repo body
 		wantErr   bool
 		errSubstr string
 	}{
-		{"valid", http.StatusOK, false, ""},
-		{"revoked", http.StatusUnauthorized, true, "invalid, expired, or revoked"},
-		{"no access", http.StatusNotFound, true, "can't read"},
-		{"forbidden", http.StatusForbidden, true, "can't read"},
+		{"valid read+write", http.StatusOK, true, false, ""},
+		{"read-only rejected", http.StatusOK, false, true, "lacks write access"},
+		{"revoked", http.StatusUnauthorized, false, true, "invalid, expired, or revoked"},
+		{"no access", http.StatusNotFound, false, true, "can't read"},
+		{"forbidden", http.StatusForbidden, false, true, "can't read"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if !strings.Contains(r.URL.Path, "/contents/") {
-					t.Errorf("validate should read repo contents, got path %s", r.URL.Path)
+				// Validation reads the config repo itself (GET
+				// /repos/{org}/classroom50) so it can assert the
+				// token's effective permissions.push, not the
+				// contents listing.
+				if !strings.HasSuffix(r.URL.Path, "/repos/cs50/classroom50") {
+					t.Errorf("validate should GET the config repo, got path %s", r.URL.Path)
 				}
 				if tc.status == http.StatusOK {
-					_, _ = w.Write([]byte(`[]`))
+					_, _ = w.Write([]byte(`{"permissions":{"push":` + boolJSON(tc.canPush) + `}}`))
 					return
 				}
 				w.WriteHeader(tc.status)
@@ -81,7 +87,7 @@ func TestValidateServiceToken(t *testing.T) {
 
 			err := validateTokenWithClient(client, "cs50")
 			if tc.wantErr && err == nil {
-				t.Fatalf("expected an error for status %d", tc.status)
+				t.Fatalf("expected an error for status %d (canPush=%v)", tc.status, tc.canPush)
 			}
 			if !tc.wantErr && err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -89,14 +95,30 @@ func TestValidateServiceToken(t *testing.T) {
 			if tc.errSubstr != "" && !strings.Contains(err.Error(), tc.errSubstr) {
 				t.Errorf("error %q should contain %q", err.Error(), tc.errSubstr)
 			}
-			// The no-access message must carry the actionable fix.
+			// The no-access message must carry the actionable fix,
+			// including the now-required Read-and-write scope.
 			if tc.status == http.StatusNotFound {
-				if !strings.Contains(err.Error(), "Resource owner") || !strings.Contains(err.Error(), "Contents") {
-					t.Errorf("no-access error should explain the resource-owner + Contents fix: %q", err.Error())
+				if !strings.Contains(err.Error(), "Resource owner") ||
+					!strings.Contains(err.Error(), "Contents: Read and write") {
+					t.Errorf("no-access error should explain the resource-owner + Contents: Read and write fix: %q", err.Error())
+				}
+			}
+			// A read-only token must be told it needs write.
+			if tc.status == http.StatusOK && !tc.canPush {
+				if !strings.Contains(err.Error(), "Contents: Read and write") {
+					t.Errorf("read-only error should explain the Contents: Read and write fix: %q", err.Error())
 				}
 			}
 		})
 	}
+}
+
+// boolJSON renders a Go bool as a JSON literal for inline response bodies.
+func boolJSON(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
 }
 
 // TestProvisionServiceSecret_PutStatus pins the PUT status handling: the

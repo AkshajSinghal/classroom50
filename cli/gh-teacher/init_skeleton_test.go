@@ -23,8 +23,10 @@ func TestSkeletonFiles_Manifest(t *testing.T) {
 		".github/workflows/autograde-runner.yaml",
 		".github/workflows/publish-pages.yaml",
 		".github/workflows/collect-scores.yaml",
+		".github/workflows/regrade.yaml",
 		".github/scripts/runner.py",
 		".github/scripts/collect_scores.py",
+		".github/scripts/regrade_repos.py",
 		".github/scripts/ensure_feedback_pr.py",
 		"README.md",
 	}
