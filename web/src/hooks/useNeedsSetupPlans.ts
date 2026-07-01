@@ -1,0 +1,33 @@
+import { useQueries } from "@tanstack/react-query"
+
+import { useGitHubClient } from "@/context/github/GitHubProvider"
+import type { GitHubOrgDetails } from "@/hooks/github/types"
+
+// Batch plan-name fetches for a set of org logins. Only the "needs setup" subset
+// of the home view is passed in — every such org is admin-owned, so `plan` is
+// visible there — which keeps this fan-out off the general org list the home
+// path deliberately avoids paying for. Keyed identically to useGetOrgPlanDetails
+// so the setup page reuses the same cache entry. Maps login -> plan name, or
+// undefined when the plan isn't visible (non-owner) or hasn't loaded yet.
+const useNeedsSetupPlans = (
+  logins: string[],
+): Record<string, string | undefined> => {
+  const client = useGitHubClient()
+
+  const results = useQueries({
+    queries: logins.map((login) => ({
+      queryKey: ["github", "orgs", login],
+      queryFn: () => client.request<GitHubOrgDetails>(`/orgs/${login}`),
+      staleTime: 10 * 60 * 1000,
+    })),
+  })
+
+  const byLogin: Record<string, string | undefined> = {}
+  logins.forEach((login, i) => {
+    byLogin[login] = results[i]?.data?.plan?.name
+  })
+
+  return byLogin
+}
+
+export default useNeedsSetupPlans

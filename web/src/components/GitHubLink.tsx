@@ -8,20 +8,22 @@ export const GitHubLink = ({
   label,
   title,
   className = "",
+  showLogo = true,
 }: {
   href: string
   label: string
   title?: string
   className?: string
+  showLogo?: boolean
 }) => (
   <a
     href={href}
     target="_blank"
     rel="noreferrer"
     title={title}
-    className={`inline-flex items-center gap-1.5 text-sm text-base-content/50 hover:text-primary ${className}`}
+    className={`inline-flex cursor-pointer items-center gap-1.5 text-sm text-base-content/50 hover:text-primary ${className}`}
   >
-    <GitHub className="size-4" />
+    {showLogo && <GitHub className="size-4" />}
     {label}
     <ExternalLink className="size-3" />
   </a>
