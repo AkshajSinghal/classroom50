@@ -27,4 +27,4 @@ End-user documentation — installation, walkthroughs, and per-command reference
 | Every `gh student` command and flag | [`gh student` reference](https://github.com/foundation50/classroom50/wiki/gh-student) |
 | Common errors and debug flags | [Troubleshooting](https://github.com/foundation50/classroom50/wiki/Troubleshooting) |
 
-The wiki is built from [`wiki/`](../wiki/) in this repo and auto-synced on every merge to `v1` ([`mirror-to-public.yaml`](../.github/workflows/mirror-to-public.yaml)). **When you ship a new CLI feature, document it on the wiki** — the per-extension READMEs in this folder are deliberately kept minimal (build/lint/test instructions only) so usage details don't drift between two places.
+The wiki is built from [`wiki/`](../wiki/) in this repo and auto-published on every merge to `main` ([`publish-wiki.yaml`](../.github/workflows/publish-wiki.yaml)). **When you ship a new CLI feature, document it on the wiki** — the per-extension READMEs in this folder are deliberately kept minimal (build/lint/test instructions only) so usage details don't drift between two places.
