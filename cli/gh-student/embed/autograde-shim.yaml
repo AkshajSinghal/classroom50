@@ -36,7 +36,7 @@ jobs:
     permissions:
       contents: write
       statuses: write
-      # Lets the runner open the opt-in Feedback PR (issue #86). A
+      # Lets the runner open the opt-in Feedback PR. A
       # reusable workflow's token is the intersection with the caller's
       # grants, so this must mirror autograde-runner.yaml's permissions.
       pull-requests: write

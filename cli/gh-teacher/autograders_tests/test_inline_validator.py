@@ -237,7 +237,7 @@ class TestValidatorHappyPaths:
         assert "user" not in container
 
     def test_custom_runner_array_emitted_as_array(self, inline_script, tmp_path):
-        # Custom / self-hosted runner (issue #97): a runs-on
+        # Custom / self-hosted runner: a runs-on
         # array bypasses any hosted-label assumption and is emitted
         # verbatim as the runs-on JSON array.
         rc, _stdout, _stderr, outputs = _run_validator(

@@ -354,7 +354,7 @@ func TestApplyOrgMemberDefaults_HappyPath(t *testing.T) {
 	if gotBody["members_can_create_repositories"] != true {
 		t.Errorf("members_can_create_repositories = %v, want true (master switch; without it Team leaves both repo-creation options off)", gotBody["members_can_create_repositories"])
 	}
-	// Issue #112 lockdown fields available on Team must all be present
+	// The org member-privilege lockdown fields available on Team must all be present
 	// and false in the combined PATCH — a regression that drops one
 	// silently re-opens a member privilege.
 	for _, f := range []string{
@@ -1031,7 +1031,7 @@ func TestEnablePages_PlanWithoutVisibilityControlIsSuccess(t *testing.T) {
 	// "Private pages is not enabled... All Pages will be public."
 	// — i.e. the site is already public, which is the state init
 	// wants. Must report success on stdout with no warning.
-	// Mirrors the Team-plan report in public issue #22.
+	// Mirrors the Team-plan report in https://github.com/foundation50/classroom50/issues/22.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:

@@ -241,7 +241,7 @@ func acceptAssignment(cmd *cobra.Command, client githubapi.Client, u *ui.UI, out
 	verbose, _ := cmd.Flags().GetBool("verbose")
 
 	// The acceptor owns the repo, so capture their immutable id and the
-	// accept time alongside the login (classroom50-cli#185).
+	// accept time alongside the login (rename-safe github_id identity).
 	username, ownerID, err := githubapi.CurrentUser(client)
 	if err != nil {
 		return fmt.Errorf("retrieving authed user: %w", err)
@@ -316,7 +316,7 @@ func acceptAssignment(cmd *cobra.Command, client githubapi.Client, u *ui.UI, out
 		// Resolve the template owner's immutable id best-effort: a rename of
 		// the template org/user shouldn't break submit's instructor-file
 		// re-fetch. A failed lookup is non-fatal — leave owner_id null rather
-		// than abort the accept (classroom50-cli#185).
+		// than abort the accept.
 		templateOwnerID := lookupUserID(client, entry.Template.Owner)
 		if templateOwnerID == nil && verbose {
 			u.Detail("could not resolve template owner id for %q; recording source.owner_id as null", entry.Template.Owner)
@@ -449,7 +449,7 @@ func acceptIntoRepo(client githubapi.Client, u *ui.UI, verbose bool, out io.Writ
 func provisionAcceptedRepo(client githubapi.Client, u *ui.UI, verbose bool, p acceptRepoParams, cfg classroomcfg.Config) error {
 	// Founder stays repo `admin` (upsert) so they can manage collaborators
 	// — a group founder adds teammates via `gh student invite`, which only
-	// an admin can do. The org-level lockdown in `gh teacher init` (#112)
+	// an admin can do. The org-level lockdown in `gh teacher init`
 	// defangs the admin's delete/transfer/visibility powers org-wide.
 	if err := inviteUserAsAdmin(client, u, verbose, p.username, p.org, p.repoName); err != nil {
 		return err
@@ -595,7 +595,7 @@ func printCloneInstructions(u *ui.UI, out io.Writer, htmlURL string) error {
 // lookupUserID resolves a GitHub login to its immutable numeric id via
 // GET /users/{username}, best-effort: any failure (404, transient 5xx,
 // rate-limit) returns nil so the caller records owner_id as null rather
-// than aborting the accept (classroom50-cli#185).
+// than aborting the accept.
 func lookupUserID(client githubapi.Client, username string) *int64 {
 	var user struct {
 		ID int64 `json:"id"`
@@ -760,7 +760,7 @@ func defaultBranchOrMain(branch string) string {
 // Admin (not maintain) is required because only an admin can manage
 // collaborator access — a group founder uses `gh student invite` to add
 // teammates. The org-level member-privilege lockdown in `gh teacher init`
-// (#112) removes the org-wide danger of repo-admin (no delete/transfer/
+// removes the org-wide danger of repo-admin (no delete/transfer/
 // visibility change), so admin-on-own-repo is safe.
 func inviteUserAsAdmin(client githubapi.Client, u *ui.UI, verbose bool, username, org, repoName string) error {
 	if _, err := githubapi.SetCollaborator(client, org, repoName, username, "admin"); err != nil {

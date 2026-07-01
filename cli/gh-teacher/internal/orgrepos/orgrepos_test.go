@@ -45,7 +45,7 @@ func TestListNames(t *testing.T) {
 
 	t.Run("propagates the pagination safety-cap error", func(t *testing.T) {
 		// Always a full page → never terminates → cap error surfaces
-		// instead of looping forever (the #007 migration's whole point).
+		// instead of looping forever (the pagination-cap migration's whole point).
 		mux := http.NewServeMux()
 		mux.HandleFunc("/orgs/o/repos", func(w http.ResponseWriter, r *http.Request) {
 			batch := make([]map[string]string, perPage)

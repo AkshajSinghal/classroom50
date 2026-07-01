@@ -18,8 +18,8 @@ import (
 type initSummary struct {
 	Org    string `json:"org"`
 	DryRun bool   `json:"dry_run"`
-	// Ready is the overall go/no-go: no preflight failure, the #112
-	// lockdown invariant holds, and no fatal step. Feedback-PR readiness
+	// Ready is the overall go/no-go: no preflight failure, the org
+	// member-privilege lockdown invariant holds, and no fatal step. Feedback-PR readiness
 	// is reported separately (a not-ready Feedback PR doesn't make the
 	// classroom unusable, just degrades one feature).
 	Ready            bool        `json:"ready"`
@@ -41,8 +41,7 @@ type initSummary struct {
 	// ManualHardeningRequired is the set of org member-privilege settings
 	// GitHub exposes no REST API for, so init can neither set nor detect
 	// them. Surfaced as structured data (not just stderr prose) so an
-	// orchestrating agent can branch on "manual steps pending" — the
-	// TECH_DEBT #018 ask.
+	// orchestrating agent can branch on "manual steps pending".
 	ManualHardeningRequired []orgpolicy.ManualStep `json:"manual_hardening_required"`
 	// Notes are plan- or policy-specific informational caveats that are
 	// NOT action items — e.g. on Team/Free, member public-repo creation

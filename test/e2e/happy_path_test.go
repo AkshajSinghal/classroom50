@@ -181,7 +181,7 @@ func TestHappyPath(t *testing.T) {
 		// The must-have check from manual testing: a stale binary would
 		// leave the founder at `maintain` and break group invites.
 		if perm := collaboratorPermission(t, repo, cfg.Student); perm != "admin" {
-			t.Errorf("founder %s permission on %s = %q, want admin (#112)", cfg.Student, repo, perm)
+			t.Errorf("founder %s permission on %s = %q, want admin", cfg.Student, repo, perm)
 		}
 	})
 

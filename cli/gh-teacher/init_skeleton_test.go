@@ -78,7 +78,7 @@ func TestSkeletonFiles_Manifest(t *testing.T) {
 	}
 
 	// The classrooms index must publish the `active` archival flag so the
-	// student accept page can refuse an archived classroom (issue #203).
+	// student accept page can refuse an archived classroom.
 	if !strings.Contains(pubBody, `"active"`) {
 		t.Error("publish-pages.yaml classrooms index must include the \"active\" key so the student accept page can refuse archived classrooms")
 	}

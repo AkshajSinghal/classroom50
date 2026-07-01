@@ -20,7 +20,7 @@ tags:
   - vite
   - skeleton-ownership
 related_docs:
-  - "web/docs/solutions/architecture-patterns/evolving-strict-cross-binary-schemas.md (the PRE-monorepo lockstep model this supersedes for the synchronized-release case)"
+  - "The pre-monorepo cross-binary lockstep model this supersedes for the synchronized-release case (advance the web first, coordinate the CLI via tracked issues, never a flag day)."
 ---
 
 # Monorepo synchronized release: web-priority schemas and a GUI that bundles the CLI-owned skeleton
@@ -31,8 +31,8 @@ related_docs:
 (`web/`) now live together and are published at the same time. Two facts about
 the pre-monorepo world stopped being true and changed the right design:
 
-1. **The clients no longer ship independently.** The lockstep-avoidance dance in
-   `evolving-strict-cross-binary-schemas.md` (advance the web first, coordinate
+1. **The clients no longer ship independently.** The lockstep-avoidance dance
+   from the pre-monorepo world (advance the web first, coordinate
    the CLI with tracked issues, never a flag day) existed because the web app
    and the CLI released on different trains. In a synchronized release the
    skeleton, contracts, and schemas in a given commit are by construction

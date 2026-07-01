@@ -372,7 +372,7 @@ func TestRunAssignmentReuse_NameOverride(t *testing.T) {
 	}
 }
 
-// TestRunAssignmentReuse_PreservesUnknownField pins #202 invariant (2)
+// TestRunAssignmentReuse_PreservesUnknownField pins the forward-compat invariant
 // end-to-end: a future field on the source entry that this binary doesn't
 // know about is copied verbatim into the target classroom rather than
 // silently dropped on the read-modify-write.

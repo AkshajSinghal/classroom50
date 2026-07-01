@@ -15,8 +15,8 @@ import (
 
 // listGroupMemberLogins returns the logins of the student-level
 // collaborators on org/repo, walking pagination. The repo `owner` (the
-// founder) is always kept even though they are repo `admin` (issue #112
-// keeps the founder admin so they can manage collaborators). Every
+// founder) is always kept even though they are repo `admin` (the org
+// lockdown keeps the founder admin so they can manage collaborators). Every
 // *other* admin — the org owner and instructors, who are admins on every
 // repo, plus any admin-granted TA — is excluded so they don't consume
 // student slots against max_group_size (push collaborators count; the

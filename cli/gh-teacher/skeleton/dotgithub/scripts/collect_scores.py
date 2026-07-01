@@ -584,7 +584,7 @@ def collect_classroom(
             # key (the repo owner from the <classroom>-<assignment>-<username>
             # formula); it is invariant across re-collects even when a group's
             # credited member set changes, so apply_updates replaces the entry
-            # in place (#104). For a group entry `member_usernames` sits right
+            # in place. For a group entry `member_usernames` sits right
             # after `owner`. `_assignment` / `_type` are transport-only hints
             # for apply_updates (the bucket slug + type) and are stripped on store.
             entry_row: dict[str, Any] = {
@@ -814,7 +814,7 @@ def apply_updates(scores: dict[str, Any], updates: Iterable[dict[str, Any]]) -> 
     bucket are keyed by the repo OWNER (`row_key`), which is invariant for a
     repo — so a group entry whose credited member set changes between collects
     (e.g. a degraded collaborator read drops it to owner-only) REPLACES its
-    prior entry instead of orphaning it and appending a duplicate (issue #104).
+    prior entry instead of orphaning it and appending a duplicate.
     Entries without an `owner` are not keyable and are skipped — legacy
     migration is intentionally not performed.
     """
@@ -899,7 +899,7 @@ def row_key(record: dict[str, Any]) -> str | None:
 
     Keying on the owner — not the credited `usernames` set — is what
     makes a group re-collect replace its row instead of duplicating it
-    when the member set changes (issue #104).
+    when the member set changes.
 
     Cross-binary tie: the owner is the `<username>` component of the
     `<classroom>-<assignment>-<username>` repo-name formula (see
@@ -1159,7 +1159,7 @@ def list_repo_collaborator_logins(
     applied by the caller (group_member_usernames intersects with the
     classroom roster). Filtering on `role_name == "admin"` here was a bug:
     a group teammate who is also an org owner (admin on every repo), or a
-    founder kept as repo `admin` so they can invite teammates (issue #112),
+    founder kept as repo `admin` so they can invite teammates,
     is `admin` yet a legitimate student — the old filter silently dropped
     them, crediting only the repo owner. Instructors/TAs/org-owners who are
     not students are excluded downstream because they are not on the roster,

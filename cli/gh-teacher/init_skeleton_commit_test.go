@@ -407,7 +407,7 @@ func TestCommitSkeleton_RefreshDeclined(t *testing.T) {
 
 // TestCommitSkeleton_MissingWorkflowScopeFailsFast: without `workflow`
 // scope the Tree write 404s permanently, so it must fail after one Tree
-// POST, not retry it as fresh-repo lag. Guards foundation50/classroom50#16.
+// POST, not retry it as fresh-repo lag. Guards https://github.com/foundation50/classroom50/issues/16.
 func TestCommitSkeleton_MissingWorkflowScopeFailsFast(t *testing.T) {
 	var (
 		mu        sync.Mutex

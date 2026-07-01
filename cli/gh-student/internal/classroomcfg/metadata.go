@@ -39,7 +39,7 @@ const MetadataPath = ".classroom50.yaml"
 const AutogradeWorkflowPath = ".github/workflows/autograde.yaml"
 
 // SchemaRepoConfigV1: versioned sentinel stamped into `.classroom50.yaml`
-// at accept time (classroom50-cli#185). Readers treat it as optional —
+// at accept time. Readers treat it as optional —
 // pre-v1 files predate it — but new accepts always write it so future
 // shape changes are detectable. Mirrors the web GUI's emitted value.
 const SchemaRepoConfigV1 = "classroom50/repo-config/v1"
@@ -68,7 +68,7 @@ type Config struct {
 }
 
 // Identity records a GitHub account by both its mutable login and its
-// immutable numeric id (classroom50-cli#185), so a username rename never
+// immutable numeric id, so a username rename never
 // breaks the repo<->student binding. ID is a pointer so it renders as a
 // YAML number (or null when unresolved), never a quoted string. AcceptedAt
 // is the UTC instant of the accept commit; the owner is the acceptor, so it

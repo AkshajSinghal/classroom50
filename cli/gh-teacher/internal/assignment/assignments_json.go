@@ -86,7 +86,7 @@ type AssignmentsJSON struct {
 // runner.py grades it with a built-in interpreter. Entrypoint precedence
 // at grade time: per-assignment autograder.py > tests.json > classroom
 // default autograder.py > vacuous pass. See wiki/Autograders.md.
-// (An earlier `Tests` field was removed in PR #58 with the matrix
+// (An earlier `Tests` field was removed alongside the matrix
 // autograder; this is its declarative successor on runner.py.)
 // MaxGroupSize bounds the collaborators on a group repo. Required
 // (>= 2) for group-mode entries; must be 0 (unset, omitted) for
@@ -427,7 +427,7 @@ type TemplateRef struct {
 //
 // RunsOn mirrors GitHub Actions' own `runs-on`: a single label
 // ("ubuntu-latest") or an array (["self-hosted", "gpu"]) for custom /
-// self-hosted runners (issue #97). No value allow-list —
+// self-hosted runners. No value allow-list —
 // the teacher owns the label, as in a hand-written workflow; each is
 // only injection-checked (RunsOnLabelPattern) since it flows verbatim
 // into the workflow's `runs-on`.

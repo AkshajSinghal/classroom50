@@ -39,7 +39,7 @@ func TestInitSummary_JSONShape(t *testing.T) {
 		}
 	}
 
-	// manual_hardening_required is the TECH_DEBT #018 contract: an array
+	// manual_hardening_required is the manual-hardening contract: an array
 	// of {setting, url} objects.
 	mh, ok := got["manual_hardening_required"].([]any)
 	if !ok || len(mh) != 4 {

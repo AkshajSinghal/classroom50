@@ -9,9 +9,14 @@ Each top-level folder is a self-contained piece that may eventually ship from it
 | Folder                   | Contents                                                                  |
 | ------------------------ | ------------------------------------------------------------------------- |
 | [cli/](cli/)             | Command-line tools, packaged as `gh` CLI extensions.                      |
-| [web/](web/)             | Static web frontend, intended for GitHub Pages.                           |
 | [templates/](templates/) | Example assignment templates teachers can copy when setting up classroom repos. |
+
+The web frontend (the teacher GUI deployed to [classroom50.org](https://classroom50.org)) is not yet part of this repository; it will be open-sourced in a future release.
 
 Reusable GitHub Actions workflows live in [`.github/workflows/`](.github/workflows/) (GitHub requires that location for `uses:` references). The autograde runner is scaffolded into each teacher's `classroom50` config repo; see the [Autograders](https://github.com/foundation50/classroom50/wiki/Autograders) wiki page.
 
 Each folder has its own README with a bit more detail.
+
+## License
+
+Classroom 50 is released under the [GNU General Public License v3.0](LICENSE).

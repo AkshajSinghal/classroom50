@@ -115,7 +115,7 @@ func SecretExists(client githubapi.Client, owner, repo string) (bool, error) {
 // ValidateToken confirms a freshly-supplied service token can actually do
 // what the pipeline needs: read AND write repository contents in the org.
 // Reads back the gradebook (collect-scores) and pushing submit/* tags to
-// regrade (regrade.yaml, issue #208) both require Contents access — collect
+// regrade (regrade.yaml) both require Contents access — collect
 // reads, regrade writes — so the one shared token must hold Contents:
 // Read and write. It builds a client authenticated AS the supplied token,
 // reads the config repo (catching a wrong/zeroed resource owner, a
@@ -161,7 +161,7 @@ func validateTokenWithClient(tokenClient githubapi.Client, org string) error {
 			return fmt.Errorf("couldn't verify the token against %s/%s: %w", org, configrepo.ConfigRepoName, err)
 		}
 	}
-	// The token can read the repo, but regrade (issue #208) needs to push
+	// The token can read the repo, but regrade needs to push
 	// submit/* tags to student repos — Contents: write. A read-only PAT
 	// reports permissions.push == false here; reject it with the same
 	// actionable fix as a no-access token.
