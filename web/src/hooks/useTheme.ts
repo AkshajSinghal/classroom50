@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 
-// Client-side theme preference (#265). Mirrors the `classroom50:sidebar-collapsed`
+// Client-side theme preference. Mirrors the `classroom50:sidebar-collapsed`
 // pattern: a single localStorage key, applied by toggling `data-theme` on <html>.
 // The two theme names are the ones registered in index.css.
 export const THEME_STORAGE_KEY = "classroom50:theme"

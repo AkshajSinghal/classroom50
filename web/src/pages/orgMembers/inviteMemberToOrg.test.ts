@@ -29,7 +29,7 @@ const row = (over: Partial<OrgMemberRow>): OrgMemberRow => ({
   ...over,
 })
 
-describe("inviteMemberToOrg (#76)", () => {
+describe("inviteMemberToOrg", () => {
   it("invites by numeric github_id, not by the (possibly stale) username", async () => {
     createOrgInvitationMock.mockReset().mockResolvedValue({})
     getUserByIdMock.mockReset().mockResolvedValue({ login: "new-handle" })

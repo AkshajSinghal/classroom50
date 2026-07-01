@@ -35,7 +35,7 @@ export const SKELETON_PATHS = [
   // Expands assignments.json `tests` into per-assignment tests.json at
   // publish-pages time; without it declarative tests never grade.
   "scripts/materialize_tests.py",
-  // Opt-in Feedback PR (issue #86), fetched from Pages by autograde-runner.yaml.
+  // Opt-in Feedback PR, fetched from Pages by autograde-runner.yaml.
   "scripts/ensure_feedback_pr.py",
   // Regrade fan-out invoked by regrade.yaml.
   "scripts/regrade_repos.py",

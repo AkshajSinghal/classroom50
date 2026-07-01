@@ -178,8 +178,7 @@ export type AssignmentTest = {
 //
 // CLI coupling: students.csv is a data contract shared with the gh-teacher CLI
 // (separate repo). "reconciled"/"reconciled_at" were renamed to "enrolled"/
-// "enrolled_at" with intentionally NO back-compat; the CLI must move in lockstep
-// (foundation50/classroom50-cli#195).
+// "enrolled_at" with intentionally NO back-compat; the CLI must move in lockstep.
 export type EnrollmentStatus = "invited" | "enrolled" | ""
 
 // How the student was added: "github" (by username, already has github_id +

@@ -25,7 +25,7 @@ related_docs:
 
 ## Context
 
-The assignment overview dashboard (#59) needed to show which students had "accepted" an assignment. In `classroom50-web` — a 100% client-side app over GitHub with no backend — there is no acceptance event to query; acceptance is _implicit_: **a student's repo exists in the org**. Student repos are named by a single shared formula, `studentRepoName(classroom, assignment, owner)` = `<classroom>-<assignment>-<owner>` (lowercased), defined in `src/util/studentRepo.ts` and treated as the single source of truth across three binaries — the web app, the `gh-teacher` Go CLI, and the autograder.
+The assignment overview dashboard needed to show which students had "accepted" an assignment. In `classroom50-web` — a 100% client-side app over GitHub with no backend — there is no acceptance event to query; acceptance is _implicit_: **a student's repo exists in the org**. Student repos are named by a single shared formula, `studentRepoName(classroom, assignment, owner)` = `<classroom>-<assignment>-<owner>` (lowercased), defined in `src/util/studentRepo.ts` and treated as the single source of truth across three binaries — the web app, the `gh-teacher` Go CLI, and the autograder.
 
 So the dashboard had a list of org repos and a roster, and needed to derive "which roster usernames have a repo for this assignment." The obvious-but-wrong instinct is to read the answer _out of_ the repo names by stripping a known prefix. That instinct inverts the shared formula — and a re-implemented inverse drifts from the forward formula on edge cases the formula's authors never intended it to encode.
 

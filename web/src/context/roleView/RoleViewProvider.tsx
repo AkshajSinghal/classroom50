@@ -10,7 +10,7 @@ import {
 } from "react"
 import type { ViewAsRole } from "@/hooks/useClassroomRole"
 
-// "View as" preview state (#221). A client-side lens letting an instructor/owner
+// "View as" preview state. A client-side lens letting an instructor/owner
 // preview the app as a TA or student. Persisted per org+classroom in
 // sessionStorage and applied DOWNGRADE-ONLY by useClassroomRole.
 //

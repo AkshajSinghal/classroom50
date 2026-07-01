@@ -8,7 +8,7 @@ import { TriangleAlert } from "lucide-react"
 import { RoleViewProvider } from "@/context/roleView/RoleViewProvider"
 
 const RootComponent = () => {
-  // Scope the "view as" preview (#221) to the current org (reset across orgs via
+  // Scope the "view as" preview to the current org (reset across orgs via
   // the key); the provider re-syncs on classroom change so it's classroom-scoped.
   // Reading params at the root keeps the provider inside the router.
   const { org, classroom } = useParams({ strict: false })

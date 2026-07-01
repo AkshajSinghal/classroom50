@@ -32,7 +32,7 @@ const roster = (
   archived = false,
 ): ClassroomRoster => ({ classroom, archived, students })
 
-describe("aggregateOrgMembers (#76)", () => {
+describe("aggregateOrgMembers", () => {
   it("dedupes a student across two rosters into one row listing both classrooms", () => {
     const alice = student({
       username: "alice",

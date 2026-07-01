@@ -11,7 +11,7 @@ export type InviteToOrgResult = {
   invited: boolean
 }
 
-// Invite a roster student who isn't (yet) an org member (#76). Sent by
+// Invite a roster student who isn't (yet) an org member. Sent by
 // invitee_id (the immutable github_id), NOT username — the CSV username can be
 // stale after a rename.
 export async function inviteMemberToOrg(

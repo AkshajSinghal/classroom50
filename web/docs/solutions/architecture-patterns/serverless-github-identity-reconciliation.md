@@ -15,7 +15,7 @@ tags:
   - csv-schema
 applies_when: "Building an onboarding/identity flow with no backend, where state lives entirely in GitHub (repos, org/team membership, a CSV roster) and a privileged actor must bind a self-reported identity to a roster row"
 related_repos:
-  - "foundation50/classroom50-cli (shares the students.csv schema; see issue #195)"
+  - "foundation50/classroom50-cli (shares the students.csv schema)"
 ---
 
 # Serverless GitHub identity reconciliation for classroom onboarding
@@ -127,7 +127,7 @@ unknown columns verbatim but pins a `FullRosterHeader` lockstep across three
 codebases (Go, Python, web). A column rename (e.g. `reconciled_at` ->
 `enrolled_at`) or a status-value rename silently churns column order between the
 tools unless both sides change together. Treat any CSV header/enum change as a
-coordinated cross-repo change (we filed `classroom50-cli#195` and chose a clean
+coordinated cross-repo change (we coordinated the CLI schema change and chose a clean
 break with no back-compat).
 
 ## Why This Matters

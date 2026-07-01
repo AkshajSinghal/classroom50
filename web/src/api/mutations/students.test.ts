@@ -15,7 +15,7 @@ import { GitHubAPIError } from "@/hooks/github/errors"
 import type { GitHubClient } from "@/hooks/github/client"
 import { emailHash } from "@/util/onboarding"
 
-// #65: an already-org-member must land `enrolled` (not stuck "awaiting"), the
+// An already-org-member must land `enrolled` (not stuck "awaiting"), the
 // per-row confirm must refuse a non-member, and an already-member email invite
 // must resolve cross-roster or drop the stub. I/O is stubbed via a path-routing
 // fake client; assertions read the students.csv committed to git/trees.
@@ -110,7 +110,7 @@ const rowsFromCsv = (csv: string) =>
     string
   >[]
 
-describe("enrollStudentInClassroom — already-member writes enrolled directly (#65)", () => {
+describe("enrollStudentInClassroom — already-member writes enrolled directly", () => {
   it("writes enrollment_status 'enrolled' + enrolled_at when the user is already an active org member", async () => {
     const { client, committed } = makeClient({
       startingCsv: HEADER,
@@ -150,7 +150,7 @@ describe("enrollStudentInClassroom — already-member writes enrolled directly (
   })
 })
 
-describe("markStudentEnrolledWithConflictRetry — member-guarded manual confirm (#65)", () => {
+describe("markStudentEnrolledWithConflictRetry — member-guarded manual confirm", () => {
   const invitedRow =
     "alice,Alice,A,alice@x.edu,,42,invited,github,,tok-1,2026-01-01T00:00:00Z,\n"
 
@@ -210,7 +210,7 @@ describe("markStudentEnrolledWithConflictRetry — member-guarded manual confirm
   })
 })
 
-describe("inviteStudentByEmail — already-member email resolution (#65 email path)", () => {
+describe("inviteStudentByEmail — already-member email resolution (email path)", () => {
   const apiError422 = () =>
     new GitHubAPIError({
       status: 422,
@@ -440,7 +440,7 @@ describe("inviteStudentByEmail — already-member email resolution (#65 email pa
   })
 })
 
-describe("updateStudent — edit a roster row's teacher-facing fields in place (#74)", () => {
+describe("updateStudent — edit a roster row's teacher-facing fields in place", () => {
   // alice: enrolled github row (identity by github_id 42); bob: email-only.
   const aliceRow =
     "alice,Alice,A,alice@x.edu,Period 1,42,enrolled,github,oldhash,tok-1,2026-01-01T00:00:00Z,2026-01-02T00:00:00Z\n"
@@ -984,11 +984,11 @@ describe("updateStudent — edit a roster row's teacher-facing fields in place (
   })
 })
 
-// #76: unenroll is classroom-scoped — it never removes an ACTIVE org member
+// Unenroll is classroom-scoped — it never removes an ACTIVE org member
 // (that would leave other rosters showing them enrolled while non-member of the
 // org). A pending invite is still cancelled. The fake tracks org-membership
 // DELETEs and the committed roster so we can assert both.
-describe("unenrollStudent — classroom-scoped, no active-member org removal (#76)", () => {
+describe("unenrollStudent — classroom-scoped, no active-member org removal", () => {
   const aliceEnrolled =
     "alice,Alice,A,alice@x.edu,,42,enrolled,github,,tok-1,2026-01-01T00:00:00Z,2026-01-02T00:00:00Z\n"
   const bobInvited =

@@ -1866,7 +1866,7 @@ export async function validateServiceToken(
 
 export const COLLECT_SCORES_WORKFLOW = "collect-scores.yaml"
 
-// The regrade fan-out workflow in <org>/classroom50 (classroom50-cli#208).
+// The regrade fan-out workflow in <org>/classroom50.
 // Dispatched per assignment (optionally per repo owner); it re-runs each
 // student repo's autograde workflow. Grading then happens asynchronously inside
 // the student repos, so a follow-up collect-scores run refreshes the gradebook.
@@ -1922,8 +1922,8 @@ export async function triggerScoreCollection(
 }
 
 /**
- * Dispatches the classroom50 repo's `regrade.yaml` workflow (classroom50-cli
- * #208) to re-run the autograder for an assignment — the whole assignment, or
+ * Dispatches the classroom50 repo's `regrade.yaml` workflow
+ * to re-run the autograder for an assignment — the whole assignment, or
  * a single student when `owner` is supplied. Each targeted repo re-grades its
  * current `main` HEAD; grading runs asynchronously, so the gradebook is
  * refreshed by a subsequent collect-scores run.
@@ -2180,10 +2180,10 @@ type OrgWorkflowPermissions = {
   can_approve_pull_request_reviews: boolean
 }
 
-// The opt-in Feedback PR (issue #86), opened by each student repo's autograde
+// The opt-in Feedback PR, opened by each student repo's autograde
 // workflow, is rejected unless the org-level "Allow GitHub Actions to create
 // and approve pull requests" toggle is on (defaults off, settable only at the
-// org level; see discussion #33). Preserves default_workflow_permissions.
+// org level). Preserves default_workflow_permissions.
 export async function ensureOrgCanCreatePullRequests(
   client: GitHubClient,
   org: string,

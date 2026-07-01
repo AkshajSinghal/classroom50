@@ -5,7 +5,7 @@ import type { Student } from "@/types/classroom"
 const student = (username: string, section?: string): Student =>
   ({ username, section }) as Student
 
-describe("groupStudentsBySection (#218)", () => {
+describe("groupStudentsBySection", () => {
   it("groups by trimmed section name", () => {
     const groups = groupStudentsBySection([
       student("a", "Period 1"),

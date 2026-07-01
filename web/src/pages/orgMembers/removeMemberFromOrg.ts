@@ -34,7 +34,7 @@ const rowToStudent = (row: OrgMemberRow): Student => ({
   enrollment_status: "enrolled",
 })
 
-// Remove a student from the org without leaving any roster inconsistent (#76):
+// Remove a student from the org without leaving any roster inconsistent:
 // unenroll from every classroom FIRST, then remove org membership LAST, so a
 // partial failure never strips membership while rosters still list the student.
 // Per-classroom failures are non-fatal warnings.

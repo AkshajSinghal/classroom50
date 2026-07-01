@@ -40,7 +40,7 @@ and **round-trips** it on `gh teacher assignment add` (decode -> mutate -> re-se
 the whole file). An unknown or `null` key doesn't get ignored — it fails the read
 outright with `json: unknown field "…"`.
 
-The "Reuse assignment" feature (#60) copies a single assignment record from one
+The "Reuse assignment" feature copies a single assignment record from one
 classroom into another in-org classroom. That makes it a pure data-copy across the
 same strict, round-tripped contract: we take an existing normalized `Assignment`
 object, change only its `slug`/`name`, and write it into the target's

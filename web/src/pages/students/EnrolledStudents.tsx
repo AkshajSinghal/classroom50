@@ -56,7 +56,7 @@ import { collapseVariants, enterExit } from "@/lib/motion"
 import { EnterDiv } from "@/lib/motionComponents"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 
-// #218: group students by roster `section`, sorted by name with the unlabeled
+// Group students by roster `section`, sorted by name with the unlabeled
 // ("No section") bucket last. Section labels are trimmed; blank/absent folds
 // into the unlabeled bucket.
 const NO_SECTION = "No section"
@@ -731,7 +731,7 @@ const EnrolledStudents = ({
   const [resendingUsernames, setResendingUsernames] = useState<Set<string>>(
     new Set(),
   )
-  // #218: optional "group by section" view. Off by default; only meaningful when
+  // Optional "group by section" view. Off by default; only meaningful when
   // the roster carries sections.
   const [groupBySection, setGroupBySection] = useState(false)
 
@@ -757,7 +757,7 @@ const EnrolledStudents = ({
     partition: { readyToConfirm, awaitingEnrollment, enrolled },
   } = useRosterStatus(org, classroom, students)
 
-  // #218: does the roster carry any section labels? (gates the toggle)
+  // Does the roster carry any section labels? (gates the toggle)
   const hasSections = useMemo(
     () => students.some((s) => s.section?.trim()),
     [students],
@@ -878,7 +878,7 @@ const EnrolledStudents = ({
   })
 
   // Per-row confirm for an already-member with no onboarding repo (reconcile
-  // can't confirm those); the mutation re-verifies membership server-side (#65).
+  // can't confirm those); the mutation re-verifies membership server-side.
   const runMarkEnrolled = useSafeSubmit()
   const [markingUsernames, setMarkingUsernames] = useState<Set<string>>(
     new Set(),

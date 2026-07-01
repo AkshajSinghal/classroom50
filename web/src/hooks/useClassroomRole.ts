@@ -108,7 +108,7 @@ export function isInstructorRole(role: EffectiveRole): boolean {
   return role === "owner" || role === "instructor" || role === "unresolved"
 }
 
-// The roles an instructor/owner can preview the app AS (#221). A client-side
+// The roles an instructor/owner can preview the app AS. A client-side
 // lens for verifying what each role sees — never escalates.
 export type ViewAsRole = "ta" | "student"
 
@@ -208,7 +208,7 @@ export function teamMembershipQuery(
 
 // Resolve the viewer's effective role for an org/classroom from live queries:
 // org membership (owner), the classroom50 repo read (staff gate), and
-// instructor/ta team membership. Applies the "view as" preview (#221) as a
+// instructor/ta team membership. Applies the "view as" preview as a
 // downgrade-only lens: `role` reflects the preview, `actualRole` is the real one.
 export function useClassroomRole(
   org: string | undefined,

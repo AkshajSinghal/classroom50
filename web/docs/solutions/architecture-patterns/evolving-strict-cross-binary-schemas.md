@@ -20,7 +20,7 @@ applies_when:
   - "You can advance one writer ahead of the readers and coordinate the rest via tracked issues instead of a flag day"
   - "A new field is opt-in/off-by-default so it is only emitted when a user enables it"
 related_repos:
-  - "foundation50/classroom50-cli (gh-teacher: strict parser to relax in classroom50-cli#199 and #200; gh-student already tolerates unknown fields)"
+  - "foundation50/classroom50-cli (gh-teacher: strict parser to relax; gh-student already tolerates unknown fields)"
 related_docs:
   - "docs/solutions/architecture-patterns/serverless-github-identity-reconciliation.md (cross-binary data contract over GitHub)"
   - "docs/solutions/architecture-patterns/forward-only-cross-binary-repo-name-contract.md (forward-construct shared names; same cross-binary contract family)"
@@ -103,9 +103,9 @@ contract, not a novelty — the new field has precedent to point at.
 The web app is the leading client here and the feature is genuinely web-first
 (it drives the gradebook UI). Ship the write from the web app — but only the
 **conditional, omitempty** write (see §5) — and coordinate the CLI with tracked
-issues rather than holding the feature hostage to a lockstep release: we filed
-`#199` (model the field in the CLI struct) and `#200` (the general
-forward-compatible-parsing fix). Web-first is safe _because_ the write is
+issues rather than holding the feature hostage to a lockstep release: one issue
+to model the field in the CLI struct, and one for the general
+forward-compatible-parsing fix. Web-first is safe _because_ the write is
 conditional and rare; if it were written eagerly on every save, web-first would
 be reckless.
 
@@ -133,7 +133,7 @@ Forward-compatible parsing on a round-tripping tool must therefore also
   capturing everything unrecognized, then merge the sidecar back in on
   serialize; or
 - Land the field directly in the typed struct (so the round-trip carries it
-  naturally) — which is `#199` and the simplest fix for a _known_ field.
+  naturally) — the simplest fix for a _known_ field.
 
 Tolerate-on-read handles fields the CLI never expects; preserve-on-write is what
 keeps a round-trip from dropping them.
