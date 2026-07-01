@@ -116,7 +116,7 @@ const OrgSteps = ({
             </div>
             <div>
               <h2 className="text-xl font-bold">You're all set!</h2>
-              <p className="mx-auto mt-1 max-w-md text-sm text-base-content/60">
+              <p className="mx-auto mt-1 max-w-md text-sm text-base-content/70">
                 Your organization is ready to use Classroom 50. Head to your
                 organization to create your first classroom and assignments.
               </p>

@@ -21,7 +21,7 @@ export const GitHubLink = ({
     target="_blank"
     rel="noreferrer"
     title={title}
-    className={`inline-flex cursor-pointer items-center gap-1.5 text-sm text-base-content/50 hover:text-primary ${className}`}
+    className={`inline-flex cursor-pointer items-center gap-1.5 text-sm text-base-content/70 hover:text-primary ${className}`}
   >
     {showLogo && <GitHub className="size-4" />}
     {label}

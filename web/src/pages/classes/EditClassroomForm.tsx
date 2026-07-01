@@ -383,7 +383,7 @@ const EditClassroomForm = ({ onSubmit, cl }: EditClassroomFormProps) => {
                 <label htmlFor={field.name} className="label font-bold">
                   Onboarding repo cleanup
                 </label>
-                <p className="text-sm text-base-content/60 mb-2">
+                <p className="text-sm text-base-content/70 mb-2">
                   What to do with a student&apos;s onboarding repository once
                   their GitHub identity is reconciled into the roster.
                 </p>

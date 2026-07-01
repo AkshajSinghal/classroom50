@@ -71,7 +71,7 @@ const ClassCard = ({
         <Link
           to="/$org/$classroom/edit"
           params={{ org, classroom: cl.name }}
-          className="btn btn-ghost btn-sm btn-circle absolute right-3 top-3 z-10 text-base-content/50 hover:text-primary"
+          className="btn btn-ghost btn-sm btn-circle absolute right-3 top-3 z-10 text-base-content/70 hover:text-primary"
           aria-label={`Edit ${cl.name}`}
           title="Edit assignment"
         >
@@ -216,7 +216,7 @@ const RepoCard = ({ org, repo }: { org: string; repo: GitHubRepo }) => {
         <Link
           to="/$org/$classroom/assignments/$assignment/edit"
           params={{ org, classroom, assignment }}
-          className="btn btn-ghost btn-sm btn-circle absolute right-3 top-3 z-10 text-base-content/50 hover:text-primary"
+          className="btn btn-ghost btn-sm btn-circle absolute right-3 top-3 z-10 text-base-content/70 hover:text-primary"
           aria-label={`Manage group for ${assignment}`}
           title="Manage group"
         >
@@ -236,7 +236,7 @@ const RepoCard = ({ org, repo }: { org: string; repo: GitHubRepo }) => {
                 <h3 className="truncate text-base font-semibold leading-tight">
                   {repo.name}
                 </h3>
-                <p className="truncate text-xs text-base-content/50">
+                <p className="truncate text-xs text-base-content/70">
                   {repo.owner?.login}
                 </p>
               </div>
@@ -255,7 +255,7 @@ const RepoCard = ({ org, repo }: { org: string; repo: GitHubRepo }) => {
               <Link
                 to="/$org/$classroom"
                 params={{ org, classroom }}
-                className="max-w-full truncate group inline-flex w-fit gap-1.5 text-sm text-base-content/60 transition hover:text-primary"
+                className="max-w-full truncate group inline-flex w-fit gap-1.5 text-sm text-base-content/70 transition hover:text-primary"
               >
                 <GraduationCap className="size-4" />
                 <span className="truncate">
@@ -271,7 +271,7 @@ const RepoCard = ({ org, repo }: { org: string; repo: GitHubRepo }) => {
               <Link
                 to="/$org/$classroom/assignments/$assignment"
                 params={{ org, classroom, assignment }}
-                className="max-w-full truncate group inline-flex w-fit gap-1.5 text-sm text-base-content/60 transition hover:text-primary"
+                className="max-w-full truncate group inline-flex w-fit gap-1.5 text-sm text-base-content/70 transition hover:text-primary"
               >
                 <BookOpen className="size-4" />
                 <span className="truncate">
@@ -336,12 +336,12 @@ export const OrgRepos = ({
     return (
       <div className="rounded-2xl border border-dashed border-base-300 bg-base-100 p-8 text-center">
         <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-base-200">
-          <BookOpen className="size-6 text-base-content/60" />
+          <BookOpen className="size-6 text-base-content/70" />
         </div>
 
         <h2 className="text-lg font-semibold">No assignment repos yet</h2>
 
-        <p className="mx-auto mt-1 max-w-md text-sm text-base-content/60">
+        <p className="mx-auto mt-1 max-w-md text-sm text-base-content/70">
           Repositories you can maintain will appear here once assignments have
           been created for this organization.
         </p>
@@ -392,7 +392,7 @@ const ClassesPage = () => {
                   <GitHub className="size-5 opacity-70" />
 
                   <div>
-                    <div className="text-xs font-medium uppercase tracking-wide text-base-content/50">
+                    <div className="text-xs font-medium uppercase tracking-wide text-base-content/70">
                       GitHub Organization
                     </div>
                     <div className="font-mono text-sm font-semibold text-base-content">
@@ -409,7 +409,7 @@ const ClassesPage = () => {
                       My {isTeacher ? "Classes" : "Assignments"}
                     </h1>
                   )}
-                  <p className="mt-2 max-w-2xl text-sm text-base-content/60">
+                  <p className="mt-2 max-w-2xl text-sm text-base-content/70">
                     Manage your courses and assignments.
                   </p>
                 </div>

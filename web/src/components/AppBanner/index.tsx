@@ -10,11 +10,11 @@ export type AppBannerTone = "error" | "warning"
 // contents align with the page below via the inner max-w container.
 const TONE_CLASS: Record<AppBannerTone, { bar: string; icon: string }> = {
   error: {
-    bar: "border-error/20 bg-error/10 text-error-content",
+    bar: "border-error/20 bg-error/10 text-base-content",
     icon: "text-error",
   },
   warning: {
-    bar: "border-warning/25 bg-warning/10 text-warning-content",
+    bar: "border-warning/25 bg-warning/10 text-base-content",
     icon: "text-warning",
   },
 }

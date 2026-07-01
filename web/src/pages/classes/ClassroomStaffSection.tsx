@@ -55,7 +55,7 @@ const ClassroomStaffSection = ({
             className="shrink-0"
           />
         </div>
-        <p className="text-sm text-base-content/60 pb-4">
+        <p className="text-sm text-base-content/70 pb-4">
           Instructors and TAs get write access to this organization&apos;s
           Classroom 50 configuration. TAs see the same classroom content as
           instructors, but organization and classroom settings stay
@@ -250,11 +250,11 @@ const StaffRoleList = ({
         <span className="badge badge-sm badge-ghost">{members.length}</span>
       </div>
       {membersQuery.isLoading ? (
-        <div className="flex items-center gap-2 text-sm text-base-content/60">
+        <div className="flex items-center gap-2 text-sm text-base-content/70">
           <Loader2 className="size-4 animate-spin" /> Loading…
         </div>
       ) : members.length === 0 ? (
-        <p className="text-sm text-base-content/50">
+        <p className="text-sm text-base-content/70">
           No {ROLE_LABEL[role].toLowerCase()}s yet.
         </p>
       ) : (

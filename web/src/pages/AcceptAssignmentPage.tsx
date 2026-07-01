@@ -83,7 +83,7 @@ const UserInfo = ({ user }: { user: GitHubUser | null }) => {
       <div className="min-w-0 flex-1">
         <div className="font-medium text-base-content">{displayName}</div>
 
-        <div className="flex items-center gap-1 text-sm text-base-content/60">
+        <div className="flex items-center gap-1 text-sm text-base-content/70">
           <GitHub className="size-4" />
           <span>{username ?? "Checking GitHub user..."}</span>
         </div>
@@ -219,7 +219,7 @@ const NotOrgMember = ({
                   class roster before you can accept this assignment.
                 </p>
 
-                <p className="mt-3 text-xs leading-5 text-base-content/60">
+                <p className="mt-3 text-xs leading-5 text-base-content/70">
                   After accepting the GitHub organization invite, return to this
                   page and try again.
                 </p>
@@ -297,7 +297,7 @@ const StepRow = ({
       <span
         className={
           state.status === "pending"
-            ? "text-base-content/40"
+            ? "text-base-content/70"
             : state.status === "error"
               ? "text-error"
               : "text-base-content/80"
@@ -350,7 +350,7 @@ const AcceptProgress = ({ steps }: { steps: StepState }) => {
           <span className="font-medium">{summary}</span>
         </span>
 
-        <span className="flex items-center gap-2 text-sm text-base-content/60">
+        <span className="flex items-center gap-2 text-sm text-base-content/70">
           <span>
             {completed}/{ACCEPT_STEP_ORDER.length}
           </span>

@@ -145,7 +145,7 @@ function StatusBadge({ url }: { url: string }) {
     return (
       <span
         ref={ref}
-        className="inline-flex items-center gap-1 text-xs text-base-content/50"
+        className="inline-flex items-center gap-1 text-xs text-base-content/70"
       >
         <Loader2 className="size-3.5 animate-spin" />
         Checking
@@ -201,10 +201,10 @@ function ResourceRow({ resource }: { resource: Resource }) {
             <span className="badge badge-ghost badge-sm">Optional</span>
           )}
         </div>
-        <p className="mt-1 text-sm text-base-content/60">
+        <p className="mt-1 text-sm text-base-content/70">
           {resource.description}
         </p>
-        <code className="mt-2 block truncate text-xs text-base-content/50">
+        <code className="mt-2 block truncate text-xs text-base-content/70">
           {resource.url}
         </code>
       </div>
@@ -322,14 +322,14 @@ function ClassroomResources({
               <span className="badge badge-ghost badge-sm">Public path</span>
             )}
           </div>
-          <p className="text-xs text-base-content/50">
+          <p className="text-xs text-base-content/70">
             {resources.length} published resource
             {resources.length === 1 ? "" : "s"}
             {secret ? " · served at an unlisted URL" : ""}
           </p>
         </div>
         <ChevronDown
-          className={`size-5 shrink-0 text-base-content/40 transition-transform ${
+          className={`size-5 shrink-0 text-base-content/70 transition-transform ${
             open ? "rotate-180" : ""
           }`}
         />
@@ -412,10 +412,10 @@ export const PublishedResourcesPane = ({ org }: { org: string }) => {
 
       <section>
         <div className="flex items-center gap-2">
-          <Globe className="size-5 text-base-content/60" />
+          <Globe className="size-5 text-base-content/70" />
           <h2 className="text-lg font-bold">Organization-level</h2>
         </div>
-        <p className="mt-1 text-sm text-base-content/60">
+        <p className="mt-1 text-sm text-base-content/70">
           Served at the root of <code className="text-xs">{base}/</code>.
         </p>
         <div className="mt-4 flex flex-col gap-3">
@@ -427,14 +427,14 @@ export const PublishedResourcesPane = ({ org }: { org: string }) => {
 
       <section>
         <div className="flex items-center gap-2">
-          <ShieldAlert className="size-5 text-base-content/60" />
+          <ShieldAlert className="size-5 text-base-content/70" />
           <h2 className="text-lg font-bold">Per-classroom</h2>
         </div>
-        <p className="mt-1 text-sm text-base-content/60">
+        <p className="mt-1 text-sm text-base-content/70">
           Assignment manifests and autograders for each classroom.
         </p>
         {classes.length === 0 ? (
-          <div className="mt-4 rounded-xl border border-dashed border-base-300 bg-base-100 p-6 text-center text-sm text-base-content/60">
+          <div className="mt-4 rounded-xl border border-dashed border-base-300 bg-base-100 p-6 text-center text-sm text-base-content/70">
             No classrooms yet. Once you create one and it publishes, its
             resources will appear here.
           </div>
@@ -468,7 +468,7 @@ const PublishedResourcesPage = () => {
               <h1 className="text-2xl font-bold tracking-tight">
                 Published resources
               </h1>
-              <p className="mt-1 text-sm text-base-content/60">
+              <p className="mt-1 text-sm text-base-content/70">
                 Everything publicly served from{" "}
                 <span className="font-mono font-semibold">{org}</span>’s GitHub
                 Pages site.

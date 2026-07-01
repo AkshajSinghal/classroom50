@@ -242,9 +242,9 @@ export const InitStep = ({
       >
         <div className="flex min-w-0 items-start gap-2">
           {open ? (
-            <ChevronDown className="mt-0.5 size-4 shrink-0 text-base-content/40" />
+            <ChevronDown className="mt-0.5 size-4 shrink-0 text-base-content/70" />
           ) : (
-            <ChevronRight className="mt-0.5 size-4 shrink-0 text-base-content/40" />
+            <ChevronRight className="mt-0.5 size-4 shrink-0 text-base-content/70" />
           )}
           <div className="min-w-0">
             <div className="font-semibold">{title}</div>
@@ -261,7 +261,7 @@ export const InitStep = ({
       {open && (
         <div className="border-t border-base-200 px-4 pb-4 pt-3 pl-10 text-sm">
           <p className="text-base-content/70">{meta.what}</p>
-          <p className="mt-1 text-base-content/60">
+          <p className="mt-1 text-base-content/70">
             <span className="font-medium text-base-content/70">Why: </span>
             {meta.why}
           </p>
@@ -283,7 +283,7 @@ export const InitStep = ({
                   href={settingsUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="mt-2 inline-flex items-center gap-1 text-base-content/60 hover:text-primary"
+                  className="mt-2 inline-flex items-center gap-1 text-base-content/70 hover:text-primary"
                 >
                   Open the relevant GitHub settings
                   <ExternalLink className="size-3.5" />

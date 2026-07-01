@@ -207,7 +207,7 @@ const AssignmentsTable = ({
                   <div className="font-bold link link-info no-underline">
                     {assignment.name}
                   </div>
-                  <div className="font-mono text-xs text-base-content/40">
+                  <div className="font-mono text-xs text-base-content/70">
                     {assignment.slug}
                   </div>
                 </td>

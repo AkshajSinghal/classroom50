@@ -101,7 +101,7 @@ const EditClassroomContent = ({
               <h1 className="text-xl pt-8 pb-2 font-bold">
                 Classroom Settings
               </h1>
-              <p className="pb-10 text-sm text-base-content/60">
+              <p className="pb-10 text-sm text-base-content/70">
                 Configuration for the{" "}
                 <span className="font-semibold">
                   {cl.name || cl.short_name || classroom}

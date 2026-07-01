@@ -111,7 +111,7 @@ const HistoryLink = ({
       {label}
     </a>
   ) : (
-    <span className="inline-flex items-center gap-1 text-base-content/40">
+    <span className="inline-flex items-center gap-1 text-base-content/70">
       <Icon className="size-3.5" />
       {label}
     </span>
@@ -415,7 +415,7 @@ const SubmissionHistory = ({
         key={`${s.datetime}-${s.commit}`}
         className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-box border border-base-content/5 bg-base-100 px-3 py-2 text-sm"
       >
-        <span className="text-base-content/50 w-6 shrink-0">
+        <span className="text-base-content/70 w-6 shrink-0">
           #{submissions.length - i}
         </span>
         <span className="w-44 shrink-0">{formatDateTime(s.datetime)}</span>
@@ -433,7 +433,7 @@ const SubmissionHistory = ({
           </span>
         ) : null}
         {isGroup && s.submittedBy ? (
-          <span className="text-base-content/60">
+          <span className="text-base-content/70">
             by {getName(s.submittedBy, students) || s.submittedBy}
           </span>
         ) : null}
@@ -451,7 +451,7 @@ const SubmissionHistory = ({
         </span>
       </li>
     ))}
-    <li className="text-xs text-base-content/50">
+    <li className="text-xs text-base-content/70">
       Open the{" "}
       <a className="link" href={repoHref} target="_blank" rel="noreferrer">
         repository
@@ -536,7 +536,7 @@ const SubmissionsTable = ({
           <tbody>
             {!scores?.length && !nonSubmitters.length && (
               <tr>
-                <td colSpan={5} className="text-center text-base-content/60">
+                <td colSpan={5} className="text-center text-base-content/70">
                   No submissions match the current filters.
                 </td>
               </tr>
@@ -630,7 +630,7 @@ const SubmissionsTable = ({
                           </div>
                           {rest.gradedAt && rest.gradedAt !== datetime ? (
                             <span
-                              className="whitespace-nowrap text-xs text-base-content/50"
+                              className="whitespace-nowrap text-xs text-base-content/70"
                               title="When the autograder last (re-)graded this submission. Regrading updates this without changing the submission time."
                             >
                               Graded {formatDateTime(rest.gradedAt)}

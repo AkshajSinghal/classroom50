@@ -224,7 +224,7 @@ const UploadRoster = ({
             <HardDriveUpload />
             Choose File
           </button>
-          <p className="text-center text-base-content/50 text-sm">
+          <p className="text-center text-base-content/70 text-sm">
             Supported: .csv, .txt
           </p>
         </div>

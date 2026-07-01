@@ -176,7 +176,7 @@ const EditStudent = ({
     >
       <div className="modal-box max-w-lg">
         <h3 className="text-lg font-bold">Edit student</h3>
-        <p className="mt-1 text-sm text-base-content/60">
+        <p className="mt-1 text-sm text-base-content/70">
           Editing{" "}
           <span className="font-semibold text-base-content">
             {displayHandle ? `@${displayHandle}` : "this student"}
@@ -195,7 +195,7 @@ const EditStudent = ({
             <form.Field name="first_name">
               {(field) => (
                 <div className="flex items-center">
-                  <UserRound className="mr-2 text-base-content/40" />
+                  <UserRound className="mr-2 text-base-content/70" />
                   <input
                     id={field.name}
                     name={field.name}
@@ -213,7 +213,7 @@ const EditStudent = ({
             <form.Field name="last_name">
               {(field) => (
                 <div className="flex items-center">
-                  <UserRound className="mr-2 text-base-content/40" />
+                  <UserRound className="mr-2 text-base-content/70" />
                   <input
                     id={field.name}
                     name={field.name}
@@ -247,7 +247,7 @@ const EditStudent = ({
                 return (
                   <div>
                     <div className="flex items-center">
-                      <Mail className="size-6 mr-2 text-base-content/40" />
+                      <Mail className="size-6 mr-2 text-base-content/70" />
                       <input
                         id={field.name}
                         name={field.name}
@@ -272,7 +272,7 @@ const EditStudent = ({
                       </p>
                     )}
                     {emailHelp ? (
-                      <p className="mt-1 text-xs text-base-content/60">
+                      <p className="mt-1 text-xs text-base-content/70">
                         {emailHelp}
                       </p>
                     ) : null}
@@ -284,7 +284,7 @@ const EditStudent = ({
             <form.Field name="section">
               {(field) => (
                 <div className="flex items-center">
-                  <Users className="mr-2 text-base-content/40" />
+                  <Users className="mr-2 text-base-content/70" />
                   <input
                     id={field.name}
                     name={field.name}
@@ -300,7 +300,7 @@ const EditStudent = ({
             </form.Field>
 
             {student.username ? (
-              <div className="flex items-center gap-2 rounded-box border border-base-300 bg-base-200/50 px-3 py-2 text-sm text-base-content/60">
+              <div className="flex items-center gap-2 rounded-box border border-base-300 bg-base-200/50 px-3 py-2 text-sm text-base-content/70">
                 <GitHub className="size-5 opacity-40" />
                 <span>
                   GitHub: <span className="font-mono">@{student.username}</span>

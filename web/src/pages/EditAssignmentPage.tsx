@@ -109,7 +109,7 @@ const EditAssignmentFormStudent = ({
 
             <div>
               <h1 className="card-title text-xl">{assignmentData?.name}</h1>
-              <p className="text-sm font-medium text-base-content/60">
+              <p className="text-sm font-medium text-base-content/70">
                 Group members
               </p>
               <a

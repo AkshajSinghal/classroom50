@@ -59,7 +59,7 @@ export const StudentProfileModal = ({
           <GitHub className="size-4" />@{student.username}
         </a>
       ) : (
-        <span className="text-base-content/50">Not linked yet</span>
+        <span className="text-base-content/70">Not linked yet</span>
       ),
     },
     { label: "Email", value: student.email || "—" },
@@ -101,7 +101,7 @@ export const StudentProfileModal = ({
               key={row.label}
               className="flex items-center justify-between gap-4 py-2.5 text-sm"
             >
-              <dt className="text-base-content/50">{row.label}</dt>
+              <dt className="text-base-content/70">{row.label}</dt>
               <dd className="min-w-0 truncate text-right font-medium">
                 {row.value}
               </dd>

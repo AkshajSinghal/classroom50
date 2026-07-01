@@ -15,12 +15,12 @@ const NotFound = ({
 }) => {
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 p-10 text-center">
-      <div className="flex size-16 items-center justify-center rounded-2xl bg-base-200 text-base-content/50">
+      <div className="flex size-16 items-center justify-center rounded-2xl bg-base-200 text-base-content/70">
         <FileQuestion className="size-8" />
       </div>
       <div>
         <h1 className="text-2xl font-bold">{title}</h1>
-        <p className="mt-1 max-w-md text-base-content/60">{message}</p>
+        <p className="mt-1 max-w-md text-base-content/70">{message}</p>
       </div>
       <Link to="/" className="btn btn-primary btn-sm">
         Go to dashboard

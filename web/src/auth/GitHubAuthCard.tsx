@@ -7,7 +7,7 @@ import { GitHubDevicePrompt } from "./GitHubDevicePrompt"
 
 function LoadingScreen({ label }: { label: string }) {
   return (
-    <div className="flex flex-col items-center gap-4 py-10 text-center text-base-content/60">
+    <div className="flex flex-col items-center gap-4 py-10 text-center text-base-content/70">
       <span className="loading loading-spinner loading-lg" />
       <p className="text-sm">{label}</p>
     </div>
@@ -26,7 +26,7 @@ export function GitHubAuthCard() {
           </div>
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Classroom 50</h1>
-            <p className="mt-1 text-sm text-base-content/60">
+            <p className="mt-1 text-sm text-base-content/70">
               Sign in with your GitHub account to continue.
             </p>
           </div>
@@ -52,7 +52,7 @@ export function GitHubAuthCard() {
                 <h2 className="text-xl font-bold tracking-tight">
                   Authentication successful
                 </h2>
-                <p className="mt-2 text-sm text-base-content/60">
+                <p className="mt-2 text-sm text-base-content/70">
                   Redirecting you to the app...
                 </p>
               </div>
@@ -110,7 +110,7 @@ export function GitHubAuthCard() {
           )}
         </div>
 
-        <footer className="flex items-center justify-between border-t border-base-200 px-7 py-4 text-xs text-base-content/50">
+        <footer className="flex items-center justify-between border-t border-base-200 px-7 py-4 text-xs text-base-content/70">
           <span>Manage assignments and submissions via GitHub.</span>
           <a
             className="link link-info link-hover shrink-0"
