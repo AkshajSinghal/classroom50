@@ -208,6 +208,21 @@ func addClassroom(client githubapi.Client, out, errOut io.Writer, org, shortName
 		return err
 	}
 
+	// Preflight the existence check BEFORE any GitHub side effects
+	// (team creation, config-repo grants, maintainer membership). The
+	// authoritative race guard still runs inside the build callback
+	// against the rebased parent, but doing a cheap up-front probe means
+	// the common "already exists" case fails fast with zero orphaned
+	// teams/grants — closing the window where a refused add would still
+	// have created write-granted staff teams no classroom.json records.
+	if exists, err := configrepo.ContentsExists(client, org, configrepo.ConfigRepoName, shortName, branch); err != nil {
+		return err
+	} else if exists {
+		return fmt.Errorf("classroom %q already exists in %s/%s — refusing to overwrite (inspect or edit at https://github.com/%s/%s/tree/%s/%s)",
+			shortName, org, configrepo.ConfigRepoName,
+			org, configrepo.ConfigRepoName, branch, shortName)
+	}
+
 	// Create (or adopt) the per-classroom GitHub team before scaffolding
 	// so its id/slug can be recorded in classroom.json. The team is what
 	// later lets rostered students read private, org-owned assignment
@@ -217,7 +232,16 @@ func addClassroom(client githubapi.Client, out, errOut io.Writer, org, shortName
 		return fmt.Errorf("create classroom team: %w", err)
 	}
 
-	files, err := classroomScaffold(org, shortName, name, term, secret, nil, nil, &team)
+	// Create (or adopt) the per-classroom staff teams (instructor, ta),
+	// grant each write on the config repo, and seed the acting teacher as
+	// instructor maintainer, mirroring the web GUI so a CLI-created
+	// classroom carries the same role teams the web expects.
+	staffTeams, err := seedStaffTeams(client, errOut, org, shortName)
+	if err != nil {
+		return err
+	}
+
+	files, err := classroomScaffold(org, shortName, name, term, secret, nil, nil, &team, staffTeams)
 	if err != nil {
 		return err
 	}
@@ -247,12 +271,46 @@ func addClassroom(client githubapi.Client, out, errOut io.Writer, org, shortName
 	// "View at" + "Next:" hints.
 	_, _ = fmt.Fprintf(out, "%s/%s: added classroom %s (%d files)\n", org, configrepo.ConfigRepoName, shortName, len(files))
 	_, _ = fmt.Fprintf(out, "%s: classroom team %s ready\n", org, team.Slug)
+	if staffTeams != nil && staffTeams.Instructor != nil && staffTeams.TA != nil {
+		_, _ = fmt.Fprintf(out, "%s: staff teams %s, %s ready\n", org, staffTeams.Instructor.Slug, staffTeams.TA.Slug)
+	}
 	if secret != "" {
 		_, _ = fmt.Fprintf(out, "%s: resources published at an unlisted URL (key %q); share the accept link/command from the assignment page\n", org, secret)
 	}
 	_, _ = fmt.Fprintf(errOut, "View at https://github.com/%s/%s/tree/%s/%s\n", org, configrepo.ConfigRepoName, branch, shortName)
 	_, _ = fmt.Fprintf(errOut, "Next: gh teacher roster add %s %s <username>\n", org, shortName)
 	return nil
+}
+
+// seedStaffTeams creates (or adopts) the classroom's instructor + ta
+// teams, grants each write on the config repo, and adds the acting
+// teacher as instructor maintainer — the create-time staff-team setup
+// shared by `classroom add` and `classroom migrate` (mirrors the web's
+// single ensureStaffTeams). The maintainer add is best-effort: a
+// CurrentUser or membership failure warns to errOut but does not fail
+// the classroom creation, since the teacher can self-add via the web.
+func seedStaffTeams(client githubapi.Client, errOut io.Writer, org, shortName string) (*configrepo.StaffTeamsRef, error) {
+	staffTeams, err := configrepo.EnsureStaffTeams(client, org, shortName)
+	if err != nil {
+		return nil, fmt.Errorf("create staff teams: %w", err)
+	}
+	if staffTeams.Instructor == nil {
+		return staffTeams, nil
+	}
+	login, _, uerr := githubapi.CurrentUser(client)
+	if uerr != nil || login == "" {
+		// Surface the skip so a silent CurrentUser failure isn't
+		// invisible — the teacher isn't seeded and should know to
+		// self-add.
+		_, _ = fmt.Fprintf(errOut, "Warning: created the instructor team but couldn't resolve your GitHub login to add you (%v); add yourself at https://github.com/orgs/%s/teams/%s.\n",
+			uerr, org, staffTeams.Instructor.Slug)
+		return staffTeams, nil
+	}
+	if merr := configrepo.AddTeamMembershipWithRole(client, org, staffTeams.Instructor.Slug, login, configrepo.TeamMaintainer); merr != nil {
+		_, _ = fmt.Fprintf(errOut, "Warning: created the instructor team but couldn't add you (%s) to it (%v); add yourself at https://github.com/orgs/%s/teams/%s.\n",
+			login, merr, org, staffTeams.Instructor.Slug)
+	}
+	return staffTeams, nil
 }
 
 // classroomSummary is the per-classroom view emitted by
@@ -680,17 +738,26 @@ func removeClassroom(client githubapi.Client, in io.Reader, out, errOut io.Write
 		}
 	}
 
-	// Resolve the team ref BEFORE the commit deletes classroom.json.
+	// Resolve the team refs BEFORE the commit deletes classroom.json.
 	// deleteClassroomTeam deletes by the persisted (authoritative) slug
 	// and verifies the id matches, so a re-slugged team is still removed
 	// and an unrelated team that merely occupies the slug is never
 	// touched. A classroom with no team block yields an empty ref
-	// (no-op delete).
+	// (no-op delete). The staff teams (instructor, ta) are swept the same
+	// way, mirroring the web's classroom-delete team sweep.
 	var team configrepo.TeamRef
 	if t, ok, terr := configrepo.ResolveClassroomTeam(client, org, shortName, branch); terr != nil {
 		return terr
 	} else if ok {
 		team = t
+	}
+	var staffTeams []configrepo.TeamRef
+	for _, role := range configrepo.StaffRoles {
+		if t, ok, terr := configrepo.ResolveClassroomStaffTeam(client, org, shortName, branch, role); terr != nil {
+			return terr
+		} else if ok {
+			staffTeams = append(staffTeams, t)
+		}
 	}
 
 	var deleted int
@@ -726,6 +793,17 @@ func removeClassroom(client githubapi.Client, in io.Reader, out, errOut io.Write
 		}
 		_, _ = fmt.Fprintf(out, "%s: deleted classroom team %s\n", org, team.Slug)
 	}
+	// Sweep the staff teams too (idempotent; 404 = already gone). A
+	// failure on one is surfaced but doesn't undo the config removal or
+	// block the others.
+	for _, st := range staffTeams {
+		if err := configrepo.DeleteClassroomTeam(client, org, st); err != nil {
+			_, _ = fmt.Fprintf(errOut, "Warning: %s: removed the classroom config but could not delete its staff team %q (%v); delete it by hand at https://github.com/orgs/%s/teams if it lingers.\n",
+				org, st.Slug, err, org)
+			continue
+		}
+		_, _ = fmt.Fprintf(out, "%s: deleted staff team %s\n", org, st.Slug)
+	}
 	return nil
 }
 
@@ -752,7 +830,7 @@ func confirmClassroomRemove(in io.Reader, out io.Writer, shortName string) error
 // through assignment.EncodeAssignments (same normalization as
 // `gh teacher assignment add`); `migration` populates the optional
 // `migrated_from` block on classroom.json.
-func classroomScaffold(org, shortName, name, term, secret string, entries []assignment.AssignmentEntry, migration *configrepo.MigratedFromRef, team *configrepo.TeamRef) (map[string]string, error) {
+func classroomScaffold(org, shortName, name, term, secret string, entries []assignment.AssignmentEntry, migration *configrepo.MigratedFromRef, team *configrepo.TeamRef, staffTeams *configrepo.StaffTeamsRef) (map[string]string, error) {
 	classroom := configrepo.ClassroomJSON{
 		Schema:       classroomSchemaV1,
 		Name:         name,
@@ -761,6 +839,7 @@ func classroomScaffold(org, shortName, name, term, secret string, entries []assi
 		Org:          org,
 		Secret:       secret,
 		Team:         team,
+		Teams:        staffTeams,
 		MigratedFrom: migration,
 	}
 	classroomBytes, err := output.JSONPretty(classroom)

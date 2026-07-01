@@ -239,6 +239,17 @@ func TestRunMigrate_NonDryRun_HappyPath(t *testing.T) {
 	if classroom.MigratedFrom == nil || classroom.MigratedFrom.ClassroomID != 95884 {
 		t.Errorf("classroom.json missing migrated_from.classroom_id=95884, got %+v", classroom.MigratedFrom)
 	}
+	// The migrate path seeds + records the staff teams, same as add.
+	if classroom.Teams == nil || classroom.Teams.Instructor == nil || classroom.Teams.TA == nil {
+		t.Errorf("classroom.json missing teams.{instructor,ta}, got %+v", classroom.Teams)
+	} else {
+		if classroom.Teams.Instructor.Slug != "classroom50-classroom50test-instructor" {
+			t.Errorf("instructor team slug = %q, want classroom50-classroom50test-instructor", classroom.Teams.Instructor.Slug)
+		}
+		if classroom.Teams.TA.Slug != "classroom50-classroom50test-ta" {
+			t.Errorf("ta team slug = %q, want classroom50-classroom50test-ta", classroom.Teams.TA.Slug)
+		}
+	}
 
 	// Final stdout line is parseable; commit SHA appears.
 	if !strings.Contains(stdout.String(), "cs50-fall-2026/classroom50/classroom50test: migrated from classroom 95884") {
@@ -382,6 +393,7 @@ type migrateE2EState struct {
 	markedAsTemplate map[string]bool   // "owner/repo" → got is_template PATCH
 	uploadedFiles    map[string]string // git tree path → blob content
 	commitsCreated   int
+	teamsCreated     int // count of POST /orgs/{org}/teams (students + staff)
 
 	parentSHA     string
 	parentTreeSHA string
@@ -554,9 +566,16 @@ func (s *migrateE2EState) dispatch(t *testing.T, w http.ResponseWriter, r *http.
 		}
 		writeJSON(t, w, map[string]any{"is_template": isTpl})
 
-	// Target-side: classroom team create (POST /orgs/{org}/teams).
+	// Target-side: team create (POST /orgs/{org}/teams). Echo the
+	// requested name as the slug (canonical short-name), so the students
+	// team and the two staff teams each get their correct slug.
 	case path == "/orgs/"+s.targetOrg()+"/teams" && r.Method == http.MethodPost:
-		writeJSON(t, w, map[string]any{"id": 4242, "slug": "classroom50-classroom50test"})
+		var body struct {
+			Name string `json:"name"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		s.teamsCreated++
+		writeJSON(t, w, map[string]any{"id": 4242 + s.teamsCreated, "slug": body.Name})
 
 	// Target-side: team repo-access probe (GET → 404 = no access yet)
 	// and grant (PUT → 204) for a private migrated template.
@@ -570,6 +589,27 @@ func (s *migrateE2EState) dispatch(t *testing.T, w http.ResponseWriter, r *http.
 			t.Errorf("unexpected method %s on %s", r.Method, path)
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
+
+	// Authenticated user lookup (CurrentUser) for the instructor
+	// maintainer add.
+	case path == "/user" && r.Method == http.MethodGet:
+		writeJSON(t, w, map[string]any{"login": "teacher", "id": 1})
+
+	// Target-side: staff-team config-repo grant probe/PUT and membership
+	// PUT (add instructor maintainer). Both live under a staff-team slug.
+	case strings.HasPrefix(path, "/orgs/"+s.targetOrg()+"/teams/") && strings.Contains(path, "/repos/"):
+		switch r.Method {
+		case http.MethodGet:
+			w.WriteHeader(http.StatusNotFound)
+		case http.MethodPut:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected method %s on %s", r.Method, path)
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	case strings.HasPrefix(path, "/orgs/"+s.targetOrg()+"/teams/") && strings.Contains(path, "/memberships/") && r.Method == http.MethodPut:
+		w.WriteHeader(http.StatusOK)
+		writeJSON(t, w, map[string]any{"state": "active"})
 
 	default:
 		t.Errorf("unexpected path %q method %s", path, r.Method)

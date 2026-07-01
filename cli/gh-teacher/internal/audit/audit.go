@@ -42,11 +42,12 @@ import (
 //     confirm them. It lists them as "confirm by hand" rather than
 //     pretending they're fine.
 //
-// Exit status mirrors init's notion of "ready": non-zero when a critical
-// API-readable lockdown field is unenforced, so the command is scriptable
-// (`gh teacher audit org && deploy`). The unreadable manual items do NOT
-// fail the command (they can't be read either way); they're always
-// surfaced as a reminder.
+// Exit status treats any drift as failing: non-zero when ANY API-readable
+// lockdown field is unenforced (critical or not), so the command is
+// scriptable (`gh teacher audit org && deploy`) and agrees with the web
+// GUI's verdict for the same org. The unreadable manual items do NOT fail
+// the command (they can't be read either way); they're always surfaced as
+// a reminder.
 func NewCmd() *cobra.Command {
 	var asJSON bool
 
@@ -66,8 +67,8 @@ func NewCmd() *cobra.Command {
 			"    GitHub App installs, Projects base permissions, branch renames):\n" +
 			"    GitHub exposes no REST API to read these, so audit can't\n" +
 			"    confirm them — it lists them for you to eyeball by hand.\n\n" +
-			"Exit status is non-zero when a critical API-readable lockdown\n" +
-			"field is unenforced (scriptable); the unreadable manual items\n" +
+			"Exit status is non-zero when ANY API-readable lockdown field\n" +
+			"is unenforced (scriptable); the unreadable manual items\n" +
 			"never fail the command.\n\n" +
 			"Flags: --json (machine-readable report on stdout).",
 		Example: "  gh teacher audit cs50-fall-2026\n" +
@@ -96,8 +97,8 @@ func NewCmd() *cobra.Command {
 			report := buildAuditReport(client, org, plan)
 
 			// Render to the requested surface, then apply the SAME
-			// scriptable exit status on both paths: a non-zero exit when a
-			// critical API-readable field is unenforced (or the org couldn't
+			// scriptable exit status on both paths: a non-zero exit when
+			// ANY API-readable field is unenforced (or the org couldn't
 			// be read). The --json branch previously returned right after
 			// rendering, so `gh teacher audit org --json && deploy` proceeded
 			// on an INCOMPLETE lockdown — the JSON's lockdown_complete:false
@@ -130,9 +131,11 @@ type auditReport struct {
 	// / permission). In that case Enforced is empty and the API-readable
 	// audit is inconclusive — distinct from "read fine, all enforced".
 	ReadOK bool `json:"read_ok"`
-	// LockdownComplete is true when no *critical* API-readable field is
-	// unenforced — the same invariant init's `ready` uses. The
-	// unreadable manual items don't affect it.
+	// LockdownComplete is true when NO API-readable field is unenforced
+	// (any drift, critical or not, fails). This matches the web GUI's
+	// audit verdict (src/orgPolicy/audit.ts deriveVerdict), which treats
+	// any drift as "Needs attention", so both tools agree on the same
+	// org state. The unreadable manual items don't affect it.
 	LockdownComplete bool `json:"lockdown_complete"`
 	// Enforced lists the API-readable lockdown settings whose live value
 	// already matches the locked-down value.
@@ -182,7 +185,7 @@ func buildAuditReport(client githubapi.Client, org, plan string) auditReport {
 	}
 	report.ReadOK = true
 
-	verdicts, criticalMissed := orgpolicy.ClassifyDefaults(live, plan)
+	verdicts, _ := orgpolicy.ClassifyDefaults(live, plan)
 	for _, v := range verdicts {
 		as := auditSetting{Field: v.Setting.Field, Desc: v.Setting.Desc, Critical: v.Setting.Critical}
 		if v.Enforced {
@@ -192,7 +195,10 @@ func buildAuditReport(client githubapi.Client, org, plan string) auditReport {
 		as.Fix = v.Setting.ManualFix
 		report.Unenforced = append(report.Unenforced, as)
 	}
-	report.LockdownComplete = !criticalMissed
+	// Any drift fails (match the web GUI's verdict). The per-setting
+	// Critical flag is still surfaced for ordering/labeling, but it no
+	// longer gates the verdict or the scriptable exit status.
+	report.LockdownComplete = len(report.Unenforced) == 0
 	return report
 }
 
@@ -233,12 +239,9 @@ func (r *auditReport) renderHuman(u *ui.UI) {
 		return
 	}
 
-	switch {
-	case r.LockdownComplete && len(r.Unenforced) == 0:
+	if r.LockdownComplete {
 		u.Result(ui.StatusOK, "%s: member-privilege lockdown verified", r.Org)
-	case r.LockdownComplete:
-		u.Result(ui.StatusWarn, "%s: lockdown OK, but some non-critical settings drifted", r.Org)
-	default:
+	} else {
 		u.Result(ui.StatusFail, "%s: member-privilege lockdown INCOMPLETE", r.Org)
 	}
 
