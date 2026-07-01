@@ -1,0 +1,86 @@
+name: Bug report
+description: Report something that is broken or behaving unexpectedly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Please search
+        [existing issues](https://github.com/foundation50/classroom50/issues) first —
+        someone may have already reported this.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which part is affected?
+      options:
+        - Teacher CLI (gh-teacher)
+        - Student CLI (gh-student)
+        - Web app (classroom50.org)
+        - Assignment templates
+        - Autograder / grading
+        - Documentation
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and its impact.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the exact steps (commands, clicks, config) so we can reproduce it.
+      placeholder: |
+        1. Run `gh teacher ...`
+        2. ...
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Version and environment
+      description: |
+        Your OS, and — for the CLIs — the output of `gh --version` and
+        `gh extension list`. For the web app, your browser and version.
+      placeholder: |
+        OS: macOS 15.5
+        gh --version: 2.62.0
+        gh-teacher: v1.0.0
+        Browser: Firefox 128
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or output
+      description: |
+        Paste any error output. For the CLIs, re-running with `GH_DEBUG=api`
+        logs the underlying GitHub API calls, which helps a lot.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I removed any tokens, secrets, or private student data from the logs above.
+          required: true

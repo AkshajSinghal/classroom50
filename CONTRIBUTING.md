@@ -1,0 +1,99 @@
+# Contributing to Classroom 50
+
+Thanks for your interest in improving Classroom 50, the open-source
+[GitHub Classroom](https://classroom.github.com/) alternative from the
+[Fifty Foundation](https://fifty.foundation/). Contributions of all sizes are
+welcome — bug reports, docs, and code.
+
+## Ground rules
+
+- **No backend.** Classroom 50 is 100% client-side. All state lives in GitHub
+  repos and in JSON/CSV/YAML config files — there is no server. Behavior is
+  derived from what exists (for example, a student has "accepted" an assignment
+  when their assignment repo exists). Please don't add server-side state.
+- **Be kind.** Assume good faith and keep discussion focused on the work.
+
+## Project layout
+
+Classroom 50 is a monorepo of independently built but co-shipped pieces:
+
+| Folder         | Stack                     | Role                                                       |
+| -------------- | ------------------------- | ---------------------------------------------------------- |
+| `cli/gh-teacher/` | Go (`gh` extension)    | Instructor CLI: org setup, classrooms, roster, autograding |
+| `cli/gh-student/` | Go (`gh` extension)    | Student CLI: accept, submit                                |
+| `cli/shared/`  | Go module                 | Shared contract constants and GitHub/Git/UI helpers        |
+| `web/`         | React + TypeScript + Vite | Teacher web app deployed to classroom50.org                |
+| `schemas/`     | JSON Schema               | Source-of-truth schemas for the cross-binary contracts     |
+| `templates/`   | —                         | Example assignment templates teachers can copy             |
+
+Note: the `web/` app is not part of every checkout. If it's absent, skip the
+web steps below.
+
+## Build and test
+
+Please build, test, and lint the module you touched before opening a PR.
+
+CLI modules (Go) — run in the module directory (`cli/gh-teacher`,
+`cli/gh-student`, or `cli/shared`):
+
+```
+go build ./...
+go test ./...
+golangci-lint run
+```
+
+Set `GH_DEBUG=api` to log every underlying GitHub API request/response while
+debugging the CLIs.
+
+Web app:
+
+```
+cd web
+npm run check   # tsc -b + eslint + prettier + vitest
+npm run dev     # local dev server
+```
+
+Skeleton scripts (Python):
+
+```
+python3 -m pytest cli/gh-teacher/skeleton_tests -q
+```
+
+## Cross-binary contracts
+
+Some names, paths, and schemas are shared across more than one tool (the web
+app and the CLIs), so they can only change by coordinating every side.
+`schemas/*.schema.json` is the source of truth, and the Go, Python, and
+TypeScript sides hand-mirror it. When you touch one of these contracts:
+
+- Update the schema **and** every mirror in the same change.
+- Keep the parity tests green.
+- Evolve schemas **additively**: readers should tolerate _and_ preserve unknown
+  fields on a read-modify-write, because documents may have been written by an
+  older release. Don't drop fields you don't recognize.
+
+## Documentation
+
+Document CLI commands and flags in the
+[wiki](https://github.com/foundation50/classroom50/wiki), not in per-tool
+READMEs.
+
+## Reporting issues
+
+Open a [bug report or feature request](https://github.com/foundation50/classroom50/issues/new/choose).
+For questions and ideas, use
+[Discussions](https://github.com/foundation50/classroom50/discussions). Please
+scrub tokens, secrets, and private student data from anything you paste.
+
+## Commits and pull requests
+
+- Use [Conventional Commits](https://www.conventionalcommits.org/) for commit
+  and PR titles, e.g. `feat(web): ...`, `fix(gh-teacher): ...`,
+  `docs: ...`.
+- Keep PRs focused; link the issue they address.
+- The pull request template includes a checklist — please fill it out.
+
+## License
+
+By contributing, you agree that your contributions will be licensed under the
+[GNU General Public License v3.0](LICENSE).

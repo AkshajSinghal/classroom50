@@ -1,0 +1,63 @@
+name: Feature request
+description: Suggest a new capability or an improvement to an existing one.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Please search
+        [existing issues](https://github.com/foundation50/classroom50/issues) first —
+        the idea may already be under discussion.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which part would this affect?
+      options:
+        - Teacher CLI (gh-teacher)
+        - Student CLI (gh-student)
+        - Web app (classroom50.org)
+        - Assignment templates
+        - Autograder / grading
+        - Documentation
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or current behavior
+      description: |
+        What happens today, or what is missing? Describe the current behavior —
+        or note that there is no behavior at all yet — and why it falls short.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What would you like to happen instead? Be as concrete as you can.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches or workarounds you have thought about.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else — screenshots, links, or examples from your own teaching context.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
