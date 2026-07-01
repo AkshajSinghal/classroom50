@@ -8,10 +8,10 @@ import {
   TriangleAlert,
   XCircle,
 } from "lucide-react"
-import GitHub from "@/assets/github.svg?react"
 
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { githubKeys } from "@/hooks/github/queries"
+import PlanBadge from "@/components/PlanBadge"
 import { useSafeSubmit } from "@/hooks/useSafeSubmit"
 import useGetOrgAudit from "@/hooks/useGetOrgAudit"
 import useGetOrgMembership from "@/hooks/useGetOrgMembership"
@@ -388,15 +388,10 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
     <SettingsSection
       title="Organization policy"
       titleAdornment={
-        planDetails?.plan?.name && (
-          <span
-            className="badge badge-ghost badge-sm gap-1 capitalize"
-            title="GitHub plan — determines which policies are in scope (Enterprise unlocks additional member-privilege fields)"
-          >
-            <GitHub className="size-3" />
-            {planDetails.plan.name} plan
-          </span>
-        )
+        <PlanBadge
+          name={planDetails?.plan?.name}
+          title="GitHub plan — determines which policies are in scope (Enterprise unlocks additional member-privilege fields)"
+        />
       }
       description="What Classroom 50 configures on your behalf, and whether anything has drifted from the expected lockdown."
       action={
