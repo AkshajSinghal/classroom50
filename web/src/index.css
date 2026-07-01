@@ -4,7 +4,7 @@
   themes: corporate --default;
 }
 
-/* Keep the original dark-navy sidebar look in light mode (#265): the sidebar
+/* Keep the original dark-navy sidebar look in light mode: the sidebar
    uses `neutral`, but corporate's stock neutral is pure black. Pin it to the
    pre-existing hand-picked palette (#212a3a rail / #accefb accent). The dark
    theme redefines neutral separately below. */
@@ -16,7 +16,7 @@
   --color-neutral-content: #ffffff;
 }
 
-/* Dark theme (#265). Deliberately NOT a stock daisyUI dark theme: we keep
+/* Dark theme. Deliberately NOT a stock daisyUI dark theme: we keep
    corporate's exact primary/secondary/accent/status hues and its radius/border
    so switching light<->dark only inverts the base surfaces — the app's feel
    (blue accent, flat corporate shapes) is identical in both. Only the base and
@@ -64,7 +64,7 @@
   --noise: 0;
 }
 
-/* Sidebar accent tokens (#265). The rail/text follow daisyUI `neutral`, but the
+/* Sidebar accent tokens. The rail/text follow daisyUI `neutral`, but the
    active-border/logo accent and the active/hover surface were hand-picked hexes
    that don't map to a theme token. Scope them per theme so light mode keeps the
    original #accefb / #323b49 exactly, and dark mode uses theme-appropriate
@@ -162,7 +162,7 @@ body {
   }
 }
 
-/* ── WCAG 2.1 AA contrast overrides (issue #212) ───────────────────────────
+/* ── WCAG 2.1 AA contrast overrides ────────────────────────────────────────
    DaisyUI `corporate` ships several semantic colors that fail AA (4.5:1) as
    text or button labels. We darken them (same hue, lower lightness) so they
    clear AA against the app's white / #fafafa / light-tint backgrounds, while

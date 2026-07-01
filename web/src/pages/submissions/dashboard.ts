@@ -1,5 +1,5 @@
-// Pure derivation/filter/sort primitives for the assignment overview dashboard
-// (#59), over already-loaded scores/roster data — no fetches, no React, so the
+// Pure derivation/filter/sort primitives for the assignment overview dashboard,
+// over already-loaded scores/roster data — no fetches, no React, so the
 // classification is reusable and unit-testable.
 
 import type { SubmissionRow } from "@/hooks/useGetScores"

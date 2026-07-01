@@ -197,7 +197,7 @@ const SubmissionsPageContent = () => {
     )
   }, [isGroupAssignment, scoresLoaded, scoresInfo, students])
 
-  // Dashboard controls (#59) — all client-side over already-loaded data.
+  // Dashboard controls — all client-side over already-loaded data.
   const [query, setQuery] = useState("")
   const [filters, setFilters] = useState<SubmissionFilters>(DEFAULT_FILTERS)
   // Drives the "Regrade all" confirmation modal (replaces window.confirm).

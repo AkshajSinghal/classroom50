@@ -1035,7 +1035,7 @@ export type CopyAssignmentInput = {
   // assignments.json — copied verbatim, not re-derived from form input.
   source: Assignment
   // Sibling classroom under classroom50/. In-org only for v1: a private template
-  // can only be team-granted within its own org (see #60).
+  // can only be team-granted within its own org.
   targetClassroom: string
   // Default to the source slug/name; the slug must be unique in the target.
   targetSlug?: string
@@ -1313,7 +1313,7 @@ export function createClassroom50Yaml(params: {
   classroom: string
   assignment: string
   // `id` is the immutable numeric GitHub user id, recorded so the
-  // repo<->student binding survives a username rename (classroom50-cli#185).
+  // repo<->student binding survives a username rename.
   ownerUsername: string
   ownerId?: number | null
   acceptedAt?: string
@@ -1453,7 +1453,7 @@ export async function deleteAssignment(
 }
 
 // Grant the student `admin` (not `maintain`) on their own repo. Intentional and
-// CLI-aligned (issue #112): only an admin can manage collaborators for the
+// CLI-aligned: only an admin can manage collaborators for the
 // founder-driven group-invite flow (`gh student invite`).
 async function addAdminCollaborator(params: {
   client: GitHubClient
@@ -1511,7 +1511,7 @@ jobs:
     permissions:
       contents: write
       statuses: write
-      # Lets the runner open the opt-in Feedback PR (issue #86). A reusable
+      # Lets the runner open the opt-in Feedback PR. A reusable
       # workflow's token is the intersection with the caller's grants, so
       # this must mirror autograde-runner.yaml's permissions.
       pull-requests: write

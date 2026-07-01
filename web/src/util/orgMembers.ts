@@ -10,9 +10,9 @@ export type ClassroomAccess = {
   section: string
 }
 
-// How an aggregated row relates org membership to roster presence (#76):
+// How an aggregated row relates org membership to roster presence:
 //  - member-on-roster: a healthy member on >=1 roster.
-//  - on-roster-not-member: the discrepancy this issue targets — on a roster but
+//  - on-roster-not-member: the discrepancy this classification targets — on a roster but
 //    no longer (or never) an org member.
 //  - member-no-roster: an org member on no classroom roster (e.g. a co-teacher,
 //    or a leftover after an unenroll).

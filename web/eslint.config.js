@@ -37,7 +37,7 @@ export default defineConfig([
       // `console.warn`/`console.error` for genuine diagnostics; DEV-only debug
       // logging should be guarded by `import.meta.env.DEV`.
       "no-console": ["warn", { allow: ["warn", "error"] }],
-      // Keep the accessibility invariants from #274 self-checking. Advisory
+      // Keep the accessibility invariants self-checking. Advisory
       // (warn) so the plugin's stricter defaults don't block the build on
       // pre-existing markup, but new violations (missing alt/label, invalid
       // aria-*, click-without-keyboard) surface in `npm run check` output.

@@ -280,7 +280,7 @@ export async function addStudentToClassroom(
     section: input.section?.trim() ?? "",
     github_id: String(githubUser.id),
     // Already-member students are written "enrolled" directly (input.enrolled):
-    // no invite/onboarding repo exists for them, so reconcile can't confirm them (#65).
+    // no invite/onboarding repo exists for them, so reconcile can't confirm them.
     enrollment_status: input.enrolled ? "enrolled" : "invited",
     enrollment_method: "github",
     email_hash: studentEmail ? await emailHash(studentEmail) : "",
@@ -640,7 +640,7 @@ export async function inviteStudentByEmail(
   } catch (err) {
     // A 422 means the email already belongs to a member (or is already invited).
     // GitHub gives no identity for the email, so resolve it from the teacher's
-    // other rosters: enroll directly if found + active, else drop the stub (#65).
+    // other rosters: enroll directly if found + active, else drop the stub.
     if (err instanceof GitHubAPIError && err.status === 422) {
       const resolved = await resolveStudentIdentityByEmail(
         client,
@@ -1009,7 +1009,7 @@ export async function reconcileOnboarding(
   // case (accepting the org invite activates org + team membership via team_ids,
   // bypassing onboarding). If that account is an ACTIVE org member, bind it now
   // — github_id is GitHub-attested and an active membership re-check is the same
-  // trust model as markStudentEnrolled (#65), so this is safe to auto-enroll
+  // trust model as markStudentEnrolled, so this is safe to auto-enroll
   // without a self-report. Bounded-parallel; only rows with a username can be
   // membership-checked (the GitHub endpoint is keyed by username).
   const membershipCandidates = targets.filter(
@@ -1383,7 +1383,7 @@ type AddStudentToClassroomInput = {
   email?: string
   section?: string
   // Write the new row directly as `enrolled` (vs `invited`); set when the
-  // student is already an active org member, so they aren't stranded (#65).
+  // student is already an active org member, so they aren't stranded.
   enrolled?: boolean
 }
 export async function enrollStudentInClassroom(
@@ -1399,7 +1399,7 @@ export async function enrollStudentInClassroom(
 
   // Already an active member -> write the row enrolled directly (no invite is
   // sent, so reconcile would never confirm them). Best-effort: a failed read
-  // falls back to the normal "invited" path (#65).
+  // falls back to the normal "invited" path.
   const normalizedUsername = input.username.trim()
   const alreadyMember = await isActiveMember(client, org, normalizedUsername)
 

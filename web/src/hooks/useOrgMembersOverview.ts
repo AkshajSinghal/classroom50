@@ -28,7 +28,7 @@ export type OrgMembersOverview = {
 
 // Aggregate the org's members against every classroom roster: dedupe students,
 // match to live members, classify discrepancies, surface per-student classroom
-// access (#76).
+// access.
 const useOrgMembersOverview = (org: string | undefined): OrgMembersOverview => {
   const client = useGitHubClient()
 
