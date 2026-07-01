@@ -2,6 +2,7 @@ package teardown
 
 import (
 	"bytes"
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,10 +17,14 @@ import (
 // so partial-failure cases stay realistic.
 type teardownTestServer struct {
 	mu                sync.Mutex
-	classroom50Exists bool           // GET /repos/{org}/classroom50 returns 200 when true
-	repos             []string       // list-org-repos response
-	deleted           []string       // names that received DELETE
-	failOnDelete      map[string]int // repo name → status code to return instead of 204
+	classroom50Exists bool              // GET /repos/{org}/classroom50 returns 200 when true
+	repos             []string          // list-org-repos response
+	deleted           []string          // names that received DELETE
+	failOnDelete      map[string]int    // repo name → status code to return instead of 204
+	classroomDirs     []string          // config-repo root dir entries (classroom short-names)
+	classroomJSON     map[string]string // "<dir>/classroom.json" → contents-API JSON body
+	teamGET           map[string]string // "/orgs/{org}/teams/{slug}" → GET body (id verify)
+	deletedTeams      []string          // team slugs that received DELETE
 }
 
 func (s *teardownTestServer) handler(t *testing.T, org string) http.Handler {
@@ -52,6 +57,41 @@ func (s *teardownTestServer) handler(t *testing.T, org string) http.Handler {
 			}
 			sb.WriteByte(']')
 			_, _ = w.Write([]byte(sb.String()))
+		case path == "/repos/"+org+"/classroom50/contents" && r.Method == http.MethodGet:
+			// collectClassroomTeams lists the config-repo root before the
+			// deletions. Return the configured classroom dir entries (empty
+			// by default → the team sweep is a clean no-op).
+			var sb strings.Builder
+			sb.WriteByte('[')
+			for i, name := range s.classroomDirs {
+				if i > 0 {
+					sb.WriteByte(',')
+				}
+				sb.WriteString(`{"name":"` + name + `","type":"dir"}`)
+			}
+			sb.WriteByte(']')
+			_, _ = w.Write([]byte(sb.String()))
+		case strings.HasPrefix(path, "/repos/"+org+"/classroom50/contents/") && r.Method == http.MethodGet:
+			// A per-classroom classroom.json read during the team sweep.
+			// Return whatever the test staged for this path, else 404 (a
+			// dir without classroom.json isn't a classroom).
+			if body, ok := s.classroomJSON[strings.TrimPrefix(path, "/repos/"+org+"/classroom50/contents/")]; ok {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(body))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		case strings.HasPrefix(path, "/orgs/"+org+"/teams/") && r.Method == http.MethodGet:
+			// Team id-verify before delete during the sweep.
+			if body, ok := s.teamGET[path]; ok {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(body))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		case strings.HasPrefix(path, "/orgs/"+org+"/teams/") && r.Method == http.MethodDelete:
+			s.deletedTeams = append(s.deletedTeams, strings.TrimPrefix(path, "/orgs/"+org+"/teams/"))
+			w.WriteHeader(http.StatusNoContent)
 		case strings.HasPrefix(path, "/repos/"+org+"/") && r.Method == http.MethodDelete:
 			name := strings.TrimPrefix(path, "/repos/"+org+"/")
 			if status, fail := s.failOnDelete[name]; fail {
@@ -65,6 +105,63 @@ func (s *teardownTestServer) handler(t *testing.T, org string) http.Handler {
 			http.NotFound(w, r)
 		}
 	})
+}
+
+// jsonBase64Body wraps a raw file body in the GitHub contents-API
+// envelope ({content: <base64>, encoding: "base64"}) that
+// ReadFileContents decodes.
+func jsonBase64Body(raw string) string {
+	return `{"content":"` + base64.StdEncoding.EncodeToString([]byte(raw)) + `","encoding":"base64"}`
+}
+
+func TestRunTeardown_SweepsClassroomTeams(t *testing.T) {
+	state := &teardownTestServer{
+		classroom50Exists: true,
+		repos:             []string{"classroom50", "cs-principles-hello-alice"},
+		failOnDelete:      map[string]int{},
+		classroomDirs:     []string{"cs-principles"},
+		classroomJSON: map[string]string{
+			"cs-principles/classroom.json": jsonBase64Body(`{
+  "schema": "classroom50/classroom/v1",
+  "short_name": "cs-principles",
+  "org": "classroom50-test",
+  "team": {"id": 1, "slug": "classroom50-cs-principles"},
+  "teams": {
+    "instructor": {"id": 2, "slug": "classroom50-cs-principles-instructor"},
+    "ta": {"id": 3, "slug": "classroom50-cs-principles-ta"}
+  }
+}`),
+		},
+		teamGET: map[string]string{
+			"/orgs/classroom50-test/teams/classroom50-cs-principles":            `{"id":1}`,
+			"/orgs/classroom50-test/teams/classroom50-cs-principles-instructor": `{"id":2}`,
+			"/orgs/classroom50-test/teams/classroom50-cs-principles-ta":         `{"id":3}`,
+		},
+	}
+	server := httptest.NewServer(state.handler(t, "classroom50-test"))
+	defer server.Close()
+
+	var out, errOut bytes.Buffer
+	if err := runTeardown(githubtest.NewTestClient(t, server), strings.NewReader(""), &out, &errOut, "classroom50-test", true); err != nil {
+		t.Fatalf("runTeardown: %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
+	}
+
+	state.mu.Lock()
+	teams := append([]string(nil), state.deletedTeams...)
+	state.mu.Unlock()
+	want := map[string]bool{
+		"classroom50-cs-principles":            true,
+		"classroom50-cs-principles-instructor": true,
+		"classroom50-cs-principles-ta":         true,
+	}
+	if len(teams) != 3 {
+		t.Fatalf("deleted teams = %v, want the 3 classroom teams", teams)
+	}
+	for _, slug := range teams {
+		if !want[slug] {
+			t.Errorf("deleted unexpected team %q", slug)
+		}
+	}
 }
 
 func TestRunTeardown_HappyPath(t *testing.T) {
@@ -104,6 +201,49 @@ func TestRunTeardown_HappyPath(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "4 deleted, 0 failed") {
 		t.Errorf("stdout missing summary line:\n%s", out.String())
+	}
+}
+
+func TestRunTeardown_SweepsTeamsEvenOnPartialFailure(t *testing.T) {
+	// A repo-delete failure preserves the marker repo, but the team
+	// sweep must still run (deletes are idempotent and independent of
+	// surviving repos) so write-granted staff teams aren't stranded.
+	state := &teardownTestServer{
+		classroom50Exists: true,
+		repos:             []string{"classroom50", "cs-principles-hello-alice"},
+		failOnDelete:      map[string]int{"cs-principles-hello-alice": http.StatusForbidden},
+		classroomDirs:     []string{"cs-principles"},
+		classroomJSON: map[string]string{
+			"cs-principles/classroom.json": jsonBase64Body(`{
+  "schema": "classroom50/classroom/v1",
+  "short_name": "cs-principles",
+  "org": "classroom50-test",
+  "team": {"id": 1, "slug": "classroom50-cs-principles"},
+  "teams": {
+    "instructor": {"id": 2, "slug": "classroom50-cs-principles-instructor"},
+    "ta": {"id": 3, "slug": "classroom50-cs-principles-ta"}
+  }
+}`),
+		},
+		teamGET: map[string]string{
+			"/orgs/classroom50-test/teams/classroom50-cs-principles":            `{"id":1}`,
+			"/orgs/classroom50-test/teams/classroom50-cs-principles-instructor": `{"id":2}`,
+			"/orgs/classroom50-test/teams/classroom50-cs-principles-ta":         `{"id":3}`,
+		},
+	}
+	server := httptest.NewServer(state.handler(t, "classroom50-test"))
+	defer server.Close()
+
+	var out, errOut bytes.Buffer
+	// The failed repo delete makes runTeardown return a non-nil error,
+	// but the team sweep must have run regardless.
+	_ = runTeardown(githubtest.NewTestClient(t, server), strings.NewReader(""), &out, &errOut, "classroom50-test", true)
+
+	state.mu.Lock()
+	teams := append([]string(nil), state.deletedTeams...)
+	state.mu.Unlock()
+	if len(teams) != 3 {
+		t.Fatalf("deleted teams = %v, want all 3 swept even though a repo delete failed", teams)
 	}
 }
 

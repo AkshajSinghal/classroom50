@@ -20,7 +20,7 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | `gh teacher download <org> <classroom> <assignment>` | Roster-driven by default: clone one repo per `<classroom>/students.csv` row, refresh each repo's `result.json` (latest submission) and `results.json` (every submission) from its submit-tag releases, and write a per-submission `scores.csv` summary at the destination root. Pass `--by-pattern` to skip the roster lookup and clone by name prefix instead. Default destination is `<classroom>-<assignment>_submissions_<YYYY_MM_DD_T_HH_MM_SS>/`; override with `-d`. |
 | `gh teacher teardown <org>` | Delete every repo in a Classroom 50 org (development reset). Requires `<org>/classroom50` to exist (the marker repo guards against accidental teardown of non-Classroom orgs); prompts for typed org-name confirmation unless `--yes`; deletes `classroom50` last so an interrupted run stays safe to re-run. Requires the `delete_repo` OAuth scope (opt in once via `gh teacher login -s delete_repo`). |
 | `gh teacher init <org>` | Bootstrap `<org>/classroom50` (org member defaults, config repo, Pages, branch protection, service-token secret). Idempotent; re-runs also refresh stale skeleton files after a confirmation prompt (`--yes` to skip). |
-| `gh teacher audit <org>` | Read-only audit of the org member-privilege lockdown. Re-reads the org and reports which API-readable settings are enforced vs. drifted, plus the four web-UI-only settings it can't read (confirm by hand). Exits non-zero if a critical lockdown field is unenforced; `--json` for a machine-readable report. |
+| `gh teacher audit <org>` | Read-only audit of the org member-privilege lockdown. Re-reads the org and reports which API-readable settings are enforced vs. drifted, plus the four web-UI-only settings it can't read (confirm by hand). Exits non-zero if **any** API-readable lockdown field is unenforced (matching the web GUI's verdict); `--json` for a machine-readable report. |
 | `gh teacher rotate-service-token <org>` | Replace the `CLASSROOM50_SERVICE_TOKEN` repo secret on an existing config repo. |
 | `gh teacher classroom add <org> <short-name>` | Add a new classroom directory to `<org>/classroom50`. Optional flags: `--name "<display name>"`, `--term <e.g. Spring-2026>`. Refuses to overwrite an existing classroom. |
 | `gh teacher classroom list <org>` | List the classrooms registered in `<org>/classroom50`, one short-name per line. Archived classrooms (`active: false`) are hidden by default — pass `--all` to include them (tagged ` (archived)`). Optional: `--json` (full `{short_name, name, term, active}` objects), `--quiet` (suppress the stderr summary). Read-only. |
@@ -34,6 +34,8 @@ Run `gh teacher <command> --help` for the live flag list. Errors always go to st
 | `gh teacher roster update <org> <classroom> <username>` | Correct fields on an existing row (matched by username); only the flags you pass change, `github_id` and unset columns are preserved. Roster-only: no invite, no `github_id` re-resolution. Errors if the student isn't on the roster. Same four optional flags as `add`. |
 | `gh teacher roster remove <org> <classroom> <username>` | Remove a row from `students.csv`. Does NOT touch org membership (use `gh teacher remove <org> <username>` for that). Idempotent. |
 | `gh teacher roster import <org> <classroom> <path-to-csv>` | Bulk upsert from a local CSV (`username,first_name,last_name,email,section` header; trailing `github_id` accepted but ignored). One Tree commit; auto-invites new students. |
+| `gh teacher staff add <org> <classroom> <username>` | Add a user to a classroom's staff team. `--role instructor` (default) or `--role ta`. Membership only — no `students.csv` change. |
+| `gh teacher staff remove <org> <classroom> <username>` | Remove a user from a classroom's staff team (`--role instructor`/`ta`). Does not touch org membership. Idempotent. |
 | `gh teacher assignment add <org> <classroom> <slug>` | Register or upsert an assignment in `assignments.json`. Required flag: `--name`. Optional: `--template <owner>/<repo>[@branch]` (starter-code repo; omit for a template-less assignment, where students get an empty repo with just the autograder shim), `--description`, `--due` (ISO-8601; stored as UTC, local timezone assumed when the offset is omitted), `--mode` (`individual` default, or `group`), `--max-group-size <N>` (required with `--mode group`, `>= 2`), `--runtime <path-to-json>` (per-assignment runtime: `runs-on`, language toolchains, apt packages, container image), `--tests <path-to-json>` (declarative io/run/python tests, graded with no `autograder.py`), `--autograder <name>` (default `default`; non-default values reference a sibling shim at `<classroom>/autograders/<name>.yaml`), `--feedback-pr` (open one long-lived instructor-review PR per student repo — **on by default**; `--feedback-pr=false` to disable), `--pass-threshold <0–100>` (opt-in advisory passing bar shown by gradebook clients; off when omitted, distinct from `0`). Custom grading code is NOT registered here — drop an `autograder.py` (and any sibling fixtures) under `<classroom>/autograders/<slug>/` in the config repo, or set a classroom default with `gh teacher autograder set-default`. |
 | `gh teacher assignment test add <org> <classroom> <slug>` | Add or update one declarative test on an existing assignment's `tests` block. Required flags: `--name`, `--type {io,run,python}`, `--run`. Optional: `--setup`, `--input`/`--input-file`, `--expected`/`--expected-file`, `--comparison {included,exact,regex}`, `--timeout`, `--exit-code`, `--points`. Mutually exclusive with a per-assignment `autograder.py`. |
 | `gh teacher assignment test list <org> <classroom> <slug>` | Print the declarative test names on an assignment, one per line. `--json` for the full spec array, `-q` to suppress the stderr summary. Read-only. |
@@ -100,7 +102,7 @@ Re-reads `GET /orgs/{org}` and classifies each in-scope member-default setting (
 - **Action required** — API-readable settings that are NOT locked down, each with the exact GitHub-UI fix. Critical fields (the ones that defang the founder repo-admin grant org-wide) failing is what makes the command exit non-zero.
 - **Confirm by hand** — the four web-UI-only settings (App access requests, repo-admin GitHub App installs, Projects base permissions, branch renames). GitHub exposes **no REST API to read** these, so audit can neither confirm nor deny them; it lists them for a visual check rather than implying they're fine.
 
-**Exit status** is non-zero when a critical API-readable field is unenforced (so `gh teacher audit <org> && …` is safe in scripts) or when the org couldn't be read back (inconclusive — treated as a conservative failure, never a false all-clear). The unreadable manual items never fail the command. `--json` emits `{org, plan, read_ok, lockdown_complete, enforced[], unenforced[], manual_unreadable[], settings_url}` for an orchestrating agent to branch on.
+**Exit status** is non-zero when **any** API-readable field is unenforced — critical or not (so `gh teacher audit <org> && …` is safe in scripts) or when the org couldn't be read back (inconclusive — treated as a conservative failure, never a false all-clear). This matches the web GUI, which flags **any** drift as "Needs attention"; the two tools agree on the same org state. The unreadable manual items never fail the command. `--json` emits `{org, plan, read_ok, lockdown_complete, enforced[], unenforced[], manual_unreadable[], settings_url}` for an orchestrating agent to branch on.
 
 This answers "I unchecked everything from init's Action-required list — did it take?": audit confirms the API-readable settings landed and reminds you which four you must confirm visually.
 
@@ -156,6 +158,8 @@ Three things this scaffold does **not** include:
 Per-assignment autograders (an `autograder.py` entrypoint + any sibling fixtures) go under `<short-name>/autograders/<slug>/` once the classroom is in place; the runner picks them over the classroom default at `<short-name>/autograder.py`. Per-assignment runtime customization (Python version, language toolchains, apt packages, container image) lives in the `runtime:` block on each `assignments.json` entry; see [Autograders](Autograders) for the schema.
 
 **Classroom team.** Besides the config files, `classroom add` creates a GitHub team `classroom50-<short-name>` (privacy `secret`, via `POST /orgs/{org}/teams`), reconciling-and-adopting an existing team of that name rather than failing. The team's members are the classroom's rostered students (added by `gh teacher roster add`); it exists to grant those students read access to **in-org private** assignment templates (`gh teacher assignment add` grants `pull` on the template to this team). `gh teacher classroom remove` deletes the team; `gh teacher roster remove` drops a student from it. `members_can_create_teams: false` (set by `init`'s lockdown) doesn't block this — the teacher authenticates as an org owner.
+
+**Staff teams.** `classroom add` (and `classroom migrate`) also create two `secret` staff teams — `classroom50-<short-name>-instructor` and `classroom50-<short-name>-ta` — each granted `push` (write) on the `classroom50` config repo so staff can author assignments. The creating teacher is added to the instructor team as a maintainer. Their `{id, slug}` are recorded under `classroom.json` `teams.{instructor,ta}`, mirroring the web GUI so a classroom managed from either surface has the same staff teams. Manage membership with `gh teacher staff add/remove` (below). `classroom remove` and `teardown` sweep the staff teams alongside the students team.
 
 **Errors:**
 
@@ -387,6 +391,33 @@ Duplicate usernames within the input (case-insensitive) collapse with last-wins 
 - `students.csv` header doesn't begin with `username,first_name,last_name,email,section,github_id` → exits non-zero with the offending header. (Optional onboarding columns appended after `github_id` by the web app are accepted and preserved.)
 - GitHub user not found (404 from `GET /users/{username}`) → exits with the offending username.
 - Repeated rebase failures (the CLI retries a small fixed number of times with exponential backoff) → exits with a `lost the rebase race` message and a hint to retry or investigate concurrent writers.
+
+## `gh teacher staff`
+
+Manage a classroom's **staff teams** — the per-classroom GitHub teams that back the web GUI's in-app roles: `classroom50-<classroom>-instructor` and `classroom50-<classroom>-ta`, each granted write on the `classroom50` config repo. Membership lives entirely in these GitHub teams (there is **no** `role` column in `students.csv`), so a classroom's staff is the same whether managed from the CLI or the web.
+
+The staff teams are created by `gh teacher classroom add` / `classroom migrate`. If a classroom predates the staff-teams feature (no `teams` block in `classroom.json`), re-run `gh teacher classroom add <org> <classroom>` to create them, then add staff.
+
+### `gh teacher staff add`
+
+```
+gh teacher staff add <org> <classroom> <username> [--role instructor|ta]
+gh teacher staff add cs50-fall-2026 cs-principles alice
+gh teacher staff add cs50-fall-2026 cs-principles bob --role ta
+```
+
+Adds `<username>` to the classroom's instructor (default) or ta staff team. `--role` accepts `instructor` or `ta` (case-insensitive; defaults to `instructor`). The user gains write on the config repo through the team; if they aren't yet an org member the team membership goes pending until they accept the org invitation. The team slug is read from `classroom.json` (authoritative — never re-derived). If the classroom predates the staff-teams feature (or its `teams` block is partial), `staff add` self-heals: it creates/adopts the missing team, grants it config-repo write, and records the ref in `classroom.json` before adding the user.
+
+### `gh teacher staff remove`
+
+```
+gh teacher staff remove <org> <classroom> <username> [--role instructor|ta]
+gh teacher staff remove cs50-fall-2026 cs-principles alice --role ta
+```
+
+Removes `<username>` from the named staff team. **Does NOT** touch the user's org membership. Idempotent — a user who isn't on the team (or an already-gone team) is a clean no-op.
+
+**Errors:** missing config repo → `run gh teacher init <org> first`; classroom not found → points at `gh teacher classroom add`; GitHub user not found → exits with the offending username.
 
 ## `gh teacher assignment`
 

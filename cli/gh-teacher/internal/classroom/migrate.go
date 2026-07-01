@@ -230,6 +230,26 @@ func performMigration(client githubapi.Client, out, errOut io.Writer, plan migra
 		return fmt.Errorf("create classroom team: %w", err)
 	}
 
+	// Preflight the existence check before seeding staff teams, so a
+	// classroom that already exists in the target fails fast without
+	// orphaning freshly-created write-granted staff teams. The in-build
+	// check below stays as the authoritative concurrent-writer guard.
+	if exists, err := configrepo.ContentsExists(client, plan.TargetOrg, configrepo.ConfigRepoName, plan.ShortName, branch); err != nil {
+		return err
+	} else if exists {
+		return fmt.Errorf("classroom %q already exists in %s/%s — refusing to overwrite",
+			plan.ShortName, plan.TargetOrg, configrepo.ConfigRepoName)
+	}
+
+	// Create (or adopt) the staff teams (instructor, ta) + config-repo
+	// write grant + instructor-maintainer seed, same as `gh teacher
+	// classroom add`, so a migrated classroom carries the role teams the
+	// web GUI expects.
+	staffTeams, err := seedStaffTeams(client, errOut, plan.TargetOrg, plan.ShortName)
+	if err != nil {
+		return err
+	}
+
 	build := func(parentSHA string) (map[string]string, error) {
 		exists, err := configrepo.ContentsExists(client, plan.TargetOrg, configrepo.ConfigRepoName, plan.ShortName, parentSHA)
 		if err != nil {
@@ -242,7 +262,7 @@ func performMigration(client githubapi.Client, out, errOut io.Writer, plan migra
 		// Migrated classrooms get a plain (guessable) URL — unlisted is an
 		// opt-in `classroom add --unlisted` concern and a bulk import can't
 		// block on its prompt, so pass an empty key.
-		return classroomScaffold(plan.TargetOrg, plan.ShortName, plan.Classroom.Name, plan.Term, "", entries, migration, &team)
+		return classroomScaffold(plan.TargetOrg, plan.ShortName, plan.Classroom.Name, plan.Term, "", entries, migration, &team, staffTeams)
 	}
 
 	message := contract.PrefixCommit(fmt.Sprintf("Migrate %s from GitHub Classroom %d (gh teacher classroom migrate)",

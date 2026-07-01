@@ -21,9 +21,10 @@ import (
 // records the decoded content of every blob POSTed, so a test can
 // assert what an edit re-encoded.
 type configRepoMock struct {
-	files       map[string]string
-	blobs       []string
-	teamDeleted bool // set when DELETE /orgs/o/teams/{slug} is received
+	files            map[string]string
+	blobs            []string
+	teamDeleted      bool     // set when DELETE /orgs/o/teams/classroom50-cs-principles is received
+	staffTeamDeleted []string // staff-team slugs that received a DELETE
 }
 
 func (m *configRepoMock) handler(t *testing.T) http.Handler {
@@ -138,7 +139,51 @@ func (m *configRepoMock) handler(t *testing.T) http.Handler {
 		}
 	})
 
+	// Staff-team verify+delete routes (instructor, ta), keyed by the
+	// slug + recorded ids the classroomJSONWithStaffTeams helper sets.
+	for _, st := range []struct {
+		slug string
+		id   int64
+	}{
+		{"classroom50-cs-principles-instructor", 4243},
+		{"classroom50-cs-principles-ta", 4244},
+	} {
+		st := st
+		mux.HandleFunc("/orgs/o/teams/"+st.slug, func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodGet:
+				_ = json.NewEncoder(w).Encode(map[string]any{"id": st.id, "slug": st.slug})
+			case http.MethodDelete:
+				m.staffTeamDeleted = append(m.staffTeamDeleted, st.slug)
+				w.WriteHeader(http.StatusNoContent)
+			default:
+				http.NotFound(w, r)
+			}
+		})
+	}
+
 	return mux
+}
+
+// classroomJSONWithStaffTeams builds a classroom.json carrying the
+// students team plus both staff teams, so the remove sweep has refs to
+// delete.
+func classroomJSONWithStaffTeams(t *testing.T, org, shortName string) string {
+	t.Helper()
+	b, err := output.JSONPretty(configrepo.ClassroomJSON{
+		Schema:    classroomSchemaV1,
+		ShortName: shortName,
+		Org:       org,
+		Team:      &configrepo.TeamRef{ID: 4242, Slug: "classroom50-" + shortName},
+		Teams: &configrepo.StaffTeamsRef{
+			Instructor: &configrepo.TeamRef{ID: 4243, Slug: "classroom50-" + shortName + "-instructor"},
+			TA:         &configrepo.TeamRef{ID: 4244, Slug: "classroom50-" + shortName + "-ta"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("encode classroom.json: %v", err)
+	}
+	return string(b)
 }
 
 func classroomJSONContent(t *testing.T, org, shortName, name, term string) string {
@@ -350,6 +395,39 @@ func TestRemoveClassroom(t *testing.T) {
 		}
 	})
 
+	t.Run("sweeps the staff teams recorded in classroom.json", func(t *testing.T) {
+		mock := &configRepoMock{files: map[string]string{
+			"cs-principles/classroom.json":   classroomJSONWithStaffTeams(t, "o", "cs-principles"),
+			"cs-principles/assignments.json": "[]",
+		}}
+		server := httptest.NewServer(mock.handler(t))
+		t.Cleanup(server.Close)
+		client := githubtest.NewTestClient(t, server)
+
+		var out, errOut bytes.Buffer
+		if err := removeClassroom(client, strings.NewReader(""), &out, &errOut, "o", "cs-principles", true); err != nil {
+			t.Fatalf("removeClassroom: %v", err)
+		}
+		if !mock.teamDeleted {
+			t.Error("students team should be deleted")
+		}
+		want := map[string]bool{
+			"classroom50-cs-principles-instructor": true,
+			"classroom50-cs-principles-ta":         true,
+		}
+		if len(mock.staffTeamDeleted) != 2 {
+			t.Fatalf("staffTeamDeleted = %v, want both staff teams", mock.staffTeamDeleted)
+		}
+		for _, s := range mock.staffTeamDeleted {
+			if !want[s] {
+				t.Errorf("unexpected staff-team delete %q", s)
+			}
+		}
+		if !strings.Contains(out.String(), "deleted staff team classroom50-cs-principles-instructor") {
+			t.Errorf("stdout = %q, want instructor staff-team delete confirmation", out.String())
+		}
+	})
+
 	t.Run("missing classroom errors before prompt", func(t *testing.T) {
 		mock := &configRepoMock{files: map[string]string{}}
 		server := httptest.NewServer(mock.handler(t))
@@ -377,6 +455,52 @@ func TestRemoveClassroom(t *testing.T) {
 			t.Fatalf("removeClassroom err = %v, want confirmation mismatch", err)
 		}
 	})
+}
+
+// TestSeedStaffTeams_MaintainerAddFailureIsBestEffort pins that a
+// failure adding the acting teacher as instructor maintainer warns but
+// does not fail classroom creation (the teacher can self-add via web).
+func TestSeedStaffTeams_MaintainerAddFailureIsBestEffort(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/orgs/o/teams", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Name string `json:"name"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": 9, "slug": body.Name})
+	})
+	// Repo-grant probe/PUT for each staff team.
+	mux.HandleFunc("/orgs/o/teams/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/repos/") && r.Method == http.MethodGet:
+			w.WriteHeader(http.StatusNotFound)
+		case strings.Contains(r.URL.Path, "/repos/") && r.Method == http.MethodPut:
+			w.WriteHeader(http.StatusNoContent)
+		case strings.Contains(r.URL.Path, "/memberships/") && r.Method == http.MethodPut:
+			// The maintainer add fails.
+			http.Error(w, `{"message":"forbidden"}`, http.StatusForbidden)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	mux.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"login": "teacher", "id": 1})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	client := githubtest.NewTestClient(t, server)
+
+	var errOut bytes.Buffer
+	refs, err := seedStaffTeams(client, &errOut, "o", "cs-principles")
+	if err != nil {
+		t.Fatalf("seedStaffTeams must not fail on a best-effort maintainer-add error: %v", err)
+	}
+	if refs == nil || refs.Instructor == nil || refs.TA == nil {
+		t.Fatalf("staff refs = %+v, want both teams", refs)
+	}
+	if !strings.Contains(errOut.String(), "couldn't add you") {
+		t.Errorf("stderr = %q, want a best-effort maintainer-add warning", errOut.String())
+	}
 }
 
 func TestConfirmClassroomRemove(t *testing.T) {

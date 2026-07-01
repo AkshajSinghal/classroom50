@@ -87,10 +87,11 @@ func TestBuildAuditReport_CriticalDriftFails(t *testing.T) {
 	}
 }
 
-func TestBuildAuditReport_NonCriticalDriftStillComplete(t *testing.T) {
-	// A non-critical field (private repo creation enabled) drifting does
-	// NOT fail the lockdown invariant — it's reported but LockdownComplete
-	// stays true, mirroring init's notion of "ready".
+func TestBuildAuditReport_NonCriticalDriftFails(t *testing.T) {
+	// A non-critical field (private repo creation enabled) drifting now
+	// FAILS the lockdown invariant — any drift is treated as failing to
+	// match the web GUI's verdict. The field is still reported as
+	// non-critical, but LockdownComplete goes false.
 	const drifted = "members_can_create_private_repositories"
 	live := orgLiveFromSettings("team")
 	live[drifted] = false
@@ -104,8 +105,8 @@ func TestBuildAuditReport_NonCriticalDriftStillComplete(t *testing.T) {
 
 	report := buildAuditReport(client, "cs50-fall-2026", "team")
 
-	if !report.LockdownComplete {
-		t.Errorf("a non-critical field drifted; LockdownComplete should stay true")
+	if report.LockdownComplete {
+		t.Errorf("a non-critical field drifted; LockdownComplete must be false (any drift fails)")
 	}
 	found := false
 	for _, s := range report.Unenforced {

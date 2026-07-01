@@ -100,6 +100,13 @@ func runTeardown(client githubapi.Client, in io.Reader, out, errOut io.Writer, o
 		return nil
 	}
 
+	// Collect the per-classroom team refs (students + staff) BEFORE the
+	// repo deletions remove the config repo that records them, so we can
+	// sweep the teams afterward (deleting repos does not delete teams).
+	// Best-effort: a read failure here shouldn't block the destructive
+	// repo teardown the teacher asked for.
+	teams := collectClassroomTeams(client, org, errOut)
+
 	_, _ = fmt.Fprintf(out, "Found %d repo(s) in %s:\n", len(repos), org)
 	for _, r := range repos {
 		_, _ = fmt.Fprintf(out, "  %s/%s\n", org, r)
@@ -176,10 +183,77 @@ func runTeardown(client githubapi.Client, in io.Reader, out, errOut io.Writer, o
 		summary += " (marker repo preserved)"
 	}
 	_, _ = fmt.Fprintln(out, summary+".")
+
+	// Sweep the classroom teams collected before deletion. This runs even
+	// when the marker repo was preserved after a partial repo-delete
+	// failure: the team refs were snapshotted up-front from the (still
+	// intact) classroom.json, DeleteClassroomTeam is idempotent (404 =
+	// already gone), and the deletes are independent of any surviving
+	// repos — so a re-run that re-reads the same refs harmlessly no-ops.
+	// Sweeping now avoids stranding write-granted staff teams when a
+	// stuck repo means a clean re-run never happens.
+	for _, t := range teams {
+		if err := configrepo.DeleteClassroomTeam(client, org, t); err != nil {
+			_, _ = fmt.Fprintf(errOut, "Warning: %s: could not delete classroom team %q (%v); delete it by hand at https://github.com/orgs/%s/teams if it lingers.\n",
+				org, t.Slug, err, org)
+			continue
+		}
+		_, _ = fmt.Fprintf(out, "%s: deleted team %s\n", org, t.Slug)
+	}
+
 	if failed > 0 {
 		return fmt.Errorf("%d repo(s) failed to delete — see stderr for per-repo errors", failed)
 	}
 	return nil
+}
+
+// collectClassroomTeams reads every classroom.json in the config repo
+// and returns the team refs to sweep on teardown: each classroom's
+// students team plus its staff teams (instructor, ta). Best-effort — a
+// read failure is warned and skipped rather than aborting the teardown,
+// since the destructive repo deletions are the primary action. Refs are
+// deduped by slug (a hand-edited config could repeat one).
+func collectClassroomTeams(client githubapi.Client, org string, errOut io.Writer) []configrepo.TeamRef {
+	branch, err := configrepo.ResolveConfigRepoBranch(client, org)
+	if err != nil {
+		_, _ = fmt.Fprintf(errOut, "Warning: %s: could not resolve the config repo branch to sweep classroom teams (%v); delete any lingering classroom50-* teams by hand.\n", org, err)
+		return nil
+	}
+	entries, _, err := configrepo.ListDirContents(client, org, configrepo.ConfigRepoName, "", branch)
+	if err != nil {
+		_, _ = fmt.Fprintf(errOut, "Warning: %s: could not list classrooms to sweep their teams (%v); delete any lingering classroom50-* teams by hand.\n", org, err)
+		return nil
+	}
+	bySlug := map[string]configrepo.TeamRef{}
+	add := func(t *configrepo.TeamRef) {
+		// Filter through the same fail-closed predicate the delete uses
+		// (mirrors the web's teardown, which .filter()s refs through
+		// isDeletableClassroomTeamRef before the bulk delete). A ref
+		// missing a positive id or the classroom50- prefix never enters
+		// the sweep set, defense-in-depth on top of DeleteClassroomTeam.
+		if t != nil && configrepo.IsDeletableClassroomTeamRef(*t) {
+			bySlug[t.Slug] = *t
+		}
+	}
+	for _, e := range entries {
+		if e.Type != "dir" {
+			continue
+		}
+		c, ok, err := configrepo.LoadClassroom(client, org, e.Name, branch)
+		if err != nil || !ok {
+			continue
+		}
+		add(c.Team)
+		if c.Teams != nil {
+			add(c.Teams.Instructor)
+			add(c.Teams.TA)
+		}
+	}
+	teams := make([]configrepo.TeamRef, 0, len(bySlug))
+	for _, t := range bySlug {
+		teams = append(teams, t)
+	}
+	return teams
 }
 
 // requireConfigRepo confirms <org>/classroom50 exists. 404 is the
