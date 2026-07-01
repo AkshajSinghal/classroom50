@@ -14,6 +14,8 @@ import {
   Globe,
   Eye,
   Check,
+  Sun,
+  Moon,
 } from "lucide-react"
 import {
   Link,
@@ -39,6 +41,7 @@ import useGetPublicAssignment from "@/hooks/useGetPublicAssignment"
 import useDotClassroom50 from "@/hooks/useDotClassroom50"
 import { studentRepoName } from "@/util/studentRepo"
 import useGetAssignmentRepo from "@/hooks/useGetAssignmentRepo"
+import { useTheme } from "@/hooks/useTheme"
 import type { Classroom } from "@/types/classroom"
 import {
   createContext,
@@ -121,7 +124,7 @@ export const DrawerSidebar = ({
         className="drawer-overlay"
       />
       <div
-        className={`flex flex-col min-h-full bg-[#212a3a] text-white transition-[width] duration-200 ease-out ${
+        className={`flex flex-col min-h-full bg-neutral text-neutral-content transition-[width] duration-200 ease-out ${
           collapsed
             ? "w-16 min-w-16 [&>div]:px-2"
             : "w-60 min-w-30 [&>div]:px-6"
@@ -144,18 +147,26 @@ const navItemClass = (active: boolean, collapsed: boolean) =>
     collapsed ? "justify-center" : ""
   } ${
     active
-      ? "border-[#accefb] bg-[#323b49]"
-      : "border-transparent hover:bg-[#323b49]/60"
+      ? "border-[var(--sidebar-accent)] bg-[var(--sidebar-surface)]"
+      : "border-transparent hover:bg-[var(--sidebar-surface)]/60"
   }`
+
+// Shared sidebar tooltip tokens (dark rail): the tooltip bubble + text colors
+// that every collapsed-sidebar tooltip uses. Kept as one source so a token
+// rename lands in one place instead of ~5 hand-copied class strings.
+const sidebarTooltip =
+  "tooltip tooltip-right [--tt-bg:var(--sidebar-surface)] before:text-neutral-content"
+
+// Interactive icon-button row inside the rail (back-links, collapse/expand):
+// the tooltip base plus a muted icon that lightens and gains a surface on hover.
+const sidebarIconButton = (padding: "p-1" | "p-2" = "p-1") =>
+  `${sidebarTooltip} cursor-pointer rounded-md ${padding} text-neutral-content/60 transition-colors hover:bg-[var(--sidebar-surface)] hover:text-neutral-content`
 
 const Tip = ({ label, children }: { label: string; children: ReactNode }) => {
   const { collapsed } = useSidebarCollapse()
   if (!collapsed) return <>{children}</>
   return (
-    <div
-      className="tooltip tooltip-right w-full [--tt-bg:#323b49] before:text-white"
-      data-tip={label}
-    >
+    <div className={`${sidebarTooltip} w-full`} data-tip={label}>
       {children}
     </div>
   )
@@ -189,34 +200,34 @@ export const ClassroomLogo = () => {
 
   if (collapsed) {
     return (
-      <div className="flex items-center justify-center px-2 py-6 border-b-1 border-[#444]">
+      <div className="flex items-center justify-center px-2 py-6 border-b-1 border-neutral-content/20">
         <button
           type="button"
           onClick={toggle}
-          className="tooltip tooltip-right [--tt-bg:#323b49] before:text-white cursor-pointer rounded-md p-1 transition-colors hover:bg-[#323b49]"
+          className={`${sidebarTooltip} cursor-pointer rounded-md p-1 transition-colors hover:bg-[var(--sidebar-surface)]`}
           data-tip="Expand sidebar"
           aria-label="Expand sidebar"
         >
-          <GraduationCap className="size-8 text-[#accefb]" />
+          <GraduationCap className="size-8 text-[var(--sidebar-accent)]" />
         </button>
       </div>
     )
   }
 
   return (
-    <div className="flex items-center gap-2 px-6 py-6 border-b-1 border-[#444]">
+    <div className="flex items-center gap-2 px-6 py-6 border-b-1 border-neutral-content/20">
       <Link
         to="/"
-        className="flex flex-1 min-w-0 items-center text-lg text-white font-bold"
+        className="flex flex-1 min-w-0 items-center text-lg text-neutral-content font-bold"
         title="Classroom 50"
       >
-        <GraduationCap className="size-8 text-[#accefb] shrink-0 mr-2" />
+        <GraduationCap className="size-8 text-[var(--sidebar-accent)] shrink-0 mr-2" />
         <span className="whitespace-nowrap">Classroom 50</span>
       </Link>
       <button
         type="button"
         onClick={toggle}
-        className="shrink-0 rounded-md p-1 text-[#aaa] transition-colors hover:bg-[#323b49] hover:text-white cursor-pointer"
+        className="shrink-0 rounded-md p-1 text-neutral-content/60 transition-colors hover:bg-[var(--sidebar-surface)] hover:text-neutral-content cursor-pointer"
         aria-label="Collapse sidebar"
         title="Collapse sidebar"
       >
@@ -235,7 +246,7 @@ const ExpandSidebarButton = () => {
       <button
         type="button"
         onClick={toggle}
-        className="tooltip tooltip-right [--tt-bg:#323b49] before:text-white cursor-pointer rounded-md p-2 text-[#aaa] transition-colors hover:bg-[#323b49] hover:text-white"
+        className={sidebarIconButton("p-2")}
         data-tip="Expand sidebar"
         aria-label="Expand sidebar"
       >
@@ -254,7 +265,7 @@ export const AllClasses = ({ org }: { org: string }) => {
         <Link
           to="/$org/classes"
           params={{ org }}
-          className="tooltip tooltip-right [--tt-bg:#323b49] before:text-white rounded-md p-1 text-[#aaa] transition-colors hover:bg-[#323b49] hover:text-white"
+          className={sidebarIconButton("p-1")}
           data-tip="All Classes"
           aria-label="All Classes"
         >
@@ -382,7 +393,7 @@ const AssignmentSidebarMenu = ({
           <Link
             to="/$org/$classroom/assignments"
             params={{ org, classroom }}
-            className="tooltip tooltip-right [--tt-bg:#323b49] before:text-white rounded-md p-1 text-[#aaa] transition-colors hover:bg-[#323b49] hover:text-white"
+            className={sidebarIconButton("p-1")}
             data-tip="All Assignments"
             aria-label="All Assignments"
           >
@@ -410,7 +421,7 @@ const AssignmentSidebarMenu = ({
             <>
               {[0, 1].map((i) => (
                 <li key={i} className="flex px-2 py-2">
-                  <span className="skeleton h-4 w-24 bg-white/10" />
+                  <span className="skeleton h-4 w-24 bg-neutral-content/10" />
                 </li>
               ))}
             </>
@@ -529,7 +540,7 @@ export const TeacherSidebarMenu = ({
           <>
             {[0, 1].map((i) => (
               <li key={i} className="flex px-2 py-2">
-                <span className="skeleton h-4 w-24 bg-white/10" />
+                <span className="skeleton h-4 w-24 bg-neutral-content/10" />
               </li>
             ))}
           </>
@@ -654,6 +665,7 @@ export const SidebarFooter = () => {
   const [menuOpen, setMenuOpen] = useState(false)
   const footerRef = useRef<HTMLDivElement | null>(null)
   const { collapsed } = useSidebarCollapse()
+  const { isDark, toggleTheme } = useTheme()
 
   useEffect(() => {
     if (!menuOpen) return
@@ -676,7 +688,7 @@ export const SidebarFooter = () => {
   return (
     <div
       ref={footerRef}
-      className="relative mt-auto cursor-pointer border-t border-[#444] py-4"
+      className="relative mt-auto cursor-pointer border-t border-neutral-content/20 py-4"
       onClick={() => setMenuOpen((open) => !open)}
       role="button"
       tabIndex={0}
@@ -754,6 +766,34 @@ export const SidebarFooter = () => {
             </>
           )}
           <li>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation()
+                toggleTheme()
+              }}
+              aria-pressed={isDark}
+            >
+              {isDark ? (
+                <Moon className="size-4" />
+              ) : (
+                <Sun className="size-4" />
+              )}
+              <span className="flex-1 text-left">
+                {isDark ? "Dark mode" : "Light mode"}
+              </span>
+              <input
+                type="checkbox"
+                className="toggle toggle-sm toggle-primary pointer-events-none"
+                checked={isDark}
+                readOnly
+                tabIndex={-1}
+                aria-hidden="true"
+              />
+            </button>
+          </li>
+          <div className="divider my-1" />
+          <li>
             <a
               href="https://github.com/foundation50/classroom50/discussions"
               target="_blank"
@@ -787,13 +827,15 @@ export const SidebarFooter = () => {
 
         {!collapsed && (
           <div className="min-w-0 flex-1">
-            <div className="truncate font-medium text-white">{name}</div>
+            <div className="truncate font-medium text-neutral-content">
+              {name}
+            </div>
 
             {org ? (
               <div className="flex items-center gap-1.5">
-                <span className="text-[#aaa]">
+                <span className="text-neutral-content/60">
                   {labelPending ? (
-                    <span className="skeleton inline-block h-3 w-16 align-middle bg-white/10" />
+                    <span className="skeleton inline-block h-3 w-16 align-middle bg-neutral-content/10" />
                   ) : (
                     roleLabelText
                   )}
@@ -874,7 +916,7 @@ export const MyClasses = ({ settings = false, selected = "" }) => {
       <ul className="flex flex-col gap-1">
         {!roleResolved ? (
           <li className="flex px-2 py-2">
-            <span className="skeleton inline-block h-4 w-24 align-middle bg-white/10" />
+            <span className="skeleton inline-block h-4 w-24 align-middle bg-neutral-content/10" />
           </li>
         ) : (
           <Tip label={classesLabel}>

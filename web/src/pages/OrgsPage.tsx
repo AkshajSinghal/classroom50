@@ -113,7 +113,7 @@ function OrgCard({
 
   return (
     <motion.div
-      className="card bg-base-100 rounded-xl col-span-12 border border-[#eee] md:col-span-6"
+      className="card bg-base-100 rounded-xl col-span-12 border border-base-300 md:col-span-6"
       variants={enterExit}
       initial="initial"
       animate="animate"
@@ -260,7 +260,7 @@ const OrgsPage = () => {
     <div className="min-h-screen">
       <Drawer>
         <DrawerToggle />
-        <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
+        <DrawerContent className="p-10 bg-base-200 2xl:px-50">
           {isLoading ? (
             <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
               <span className="loading loading-spinner loading-lg text-primary" />

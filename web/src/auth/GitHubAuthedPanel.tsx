@@ -63,12 +63,12 @@ export function GitHubAuthedPanel({
           </div>
         )}
 
-        <div className="w-full rounded-xl border border-[#eee] bg-base-200 p-3 text-left font-mono text-xs text-base-content/60">
+        <div className="w-full rounded-xl border border-base-300 bg-base-200 p-3 text-left font-mono text-xs text-base-content/60">
           <strong className="text-base-content">gh_access_token</strong> →{" "}
           {previewToken(token)}
         </div>
 
-        <div className="w-full rounded-xl border border-[#eee] bg-base-200 p-3 text-left font-mono text-xs text-base-content/60">
+        <div className="w-full rounded-xl border border-base-300 bg-base-200 p-3 text-left font-mono text-xs text-base-content/60">
           <strong className="text-base-content">granted scopes</strong> →{" "}
           {tokenScope || "(none reported)"}
         </div>

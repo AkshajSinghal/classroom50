@@ -193,7 +193,7 @@ const AssignmentsTable = ({
             assignments?.map((assignment) => (
               <tr
                 key={assignment.slug}
-                className="hover:cursor-pointer hover:bg-[#fafafa]"
+                className="hover:cursor-pointer hover:bg-base-200"
               >
                 <td
                   onClick={() =>

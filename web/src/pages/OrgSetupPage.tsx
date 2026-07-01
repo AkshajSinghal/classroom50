@@ -54,10 +54,10 @@ const OrgSteps = ({
               className={`step ${stage === 1 ? "step-info" : "step-success"}`}
             ></li>
             <li
-              className={`step ${stage === 2 ? "step-info" : stage === 3 ? "step-success" : "[--step-bg: #eee]"}`}
+              className={`step ${stage === 2 ? "step-info" : stage === 3 ? "step-success" : "[--step-bg:var(--color-base-300)]"}`}
             ></li>
             <li
-              className={`step ${stage === 3 ? "step-primary" : "[--step-bg: #eee]"}`}
+              className={`step ${stage === 3 ? "step-primary" : "[--step-bg:var(--color-base-300)]"}`}
             ></li>
           </ul>
           <div className="card-actions col-start-3 justify-self-end">
@@ -217,7 +217,7 @@ const OrgSetupPage = () => {
     <div className="min-h-screen">
       <Drawer>
         <DrawerToggle />
-        <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
+        <DrawerContent className="p-10 bg-base-200 2xl:px-50">
           <div className="mb-8">
             <h1 className="font-bold text-2xl">Setup Classroom 50</h1>
             <p className="text-sm text-base-content/70">

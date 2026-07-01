@@ -106,7 +106,7 @@ const CreateClassroomForm = ({
           {(field) => (
             <>
               <label htmlFor={field.name} className="label font-bold">
-                Classroom Name<span className="text-[#f00]">*</span>
+                Classroom Name<span className="text-error">*</span>
               </label>
 
               <input
@@ -136,7 +136,7 @@ const CreateClassroomForm = ({
           {(field) => (
             <>
               <label htmlFor={field.name} className="label font-bold">
-                Classroom Slug<span className="text-[#f00]">*</span>
+                Classroom Slug<span className="text-error">*</span>
               </label>
 
               <input

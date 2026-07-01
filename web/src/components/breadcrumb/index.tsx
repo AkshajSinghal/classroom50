@@ -15,7 +15,7 @@ const Breadcrumb = ({
   if (!org && !classroom) return <div></div>
 
   return (
-    <div className={`[&>a]:text-[#4e80ee] ${className}`}>
+    <div className={`[&>a]:text-primary ${className}`}>
       {org && (
         <Link to="/$org" params={{ org }}>
           Classes

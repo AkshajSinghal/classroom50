@@ -109,7 +109,7 @@ export const TemplateField = ({
         htmlFor={field.name}
         className="label font-bold mb-2 flex items-center gap-1.5"
       >
-        <GitHub className="size-4 text-[#ddd] opacity-70" />
+        <GitHub className="size-4 text-base-content/30 opacity-70" />
         Template Repository
       </label>
       <input

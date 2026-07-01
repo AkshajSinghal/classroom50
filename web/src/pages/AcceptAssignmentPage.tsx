@@ -47,7 +47,7 @@ const AcceptNavbar = () => {
     <div className="navbar bg-base-100 shadow-sm">
       <Link to="/">
         <div className="flex p-6 text-lg font-bold">
-          <GraduationCap className="size-8 text-[#accefb] mr-2" /> Classroom 50
+          <GraduationCap className="size-8 text-primary mr-2" /> Classroom 50
         </div>
       </Link>
     </div>
@@ -56,7 +56,7 @@ const AcceptNavbar = () => {
 
 const AcceptCard = ({ children }: { children: React.ReactNode }) => {
   return (
-    <div className="card w-200 max-w-[calc(100vw-2em)] p-8 m-auto rounded-xl mt-10 border border-[#eee]">
+    <div className="card w-200 max-w-[calc(100vw-2em)] p-8 m-auto rounded-xl mt-10 border border-base-300">
       {children}
     </div>
   )
@@ -67,7 +67,7 @@ const UserInfo = ({ user }: { user: GitHubUser | null }) => {
   const displayName = user?.name || user?.login || "GitHub user"
 
   return (
-    <div className="flex gap-4 bg-[#fafafa] p-4 rounded-xl border border-[#ddd]">
+    <div className="flex gap-4 bg-base-200 p-4 rounded-xl border border-base-300">
       <div className="avatar avatar-placeholder">
         {user?.avatar_url ? (
           <div className="w-12 rounded-full">
@@ -570,7 +570,7 @@ const AcceptAssignmentPage = () => {
           <div className="flex flex-col gap-4">
             <UserInfo user={user} />
 
-            <div className="flex gap-2 flex-col bg-[#fafafa] p-4 rounded-xl border border-[#ddd]">
+            <div className="flex gap-2 flex-col bg-base-200 p-4 rounded-xl border border-base-300">
               <label className="label text-lg">
                 {repoExistsAlready
                   ? "Repository already exists as:"
