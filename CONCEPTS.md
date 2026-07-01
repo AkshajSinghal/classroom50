@@ -20,7 +20,7 @@ Shared domain vocabulary for this project — entities, named processes, and sta
 
 - **Onboarding** — the student-side flow where an invited student self-reports their identity so the teacher can add them to the classroom roster. Distinct from being an org/team member: a student can have classroom access (be on the team) yet not have onboarded.
 
-- **Onboarding repo** — a private repo a student creates in the org to carry their self-report, named `classroom50-onboarding-<github-id>-<random-hash>`. The random suffix makes the name unguessable (squat-proof) and unique per onboarding; it is a read/delete address, not a teacher-side lookup key.
+- **Onboarding repo** — a private repo a student creates in the org to carry their self-report, named `onboarding-<github-id>` (one per student per org). The name is derivable from the public github-id, not a secret: it is a read/delete address, not a teacher-side lookup key (reconcile still matches by YAML content + commit author, never by name). Because it is guessable, another org member can pre-create it; the commit-author check stops them binding a victim's identity, and a victim who hits a squatted repo gets a clear "name already taken" error to escalate, not a silent hijack. (Earlier this name carried a random suffix for squat-proofing; that was dropped to simplify the lifecycle.)
 
 - **Self-report** — the `.classroom50-onboarding.yaml` payload committed into the onboarding repo: the student's claimed email + name plus their GitHub-attested `github_username`/`github_id`, and an optional `invite_token`.
 

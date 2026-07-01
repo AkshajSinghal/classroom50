@@ -37,43 +37,61 @@ GitHub-backed onboarding/identity flow does not re-derive it.
 
 ## Guidance
 
-### 1. Name the self-report artifact by an unguessable, self-bound key — not by a derived key
+### 1. Name the self-report artifact by a self-bound key; if the name is guessable, plan for squatting
 
 Each student creates a private "onboarding repo" holding a
 `.classroom50-onboarding.yaml` self-report (their claimed email + name; their
-GitHub-attested `github_username`/`github_id`). Name it:
+GitHub-attested `github_username`/`github_id`). We name it:
 
 ```
-classroom50-onboarding-<github-id>-<random-hash>
+onboarding-<github-id>
 ```
 
-- The **github-id segment** scopes a prefix list so a student (or the teacher)
-  can find a student's own repos: `classroom50-onboarding-<id>-`.
-- The **browser-generated random suffix** (128 bits of hex) makes the full name
-  unguessable, so no other org member can **pre-create / squat** a victim's
-  onboarding repo, and it is unique per onboarding attempt (a student in two
-  classrooms of one org gets two distinct repos — no collision).
+one repo per student per org. The github-id segment makes the name derivable,
+so both the student's own lookup and the teacher's reconcile can reconstruct it
+exactly (and still list by the shared `onboarding-` prefix). This trades the
+prior squat-proofing for a simpler, single-repo-per-student lifecycle.
 
-Do NOT derive the name from a guessable input (email hash, or a bare github-id).
-A guessable name re-opens a squat/denial-of-service: any org member can
-pre-create `…-<victimId>` and the victim's create then 422s and their commit
-403s, locking them out with no fallback name.
+The trade-off, made deliberately: because `github-id` is public, the full name
+is **guessable**, so any org member can **pre-create / squat** `onboarding-<victimId>`.
+That does NOT let them hijack the identity (the author check in §2 binds only
+their own attested id), but it can lock the victim out — their create 422s and a
+naive "re-fetch the existing repo and commit into it" then 403s, because they
+can't push to a repo someone else owns. Two things keep the simpler name safe:
+
+- **Detect the squat, don't fall into it.** On the 422, re-fetch the repo and
+  check `permissions.push`; if you can't write, fail with an actionable "name
+  already taken — ask your instructor to remove it" error instead of 403-ing
+  deep inside the commit. (Never delete a repo you didn't create this call.)
+- **Match exactly, not by prefix.** With a suffix-free name, `onboarding-42` is
+  a string prefix of `onboarding-420`; the own-repo/cleanup lookups must compare
+  the full name, not `startsWith`, or one student's repo leaks into another's
+  resolution.
+
+(The earlier design appended a 128-bit random suffix —
+`classroom50-onboarding-<github-id>-<random-hash>` — to make the name
+unguessable and per-attempt unique, which removed the squat vector entirely at
+the cost of a non-derivable name. If you don't need the simpler lifecycle,
+prefer the unguessable suffix: a guessable self-report-artifact name is a
+denial-of-service surface you then have to defend explicitly.)
 
 ### 2. Trust the self-report only after a GitHub-attested author check
 
 The YAML's `github_username`/`github_id` are written by the authenticated
 student, but a teacher must still verify the writer IS who they claim. Read the
 commit author/committer ids of the YAML file and require the claimed
-`github_id` to be among them. This is what makes the unguessable name safe: a
+`github_id` to be among them. This is what keeps a guessable name safe: a
 squatter can only ever author commits as themselves, so they can only bind
-their own attested id.
+their own attested id — never a victim's.
 
 ### 3. The artifact name is a read/delete address, NOT a match key
 
-Because the random suffix is not derivable by the teacher, reconciliation must
-NOT try to recompute the name. Instead: **list onboarding repos by the shared
-prefix, read each YAML, and match the payload back to a roster row by content**,
-strongest key first:
+Even though the name is now derivable, reconciliation must NOT bind a repo to a
+row by its name. The name attests nothing — anyone can create
+`onboarding-<id>`, and the id in the name is unverified until the author check.
+So keep the inversion: **list onboarding repos by the shared prefix, read each
+YAML, verify the commit author, and match the payload back to a roster row by
+content**, strongest key first:
 
 1. `invite_token` (an always-minted, teacher-issued per-row secret written into
    the YAML when the student used a unique secure link) — unguessable, binds to
@@ -81,8 +99,17 @@ strongest key first:
 2. `github_id` — immutable; binds a username-invited row.
 3. `email` — last resort; the accepted-residual-risk path (the YAML email is
    attacker-controllable, so this is hardened: only match a row with no stronger
-   key and a real email key, and route ambiguous multi-match to "needs
-   attention" rather than guessing).
+   key and a real email key, and route an ambiguous multi-match to `unmatched`
+   (with a reason) rather than guessing).
+
+Implement this precedence ONCE and share it. There are two consumers of "which
+report binds to which row": the teacher's reconcile write, and the teacher UI's
+"ready to confirm" badge. If each matches independently they drift — an earlier
+version's badge matched by `github_id`/raw-email only and ignored `invite_token`
+and `email_hash`, so it could show "ready" for a row reconcile would NOT bind
+(or vice versa). Extract a single `matchReportToRow` (and a `bindReportsToRows`
+that runs the one-to-one binding in report order) that both call, so the badge
+can never promise something reconcile won't deliver.
 
 ### 4. Put team membership on the org invitation (team_ids), not a separate call
 
@@ -107,10 +134,12 @@ break with no back-compat).
 
 Without this pattern, the obvious-looking shortcuts each fail:
 
-- **Deriving the repo name from email/id** seems convenient (the teacher can
-  fetch it directly) but it is guessable, which re-opens squat + hijack. The
-  unguessable name + content-driven match trades one cheap `GET` for a prefix
-  list, and removes a whole class of identity attacks.
+- **Deriving the repo name from email/id** makes the name guessable, which
+  re-opens squat → victim lockout (not identity hijack — the author check
+  blocks that). If you accept that for a simpler lifecycle, you must detect the
+  squat (write-permission check + actionable error) and match the full name
+  exactly; otherwise prefer an unguessable random suffix, which removes the
+  vector entirely at the cost of a non-derivable name.
 - **Using team membership as the "has onboarded" signal** is tempting but wrong:
   both invite flows put a student on the team BEFORE they onboard (username flow
   at invite time; email flow via `team_ids`), so team membership means "has
@@ -138,8 +167,9 @@ Without this pattern, the obvious-looking shortcuts each fail:
 **Unguessable naming + content-driven match (the core inversion):**
 
 ```text
-Student side:  create  classroom50-onboarding-<id>-<random>   (commit YAML self-report)
-Teacher side:  list    classroom50-onboarding-*  ->  read each YAML
+Student side:  create  onboarding-<id>   (commit YAML self-report)
+               guard    if the repo exists but I can't push → squatted → error
+Teacher side:  list    onboarding-*  ->  read each YAML
                verify   commit author/committer id == payload.github_id
                match    payload -> roster row by  invite_token > github_id > email
                write    one batched students.csv commit (status -> "enrolled")
