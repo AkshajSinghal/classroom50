@@ -168,7 +168,7 @@ SOURCE_GIT_ERROR = "git-error"
 SOURCE_NONE = "none"
 SOURCE_OPENABLE = (SOURCE_ACCEPT, SOURCE_ROOT)
 
-# Control paths allowed_files enforcement (issue #169) never removes,
+# Control paths allowed_files enforcement never removes,
 # even under a bare `*`. Lockstep with submit.go's isControlPath, pinned
 # from both sides by the shared fixture
 # cli/shared/testdata/control_path_cases.json. Directory controls match by
@@ -834,7 +834,7 @@ def _classify_disallowed(patterns: list[str], paths: list[str]) -> list[str] | N
 
 def enforce_allowed_files(workspace: pathlib.Path, patterns: list[str]) -> list[str]:
     """Remove every working-tree file the allowed_files patterns disallow
-    so the autograder only sees allowed files (issue #169). Control files
+    so the autograder only sees allowed files. Control files
     are always kept. Working-tree-only, so the baseline and review/
     Feedback-PR links are unaffected. Returns the sorted removed paths;
     no-ops when patterns is empty.
@@ -1977,7 +1977,7 @@ def main() -> int:
         if f.exists():
             f.unlink()
 
-    # Enforce allowed_files (issue #169) before grading: remove disallowed
+    # Enforce allowed_files before grading: remove disallowed
     # files so the autograder only sees allowed ones. Fails open — if the
     # matcher can't run, enforce_allowed_files returns [] and grading
     # proceeds on the unfiltered tree (see its docstring for how to flip to

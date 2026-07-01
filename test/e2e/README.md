@@ -52,15 +52,14 @@ a second self-contained init→teardown, so budget ~60 min (hence `-timeout 60m`
 ## In CI
 
 `.github/workflows/e2e.yaml` runs it on `workflow_dispatch` (nightly is currently disabled until the
-secrets are provisioned). Provision the secrets/vars above on this repo
-(`foundation50/classroom50-internal`); runs are serialized per-org and never cancel in
+secrets are provisioned). Provision the secrets/vars above on this repo; runs are serialized per-org and never cancel in
 flight (a cancelled run would leave the org dirty). A hard-killed run is self-healed by the next
 run's teardown-first plus the workflow's `if: always()` safety-net wipe.
 
 ## Notes / known rough edges
 
-- Assertions target **current** branch behavior — notably the founder is repo `admin` after `accept`
-  (#112). If the group permission model moves to teacher-managed/`maintain`, flip that one assertion
+- Assertions target **current** branch behavior — notably the founder is repo `admin` after `accept`.
+  If the group permission model moves to teacher-managed/`maintain`, flip that one assertion
   in `happy_path_test.go` (step 4.2).
 - Enterprise test orgs grant more than a real **Team-plan** teacher, so this validates the happy path
   but won't catch Team-plan-only permission failures.

@@ -97,7 +97,7 @@ gh teacher audit <org> --json    # machine-readable report on stdout
 Re-reads `GET /orgs/{org}` and classifies each in-scope member-default setting (filtered by the org's plan) into:
 
 - **Verified (read from the API)** — settings whose live value matches the locked-down value `init` applies via `PATCH /orgs/{org}`. Drift is flagged here (e.g. you re-checked "Allow members to delete or transfer repositories").
-- **Action required** — API-readable settings that are NOT locked down, each with the exact GitHub-UI fix. Critical fields (the ones that defang the founder repo-admin grant org-wide, issue #112) failing is what makes the command exit non-zero.
+- **Action required** — API-readable settings that are NOT locked down, each with the exact GitHub-UI fix. Critical fields (the ones that defang the founder repo-admin grant org-wide) failing is what makes the command exit non-zero.
 - **Confirm by hand** — the four web-UI-only settings (App access requests, repo-admin GitHub App installs, Projects base permissions, branch renames). GitHub exposes **no REST API to read** these, so audit can neither confirm nor deny them; it lists them for a visual check rather than implying they're fine.
 
 **Exit status** is non-zero when a critical API-readable field is unenforced (so `gh teacher audit <org> && …` is safe in scripts) or when the org couldn't be read back (inconclusive — treated as a conservative failure, never a false all-clear). The unreadable manual items never fail the command. `--json` emits `{org, plan, read_ok, lockdown_complete, enforced[], unenforced[], manual_unreadable[], settings_url}` for an orchestrating agent to branch on.

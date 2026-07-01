@@ -1,5 +1,5 @@
 // Package orgpolicy is the shared org-member-defaults policy seam: the
-// canonical least-privilege member-privilege model (issue #112), the
+// canonical least-privilege member-privilege model, the
 // plan-aware filtering of which settings apply, the classification of a
 // live GET /orgs/{org} response against that model, and the static
 // manual-hardening checklist for the web-UI-only settings GitHub exposes
@@ -30,7 +30,7 @@ type MemberDefaultSetting struct {
 	ManualFix string
 	// Critical marks the lockdown fields whose absence re-opens the
 	// org-wide repo-admin danger that makes the founder-admin grant in
-	// `gh student accept` safe (#112). If any of these is rejected, the
+	// `gh student accept` safe. If any of these is rejected, the
 	// "repo-admin is defanged org-wide" invariant does NOT hold and init
 	// must say so loudly rather than reporting a clean success. The
 	// enabling fields (private-repo / Pages creation) are deliberately
@@ -87,7 +87,7 @@ func MemberDefaultSettings(plan string) []MemberDefaultSetting {
 }
 
 // allMemberDefaultSettings: the full canonical list of org-level
-// member policies, in apply order. The intent (issue #112) is a
+// member policies, in apply order. The intent is a
 // least-privilege org where the only member capability is private-repo
 // creation; every other member privilege and dangerous repo-admin
 // capability is locked to org owners. Because `gh student accept` now

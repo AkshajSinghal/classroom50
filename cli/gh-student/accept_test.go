@@ -38,7 +38,7 @@ func TestCheckAcceptableMode(t *testing.T) {
 	}
 }
 
-// TestInviteUserAsAdmin pins the founder-admin grant (#112): accept must
+// TestInviteUserAsAdmin pins the founder-admin grant: accept must
 // keep the student as an `admin` collaborator (not the old `maintain`),
 // because only an admin can manage collaborators for the founder-driven
 // group-invite flow. A regression to a weaker permission silently breaks

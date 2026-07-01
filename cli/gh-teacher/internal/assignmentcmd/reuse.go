@@ -22,7 +22,7 @@ import (
 
 // assignmentReuseCmd copies an assignment record from one classroom's
 // assignments.json into another's in the SAME org, changing only
-// slug/name. Mirrors classroom50-web's reuse (web #60): the record is
+// slug/name. Mirrors classroom50-web's reuse: the record is
 // copied verbatim through the typed AssignmentEntry (every v1 field
 // round-trips), and unknown/future top-level fields survive via
 // AssignmentEntry.Extra.

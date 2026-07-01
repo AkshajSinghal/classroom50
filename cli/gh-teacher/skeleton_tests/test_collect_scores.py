@@ -122,8 +122,8 @@ class TestRowKey:
         assert cs.row_key({"owner": "Alice"}) == "alice"
 
     def test_owner_invariant_across_changing_member_sets(self):
-        # Same owner, different credited member sets -> same key (the #104
-        # fix). member_usernames does not affect keying.
+        # Same owner, different credited member sets -> same key (the
+        # group re-credit fix). member_usernames does not affect keying.
         full = {"owner": "alice", "member_usernames": ["alice", "bob"]}
         degraded = {"owner": "alice", "member_usernames": ["alice"]}
         assert cs.row_key(full) == cs.row_key(degraded) == "alice"
@@ -280,7 +280,7 @@ class TestApplyUpdates:
         assert scores["assignments"]["hello"]["entries"][0]["late"] is False
 
     def test_group_degraded_recollect_replaces_not_duplicates(self):
-        # Issue #104 / F2 regression. First collect credits a group's full
+        # Group degraded-recollect regression. First collect credits a group's full
         # member list; a later collect whose collaborator read degraded to
         # owner-only must REPLACE the same entry (keyed on the owner), not
         # append a second one.
@@ -815,7 +815,7 @@ class TestGroupCollectClassroom:
         assert len(results) == 1
         assert results[0]["member_usernames"] == ["alice", "bob", "carol"]
         # End-to-end: collect_classroom stamps the stable owner (the repo
-        # owner from the roster), not the credited member set (#104 fix).
+        # owner from the roster), not the credited member set.
         assert results[0]["owner"] == "alice"
 
     def test_group_excludes_non_rostered_collaborator(self, monkeypatch):

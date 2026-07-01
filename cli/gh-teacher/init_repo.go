@@ -31,8 +31,8 @@ var plansThatSupportPrivatePages = map[string]bool{
 // fields GitHub rejects. init completes either way.
 //
 // Returns complete=true only when every *critical* lockdown field
-// landed — the fields that defang the founder-admin grant org-wide
-// (#112). A combined-PATCH success applies all fields atomically, so
+// landed — the fields that defang the founder-admin grant org-wide.
+// A combined-PATCH success applies all fields atomically, so
 // it's always complete; the per-field fallback computes completeness
 // from which critical fields the org rejected. init surfaces an
 // explicit "lockdown INCOMPLETE" warning when complete=false so a
@@ -330,7 +330,7 @@ type orgWorkflowPermissions struct {
 
 // ensureOrgCanCreatePRs turns on the org-level "Allow GitHub Actions to
 // create and approve pull requests" setting. The opt-in Feedback PR
-// (issue #86) is opened by each student repo's autograde workflow using
+// is opened by each student repo's autograde workflow using
 // GITHUB_TOKEN; even with `pull-requests: write`, GitHub rejects the
 // creation unless can_approve_pull_request_reviews is enabled -- and it
 // defaults off. Student repos inherit this from the org at creation
@@ -613,7 +613,7 @@ func applyBranchProtection(client githubapi.Client, out io.Writer, owner, repo, 
 }
 
 // feedbackBaseBranch is the frozen PR base the Feedback PR feature
-// (issue #86) pins at each student repo's baseline commit. Kept in
+// pins at each student repo's baseline commit. Kept in
 // lockstep with the autograde-runner workflow's BASE_BRANCH.
 const feedbackBaseBranch = "feedback"
 
@@ -665,7 +665,7 @@ type rulesetRule struct {
 
 // ensureClassroomRulesets installs two org-level branch rulesets that
 // auto-cover every current and future repo in the org (the student
-// assignment repos), powering the Feedback PR feature (issue #86):
+// assignment repos), powering the Feedback PR feature:
 //
 //  1. submission history — on `main`: block force-push + deletion so a
 //     student can't rewrite or erase their submission history; normal

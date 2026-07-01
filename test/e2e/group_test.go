@@ -112,7 +112,7 @@ func TestGroupAssignment(t *testing.T) {
 			t.Fatalf("group repo %s not created", repo)
 		}
 		if perm := collaboratorPermission(t, repo, founder); perm != "admin" {
-			t.Errorf("founder %s permission on %s = %q, want admin (#112)", founder, repo, perm)
+			t.Errorf("founder %s permission on %s = %q, want admin", founder, repo, perm)
 		}
 	})
 

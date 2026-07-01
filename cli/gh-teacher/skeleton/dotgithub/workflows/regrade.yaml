@@ -33,8 +33,6 @@ name: Regrade
 # graded commit's committer date, which a student can set freely. The schema
 # documents `late` as advisory and nothing enforces it — keep it that way; do
 # NOT wire `late` into anything that gates grades or eligibility.
-#
-# See classroom50-web#88 / classroom50-cli#208.
 
 on:
   workflow_dispatch:

@@ -192,7 +192,7 @@ func initCmd() *cobra.Command {
 			}
 			if !lockdownComplete {
 				// The org-level locks are what defang the repo-admin that
-				// `gh student accept` grants each founder (#112). Record the
+				// `gh student accept` grants each founder. Record the
 				// warning; the actionable checklist is rendered at the end
 				// (with the summary) so it isn't lost above the progress
 				// line.
@@ -222,8 +222,8 @@ func initCmd() *cobra.Command {
 				return err
 			}
 
-			// Allow Actions' GITHUB_TOKEN to open the opt-in Feedback PR
-			// (issue #86). Org-level so student repos inherit it at
+			// Allow Actions' GITHUB_TOKEN to open the opt-in Feedback PR.
+			// Org-level so student repos inherit it at
 			// creation; a maintain student can't set it per-repo. Even
 			// with pull-requests: write, PR creation is rejected unless
 			// this org toggle is on, and it defaults off.
@@ -235,7 +235,7 @@ func initCmd() *cobra.Command {
 			}
 
 			// Install the org-level rulesets that protect submission
-			// history and lock the Feedback PR base (issue #86). Org-
+			// history and lock the Feedback PR base. Org-
 			// level so they auto-cover every current/future student
 			// repo; warn-and-continue if the org's plan/policy blocks
 			// them.
@@ -317,7 +317,7 @@ func initCmd() *cobra.Command {
 				return err
 			}
 
-			// Consolidated Feedback PR readiness signal (issue #86).
+			// Consolidated Feedback PR readiness signal.
 			summary.FeedbackPRReady = prCreateReady && rulesetsReady
 			if !summary.FeedbackPRReady {
 				var missing []string

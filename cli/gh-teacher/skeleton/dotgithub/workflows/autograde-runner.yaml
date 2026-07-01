@@ -20,7 +20,7 @@ on:
 permissions:
   contents: write
   statuses: write
-  # pull-requests: write powers the opt-in Feedback PR (issue #86). The
+  # pull-requests: write powers the opt-in Feedback PR. The
   # calling shim must grant the same scope — a reusable workflow's
   # effective token is the intersection with the caller's permissions.
   pull-requests: write
@@ -457,7 +457,7 @@ jobs:
                   fail(f"runtime.apt[{i}] {pkg!r} must match {_APT.pattern}")
           apt_str = " ".join(apt)
 
-          # === Feedback PR opt-in (issue #86) ===
+          # === Feedback PR opt-in ===
           # Mirror Go's bool `feedback_pr` field. Re-validated here (like
           # the tests/runtime blocks) so a hand-edited manifest fails at
           # setup with a clear error. Emitted as "true"/"false" so the
@@ -472,7 +472,7 @@ jobs:
           if mode not in ("individual", "group"):
               fail(f"entry {assignment!r}: mode {mode!r} must be 'individual' or 'group'")
 
-          # === Allowed-files allowlist (issue #169) ===
+          # === Allowed-files allowlist ===
           # Re-validate the hand-editable manifest field and emit it as a
           # JSON array for runner.py to enforce.
           allowed_files = entry.get("allowed_files", [])
@@ -536,7 +536,7 @@ jobs:
       # instead of rejecting it. Defaults to the stricter individual rule
       # when absent.
       MODE:           ${{ needs.setup.outputs.mode }}
-      # allowed_files patterns (JSON array) from assignments.json (#169);
+      # allowed_files patterns (JSON array) from assignments.json;
       # runner.py removes disallowed files before grading. "[]" = allow all.
       ALLOWED_FILES:  ${{ needs.setup.outputs.allowed-files }}
     steps:
@@ -642,7 +642,7 @@ jobs:
               --latest=false
           fi
 
-      # === Ensure the Feedback PR (issue #86) ===
+      # === Ensure the Feedback PR ===
       # Opt-in per assignment (feedback-pr). One long-lived PR per repo:
       # base = the frozen `feedback` branch at the baseline commit,
       # head = the default branch, so the teacher reviews the full

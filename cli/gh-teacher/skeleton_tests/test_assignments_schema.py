@@ -98,7 +98,7 @@ class TestSchemaAccepts:
         assert _errors(_manifest(entry)) == []
 
     def test_custom_runner_labels(self):
-        # Custom / self-hosted runner (issue #97): runs-on
+        # Custom / self-hosted runner: runs-on
         # accepts an array of labels, no value allow-list.
         entry = _entry(runtime={"runs-on": ["self-hosted", "gpu"], "python": "3.12"})
         assert _errors(_manifest(entry)) == []
