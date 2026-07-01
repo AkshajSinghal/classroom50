@@ -60,7 +60,7 @@ const NotOrgMember = ({
 
         <div className="rounded-2xl border border-base-300 bg-base-200/50 p-5">
           <div className="flex gap-3">
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-base-300/40 text-base-content/60">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-base-300/40 text-base-content/70">
               <UserPlus className="size-5" />
             </div>
             <div className="min-w-0">
@@ -113,7 +113,7 @@ const OnboardingStatus = ({
             </span>
             <h1 className="mt-6 text-2xl font-bold">{title}</h1>
             {classroom && (
-              <p className="mt-2 text-sm text-base-content/60">{classroom}</p>
+              <p className="mt-2 text-sm text-base-content/70">{classroom}</p>
             )}
           </div>
           <div className={`rounded-2xl border p-5 ${toneClasses.box}`}>
@@ -328,7 +328,7 @@ const OnboardingPage = () => {
 
           <div className="flex gap-4 bg-base-200 p-4 rounded-xl border border-base-300">
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1 text-sm text-base-content/60">
+              <div className="flex items-center gap-1 text-sm text-base-content/70">
                 <GitHub className="size-4" />
                 <span>{user?.login ?? "Checking GitHub user..."}</span>
               </div>
@@ -379,12 +379,12 @@ const OnboardingPage = () => {
             >
               Your university email
             </label>
-            <p className="mt-1 text-xs text-base-content/60">
+            <p className="mt-1 text-xs text-base-content/70">
               Enter the email your instructor used to invite you, so they can
               match you to the class roster.
             </p>
             <div className="mt-2 flex">
-              <Mail className="size-6 mr-2 text-base-content/40" />
+              <Mail className="size-6 mr-2 text-base-content/70" />
               <input
                 id="onboard-email"
                 type="email"

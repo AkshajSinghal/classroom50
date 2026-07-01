@@ -71,7 +71,7 @@ const initialsFor = (row: OrgMemberRow) =>
 // GitHub identity line: makes it explicit these are GitHub members by showing
 // the @username and the immutable numeric GitHub id together.
 const GitHubIdentity = ({ row }: { row: OrgMemberRow }) => (
-  <span className="inline-flex items-center gap-1.5 text-xs text-base-content/50">
+  <span className="inline-flex items-center gap-1.5 text-xs text-base-content/70">
     <GitHub className="size-3.5 opacity-50" />
     {row.username ? (
       <span className="font-mono">@{row.username}</span>
@@ -79,7 +79,7 @@ const GitHubIdentity = ({ row }: { row: OrgMemberRow }) => (
       <span className="italic">no GitHub username</span>
     )}
     {row.github_id ? (
-      <span className="text-base-content/40">· id {row.github_id}</span>
+      <span className="text-base-content/70">· id {row.github_id}</span>
     ) : null}
   </span>
 )
@@ -204,7 +204,7 @@ const MemberDetail = ({
           <div className="flex items-center gap-2">
             <ClassificationBadge row={row} />
             {row.email ? (
-              <span className="text-sm text-base-content/60">{row.email}</span>
+              <span className="text-sm text-base-content/70">{row.email}</span>
             ) : null}
           </div>
 
@@ -223,7 +223,7 @@ const MemberDetail = ({
           <div>
             <h3 className="mb-2 text-sm font-semibold">Classroom access</h3>
             {row.classrooms.length === 0 ? (
-              <p className="text-sm text-base-content/60">
+              <p className="text-sm text-base-content/70">
                 Not on any classroom roster.
               </p>
             ) : (
@@ -244,14 +244,14 @@ const MemberDetail = ({
                         </span>
                       ) : null}
                     </span>
-                    <span className="flex items-center gap-2 text-base-content/60">
+                    <span className="flex items-center gap-2 text-base-content/70">
                       {access.section ? (
                         <span className="badge badge-xs badge-ghost">
                           {access.section}
                         </span>
                       ) : null}
                       {access.enrollment_status || "—"}
-                      <ChevronRight className="size-4 text-base-content/30 transition-transform duration-150 group-hover/cls:translate-x-0.5 group-hover/cls:text-base-content/60" />
+                      <ChevronRight className="size-4 text-base-content/30 transition-transform duration-150 group-hover/cls:translate-x-0.5 group-hover/cls:text-base-content/70" />
                     </span>
                   </Link>
                 ))}
@@ -335,7 +335,7 @@ const MemberDetail = ({
                 </button>
                 <button
                   type="button"
-                  className="btn btn-error btn-sm text-white"
+                  className="btn btn-error btn-sm"
                   disabled={working}
                   onClick={() => void handleRemove()}
                 >
@@ -449,7 +449,7 @@ const OrgMembersPage = () => {
           <RequireTeacher allow="owner">
             <div>
               <h1 className="text-2xl font-bold tracking-tight">Members</h1>
-              <p className="mt-1 text-sm text-base-content/60">
+              <p className="mt-1 text-sm text-base-content/70">
                 Everyone in the{" "}
                 <span className="font-mono font-semibold">{org}</span> GitHub
                 organization and the classrooms they belong to.
@@ -494,7 +494,7 @@ const OrgMembersPage = () => {
 
             <div className="mt-4 card card-border w-full overflow-hidden bg-base-100 shadow-sm">
               {isLoading ? (
-                <div className="flex items-center justify-center gap-3 px-6 py-12 text-base-content/50">
+                <div className="flex items-center justify-center gap-3 px-6 py-12 text-base-content/70">
                   <span className="loading loading-spinner loading-md" />
                   <span className="text-sm">Loading members...</span>
                 </div>
@@ -503,7 +503,7 @@ const OrgMembersPage = () => {
                   Couldn&apos;t load organization members.
                 </div>
               ) : filtered.length === 0 ? (
-                <div className="px-6 py-10 text-center text-sm text-base-content/50">
+                <div className="px-6 py-10 text-center text-sm text-base-content/70">
                   No members match your search.
                 </div>
               ) : (
@@ -557,12 +557,12 @@ const OrgMembersPage = () => {
                             )}
                           </button>
                         ) : null}
-                        <span className="hidden text-xs text-base-content/50 sm:inline">
+                        <span className="hidden text-xs text-base-content/70 sm:inline">
                           {row.classrooms.length} classroom
                           {row.classrooms.length === 1 ? "" : "s"}
                         </span>
                         <ClassificationBadge row={row} />
-                        <ChevronRight className="size-4 text-base-content/30 transition-transform duration-150 group-hover/row:translate-x-0.5 group-hover/row:text-base-content/60" />
+                        <ChevronRight className="size-4 text-base-content/30 transition-transform duration-150 group-hover/row:translate-x-0.5 group-hover/row:text-base-content/70" />
                       </div>
                     </ClickableRow>
                   ))}

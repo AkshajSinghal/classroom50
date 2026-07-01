@@ -246,7 +246,7 @@ const UnenrollStudentButton = ({
           ) : null}
 
           {isMember && !isSelf ? (
-            <p className="mt-3 text-sm text-base-content/60">
+            <p className="mt-3 text-sm text-base-content/70">
               This only unenrolls them from this classroom — their{" "}
               <span className="font-semibold">{org}</span> organization
               membership is kept (they may be in your other classes). To remove
@@ -272,7 +272,7 @@ const UnenrollStudentButton = ({
             </button>
             <button
               type="button"
-              className="btn btn-error text-white"
+              className="btn btn-error"
               disabled={submitting}
               onClick={() => void handleConfirm()}
             >
@@ -316,7 +316,7 @@ const InviteLink = ({
     <div className="border-b border-base-300 bg-base-200/40 px-6 py-2">
       <button
         type="button"
-        className="flex w-full items-center gap-1 text-xs font-medium text-base-content/60 hover:text-base-content"
+        className="flex w-full items-center gap-1 text-xs font-medium text-base-content/70 hover:text-base-content"
         onClick={onToggle}
         aria-expanded={expanded}
       >
@@ -329,7 +329,7 @@ const InviteLink = ({
       </button>
       {expanded ? (
         <div className="mt-2 flex flex-col gap-1">
-          <span className="text-xs text-base-content/50">
+          <span className="text-xs text-base-content/70">
             Advanced: share this so students can accept the org invite directly
             on GitHub. Most students use the onboarding link above instead.
           </span>
@@ -418,7 +418,7 @@ const OnboardingLink = ({
 
   return (
     <div className="flex flex-col gap-1 px-6 py-3 border-b border-base-300 bg-base-200/40">
-      <span className="text-xs font-medium text-base-content/60">
+      <span className="text-xs font-medium text-base-content/70">
         Email this onboarding link to students you invited by email:
       </span>
       <div className="join w-full">
@@ -592,7 +592,7 @@ const MatchAccountButton = ({
               />
               <ul className="menu mt-2 max-h-64 w-full flex-nowrap overflow-y-auto rounded-box border border-base-300 p-1">
                 {filtered.length === 0 ? (
-                  <li className="px-3 py-2 text-sm text-base-content/60">
+                  <li className="px-3 py-2 text-sm text-base-content/70">
                     No accounts match &quot;{filter}&quot;.
                   </li>
                 ) : (
@@ -637,13 +637,13 @@ const MatchAccountButton = ({
                     <span className="font-semibold text-base-content">
                       {selectedCandidate.name || selectedCandidate.login}
                     </span>{" "}
-                    <span className="text-base-content/60">
+                    <span className="text-base-content/70">
                       (@{selectedCandidate.login})
                     </span>
                   </span>
                 </div>
               ) : (
-                <p className="mt-3 text-sm text-base-content/50">
+                <p className="mt-3 text-sm text-base-content/70">
                   Select an account above to enable matching.
                 </p>
               )}
@@ -1065,7 +1065,7 @@ const EnrolledStudents = ({
           ) : null}
 
           {statusAvailable && invitedAtLabel ? (
-            <span className="whitespace-nowrap text-xs text-base-content/50">
+            <span className="whitespace-nowrap text-xs text-base-content/70">
               Invited {invitedAtLabel}
             </span>
           ) : null}
@@ -1262,7 +1262,7 @@ const EnrolledStudents = ({
           renders below so links are available while status loads. */}
       {!rosterReady ? (
         <div className="card card-border w-full bg-base-100 shadow-sm">
-          <div className="flex items-center justify-center gap-3 px-6 py-12 text-base-content/50">
+          <div className="flex items-center justify-center gap-3 px-6 py-12 text-base-content/70">
             <span className="loading loading-spinner loading-md" />
             <span className="text-sm">Loading roster...</span>
           </div>
@@ -1286,7 +1286,7 @@ const EnrolledStudents = ({
                 <h2 className="text-lg font-semibold text-info">
                   Ready for enrollment confirmation
                 </h2>
-                <span className="mt-0.5 text-sm text-base-content/60">
+                <span className="mt-0.5 text-sm text-base-content/70">
                   {readyToConfirm.length} student
                   {readyToConfirm.length === 1 ? " has" : "s have"} onboarded.
                   Confirm to add them to your roster.
@@ -1366,7 +1366,7 @@ const EnrolledStudents = ({
             <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-base-300">
               <div className="flex flex-col">
                 <h2 className="text-lg font-semibold">Awaiting enrollment</h2>
-                <span className="mt-0.5 text-sm text-base-content/60">
+                <span className="mt-0.5 text-sm text-base-content/70">
                   Invited, but haven&apos;t completed onboarding yet.
                 </span>
               </div>
@@ -1446,7 +1446,7 @@ const EnrolledStudents = ({
               </ul>
             )
           ) : (
-            <div className="px-6 py-10 text-center text-sm text-base-content/50">
+            <div className="px-6 py-10 text-center text-sm text-base-content/70">
               No students enrolled yet.
             </div>
           )}

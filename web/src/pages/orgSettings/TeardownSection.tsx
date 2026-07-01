@@ -123,7 +123,7 @@ const TeardownSection = ({ org }: { org: string }) => {
       </button>
 
       {!isOwner && (
-        <p className="mt-2 text-xs text-base-content/50">
+        <p className="mt-2 text-xs text-base-content/70">
           Teardown requires organization owner permissions.
         </p>
       )}

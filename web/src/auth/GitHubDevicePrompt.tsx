@@ -116,7 +116,7 @@ export function GitHubDevicePrompt({
             Open {device.verificationUri}
           </a>
 
-          <p className="mt-2 text-xs leading-relaxed text-base-content/50">
+          <p className="mt-2 text-xs leading-relaxed text-base-content/70">
             Paste the code there, authorize the app, then come back here.
           </p>
         </div>
@@ -130,12 +130,12 @@ export function GitHubDevicePrompt({
             Wait; we&apos;re checking automatically
           </h2>
 
-          <p className="mt-2 text-xs leading-relaxed text-base-content/50">
+          <p className="mt-2 text-xs leading-relaxed text-base-content/70">
             Once you authorize on github.com, this page should detect it within
             a few seconds.
           </p>
 
-          <p className="mt-3 font-mono text-xs text-base-content/50">
+          <p className="mt-3 font-mono text-xs text-base-content/70">
             attempt {status?.attempts ?? device.attempts} · next in{" "}
             {status?.nextPollSeconds ?? device.intervalSeconds}s · expires in{" "}
             {status?.expiresDisplay ?? "-"}

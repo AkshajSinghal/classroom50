@@ -298,7 +298,7 @@ export const SidebarClassInfo = ({ classInfo }: { classInfo?: Classroom }) => {
           classroom ||
           "Untitled Course"}
       </h3>
-      <p className="text-gray-500 text-sm">{classInfo?.term ?? ""}</p>
+      <p className="text-gray-400 text-sm">{classInfo?.term ?? ""}</p>
     </div>
   )
 }
@@ -411,7 +411,7 @@ const AssignmentSidebarMenu = ({
       {!collapsed && (
         <div className="py-2">
           <h3 className="font-bold leading-tight">{assignmentName}</h3>
-          <p className="text-gray-500 text-sm">Assignment</p>
+          <p className="text-gray-400 text-sm">Assignment</p>
         </div>
       )}
 

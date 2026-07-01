@@ -31,7 +31,7 @@ const Avatar = ({
           {name || github}
         </div>
         {subtitle ? (
-          <div className="text-sm text-base-content/60">{subtitle}</div>
+          <div className="text-sm text-base-content/70">{subtitle}</div>
         ) : null}
       </div>
     </>

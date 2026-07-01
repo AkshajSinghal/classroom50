@@ -155,7 +155,7 @@ const TemplateVerificationNote = ({
 }) => {
   if (pending) {
     return (
-      <p className="mt-1.5 flex items-center gap-1.5 text-sm text-base-content/60">
+      <p className="mt-1.5 flex items-center gap-1.5 text-sm text-base-content/70">
         <Loader2 className="size-4 shrink-0 animate-spin" />
         Checking template access…
       </p>

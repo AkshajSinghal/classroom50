@@ -268,7 +268,7 @@ const OrgsPage = () => {
                 <p className="text-base font-semibold">
                   Loading your organizations…
                 </p>
-                <p className="mt-1 text-sm text-base-content/60">
+                <p className="mt-1 text-sm text-base-content/70">
                   This may take a moment.
                 </p>
               </div>
@@ -298,7 +298,7 @@ const OrgsPage = () => {
                       <h2 className="text-lg font-semibold">
                         No Classroom 50 organizations yet
                       </h2>
-                      <p className="mx-auto mt-1 max-w-md text-sm text-base-content/60">
+                      <p className="mx-auto mt-1 max-w-md text-sm text-base-content/70">
                         Organizations you belong to that use Classroom 50 will
                         appear here. If you expect one, ask your instructor to
                         confirm you've been added, then refresh.

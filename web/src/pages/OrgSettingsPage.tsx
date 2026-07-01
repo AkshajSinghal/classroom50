@@ -113,7 +113,7 @@ export function ServiceTokenInfo() {
     <div ref={popupRef} className="dropdown">
       <button
         type="button"
-        className="btn btn-circle btn-ghost btn-xs text-base-content/60 hover:text-base-content"
+        className="btn btn-circle btn-ghost btn-xs text-base-content/70 hover:text-base-content"
         aria-label="What is the service token?"
         aria-expanded={open}
         onClick={() => setOpen((open) => !open)}
@@ -290,7 +290,7 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
                   onChange={(e) => setExpiryDays(e.target.value)}
                   className="w-full [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
                 />
-                <span className="text-sm text-base-content/50">days</span>
+                <span className="text-sm text-base-content/70">days</span>
               </label>
 
               {expiresDate ? (
@@ -304,7 +304,7 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
                 </span>
               )}
             </div>
-            <p className="mt-2 text-xs text-base-content/50">
+            <p className="mt-2 text-xs text-base-content/70">
               Valid range is {MIN_EXPIRY_DAYS}–{maxExpiry} days (GitHub’s
               maximum).
             </p>
@@ -334,7 +334,7 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
             <ExternalLink className="size-4" />
             Generate token on GitHub
           </a>
-          <p className="mt-2 text-xs text-base-content/50">
+          <p className="mt-2 text-xs text-base-content/70">
             Opens GitHub’s token form with the name, resource owner, expiry, and{" "}
             <span className="font-semibold">
               Contents: Read and write + Actions: Read and write
@@ -350,7 +350,7 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
               <li>
                 Set <span className="font-semibold">Repository access</span> to{" "}
                 <span className="font-semibold">All repositories</span>.{" "}
-                <span className="text-base-content/60">
+                <span className="text-base-content/70">
                   “Only select repositories” will miss student repos created
                   later and break score collection.
                 </span>
@@ -362,7 +362,7 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
                 and{" "}
                 <span className="font-semibold">Actions: Read and write</span>{" "}
                 (Metadata: Read is included automatically).{" "}
-                <span className="text-base-content/60">
+                <span className="text-base-content/70">
                   Read collects scores; write lets the regrade workflow re-run
                   student autograde workflows.
                 </span>
@@ -376,7 +376,7 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
             </p>
           </div>
 
-          <p className="mt-3 text-sm text-base-content/60">
+          <p className="mt-3 text-sm text-base-content/70">
             After generating the token on GitHub, copy it and paste it below.
           </p>
           <form
@@ -406,7 +406,7 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
                   if (patMutation.isError) patMutation.reset()
                 }}
               />
-              <p className="text-xs text-base-content/50">
+              <p className="text-xs text-base-content/70">
                 We’ll check the token is valid before saving. Double-check you
                 chose <span className="font-semibold">All repositories</span>{" "}
                 when creating it.
@@ -464,7 +464,7 @@ const OrgSettingsPage = () => {
           <RequireTeacher allow="owner">
             <div>
               <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-              <p className="mt-1 text-sm text-base-content/60">
+              <p className="mt-1 text-sm text-base-content/70">
                 Organization-level configuration for{" "}
                 <span className="font-mono font-semibold">{org}</span>.
               </p>

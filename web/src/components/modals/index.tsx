@@ -91,13 +91,9 @@ export function ConfirmModal({
     }
   }
 
-  const confirmButtonClass = dangerous
-    ? "btn btn-error text-white"
-    : "btn btn-primary"
+  const confirmButtonClass = dangerous ? "btn btn-error" : "btn btn-primary"
 
-  const acknowledgeButtonClass = dangerous
-    ? "btn btn-error text-white"
-    : "btn btn-warning"
+  const acknowledgeButtonClass = dangerous ? "btn btn-error" : "btn btn-warning"
 
   return (
     <dialog

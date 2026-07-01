@@ -134,7 +134,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
       >
         <div className="card-body">
           <p className="font-bold mb-2">Add Student</p>
-          <p className="text-xs text-base-content/60 mb-2">
+          <p className="text-xs text-base-content/70 mb-2">
             Enter a GitHub username, an email, or both. Students complete their
             details when they enroll.
           </p>
@@ -154,7 +154,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
           <form.Field name="name">
             {(field) => (
               <div className="flex mb-2 items-center">
-                <UserRound className="mr-2 text-base-content/40" />
+                <UserRound className="mr-2 text-base-content/70" />
                 <input
                   id={field.name}
                   name={field.name}
@@ -196,7 +196,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
             {(field) => (
               <div className="mb-4">
                 <div className="flex items-center">
-                  <Mail className="size-6 mr-2 text-base-content/40" />
+                  <Mail className="size-6 mr-2 text-base-content/70" />
                   <input
                     id={field.name}
                     name={field.name}
@@ -219,7 +219,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
           <form.Field name="section">
             {(field) => (
               <div className="flex mb-4 items-center">
-                <Users className="mr-2 text-base-content/40" />
+                <Users className="mr-2 text-base-content/70" />
                 <input
                   id={field.name}
                   name={field.name}

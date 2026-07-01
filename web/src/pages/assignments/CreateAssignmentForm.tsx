@@ -283,7 +283,7 @@ const RunnerField = ({ field, org }: { field: StringField; org?: string }) => {
       />
 
       {verification.kind === "self-hosted" && (
-        <p className="mt-1.5 text-xs text-base-content/50">
+        <p className="mt-1.5 text-xs text-base-content/70">
           Combine comma-separated labels for a self-hosted runner (e.g.{" "}
           <code>self-hosted, linux, x64</code>).
         </p>
@@ -303,7 +303,7 @@ const RunnerVerificationNote = ({
 }) => {
   if (pending && hasValue) {
     return (
-      <p className="mt-1.5 flex items-center gap-1.5 text-sm text-base-content/60">
+      <p className="mt-1.5 flex items-center gap-1.5 text-sm text-base-content/70">
         <Loader2 className="size-4 shrink-0 animate-spin" />
         Checking…
       </p>
@@ -313,7 +313,7 @@ const RunnerVerificationNote = ({
   switch (verification.kind) {
     case "empty":
       return (
-        <p className="mt-1.5 text-sm text-base-content/60">
+        <p className="mt-1.5 text-sm text-base-content/70">
           Leave blank for <code>ubuntu-latest</code>.
         </p>
       )
@@ -388,7 +388,7 @@ const RunnerVerificationNote = ({
 
     case "unknown":
       return (
-        <p className="mt-1.5 flex items-center gap-1.5 text-sm text-base-content/60">
+        <p className="mt-1.5 flex items-center gap-1.5 text-sm text-base-content/70">
           <HelpCircle className="size-4 shrink-0" />
           Can't verify — used as entered.
         </p>
@@ -547,7 +547,7 @@ const CreateAssignmentForm = ({
                         field.handleChange(e.target.value)
                       }}
                     />
-                    <p className="mt-1.5 mb-4 text-sm text-base-content/60">
+                    <p className="mt-1.5 mb-4 text-sm text-base-content/70">
                       Used in the assignment&apos;s repository names.
                       Auto-filled from the name; edit it if you like. Must be
                       unique in this classroom.
@@ -731,7 +731,7 @@ const CreateAssignmentForm = ({
                         {field.state.value ? "Enabled" : "Disabled"}
                       </span>
                     </div>
-                    <p className="text-sm text-base-content/60">
+                    <p className="text-sm text-base-content/70">
                       Open a pull request per repo for inline review of each
                       submission.
                     </p>
@@ -782,7 +782,7 @@ const CreateAssignmentForm = ({
                         onBlur={normalizeOnBlur(field)}
                         onChange={(e) => field.handleChange(e.target.value)}
                       />
-                      <p className="mt-1.5 text-sm text-base-content/60">
+                      <p className="mt-1.5 text-sm text-base-content/70">
                         Run the autograder inside this public image.
                       </p>
                     </div>
@@ -815,7 +815,7 @@ const CreateAssignmentForm = ({
                                 field.handleChange(e.target.value)
                               }
                             />
-                            <p className="mt-1.5 text-sm text-base-content/60">
+                            <p className="mt-1.5 text-sm text-base-content/70">
                               Use <code>root</code> if checkout fails with a
                               permission error.
                             </p>
@@ -866,7 +866,7 @@ const CreateAssignmentForm = ({
                       onBlur={normalizeOnBlur(field)}
                       onChange={(e) => field.handleChange(e.target.value)}
                     />
-                    <p className="mt-1.5 text-sm text-base-content/60">
+                    <p className="mt-1.5 text-sm text-base-content/70">
                       Runs once before grading (e.g. to compile). Added as a
                       leading 0-point autograding step named “setup”.
                     </p>
@@ -897,7 +897,7 @@ const CreateAssignmentForm = ({
                         onBlur={field.handleBlur}
                         onChange={(e) => field.handleChange(e.target.value)}
                       />
-                      <p className="mt-1.5 text-sm text-base-content/60">
+                      <p className="mt-1.5 text-sm text-base-content/70">
                         Ordered <code>.gitignore</code>-style patterns, one per
                         line, defining which files belong to a submission (last
                         match wins, <code>!</code> re-includes). E.g.{" "}
@@ -914,7 +914,7 @@ const CreateAssignmentForm = ({
                         </p>
                       ) : (
                         patterns.length > 0 && (
-                          <p className="mt-1.5 text-xs text-base-content/50">
+                          <p className="mt-1.5 text-xs text-base-content/70">
                             {patterns.length} pattern
                             {patterns.length === 1 ? "" : "s"}
                           </p>
@@ -937,7 +937,7 @@ const CreateAssignmentForm = ({
                       />
                       Set a passing threshold
                     </label>
-                    <p className="mt-1.5 text-sm text-base-content/60">
+                    <p className="mt-1.5 text-sm text-base-content/70">
                       Off by default. When on, the gradebook marks submissions
                       passing/failing against the bar below (Passing rollup,
                       score badges, passing/failing filter). A display threshold
@@ -968,7 +968,7 @@ const CreateAssignmentForm = ({
                                     field.handleChange(Number(e.target.value))
                                   }
                                 />
-                                <span className="text-sm text-base-content/60">
+                                <span className="text-sm text-base-content/70">
                                   % of max score to pass
                                 </span>
                               </div>

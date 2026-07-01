@@ -107,7 +107,7 @@ const StatCard = ({
 }) => (
   <div className="card bg-base-100 rounded-xl border border-base-300">
     <div className="card-body gap-1 p-4">
-      <label className="text-xs uppercase tracking-wide text-base-content/50">
+      <label className="text-xs uppercase tracking-wide text-base-content/70">
         {label}
       </label>
       {children}
@@ -515,7 +515,7 @@ const SubmissionsPageContent = () => {
                     !regrading &&
                     activeAction === null &&
                     lastCollectedLabel && (
-                      <span className="text-base-content/60">
+                      <span className="text-base-content/70">
                         Last collected (org-wide) {lastCollectedLabel}.
                       </span>
                     )}
@@ -675,16 +675,16 @@ const SubmissionsPageContent = () => {
               </div>
               <div className="min-w-0 flex-1">
                 <h2 className="font-bold">How students accept</h2>
-                <p className="text-sm text-base-content/60">
+                <p className="text-sm text-base-content/70">
                   Share an invite link or CLI command so students can accept
                   this assignment.
                 </p>
               </div>
-              <ChevronRight className="size-5 shrink-0 text-base-content/40 transition-transform group-open:rotate-90" />
+              <ChevronRight className="size-5 shrink-0 text-base-content/70 transition-transform group-open:rotate-90" />
             </summary>
             <div className="card-body gap-4 pt-0">
               {secret ? (
-                <p className="text-sm text-base-content/60">
+                <p className="text-sm text-base-content/70">
                   This classroom uses an unlisted URL, so the link includes the
                   access key — treat it like a shared password and send the full
                   link as-is.
@@ -703,7 +703,7 @@ const SubmissionsPageContent = () => {
               </div>
 
               <details className="group/cli">
-                <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-sm text-base-content/60 hover:text-base-content">
+                <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-sm text-base-content/70 hover:text-base-content">
                   <ChevronRight className="size-4 transition-transform group-open/cli:rotate-90" />
                   Prefer the command line?
                 </summary>
@@ -727,7 +727,7 @@ const SubmissionsPageContent = () => {
               <div className="flex items-baseline gap-1">
                 <span className="text-2xl font-bold">{stats.submitted}</span>
                 {isGroupAssignment ? null : (
-                  <span className="text-base-content/50">
+                  <span className="text-base-content/70">
                     / {scopedStudents.length}
                   </span>
                 )}
@@ -741,7 +741,7 @@ const SubmissionsPageContent = () => {
                   <span className="text-2xl font-bold">
                     {avgScore ?? "N/A"}
                   </span>
-                  <span className="text-base-content/50">
+                  <span className="text-base-content/70">
                     / {scopedScores?.[0]?.["max-score"]}
                   </span>
                 </div>
@@ -757,11 +757,11 @@ const SubmissionsPageContent = () => {
                       <span className="text-2xl font-bold">
                         {stats.passing}
                       </span>
-                      <span className="text-base-content/50">
+                      <span className="text-base-content/70">
                         / {stats.passing + stats.failing}
                       </span>
                     </div>
-                    <span className="text-xs text-base-content/50">
+                    <span className="text-xs text-base-content/70">
                       {stats.failing > 0 ? (
                         <button
                           type="button"
@@ -784,14 +784,14 @@ const SubmissionsPageContent = () => {
               <StatCard label="Accepted">
                 <div className="flex items-baseline gap-1">
                   <span className="text-2xl font-bold">{acceptedCount}</span>
-                  <span className="text-base-content/50">
+                  <span className="text-base-content/70">
                     / {scopedStudents.length}
                   </span>
                 </div>
                 {acceptedNotSubmittedCount > 0 && (
                   <button
                     type="button"
-                    className="link link-hover w-fit text-xs text-base-content/50 decoration-dotted underline-offset-2 hover:text-warning"
+                    className="link link-hover w-fit text-xs text-base-content/70 decoration-dotted underline-offset-2 hover:text-warning"
                     onClick={showAcceptedNotSubmitted}
                     title="Show students who accepted but haven't submitted"
                   >
@@ -801,7 +801,7 @@ const SubmissionsPageContent = () => {
               </StatCard>
             ) : null}
           </div>
-          <div className="mb-2 flex items-center justify-end gap-1 text-sm text-base-content/60">
+          <div className="mb-2 flex items-center justify-end gap-1 text-sm text-base-content/70">
             <span>Updated {scoresLastUpdated}</span>
 
             <button

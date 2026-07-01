@@ -44,7 +44,7 @@ export function GitHubAuthedPanel({
         )}
 
         {isLoadingUser && !user ? (
-          <div className="text-sm text-base-content/60">
+          <div className="text-sm text-base-content/70">
             Fetching profile...
           </div>
         ) : user ? (
@@ -52,23 +52,23 @@ export function GitHubAuthedPanel({
             <div className="text-xl font-bold tracking-tight">
               {user.name || user.login}
             </div>
-            <div className="text-sm text-base-content/60">@{user.login}</div>
+            <div className="text-sm text-base-content/70">@{user.login}</div>
             {user.bio ? (
-              <p className="mt-2 text-sm text-base-content/60">{user.bio}</p>
+              <p className="mt-2 text-sm text-base-content/70">{user.bio}</p>
             ) : null}
           </div>
         ) : (
-          <div className="text-sm text-base-content/60">
+          <div className="text-sm text-base-content/70">
             Profile unavailable
           </div>
         )}
 
-        <div className="w-full rounded-xl border border-base-300 bg-base-200 p-3 text-left font-mono text-xs text-base-content/60">
+        <div className="w-full rounded-xl border border-base-300 bg-base-200 p-3 text-left font-mono text-xs text-base-content/70">
           <strong className="text-base-content">gh_access_token</strong> →{" "}
           {previewToken(token)}
         </div>
 
-        <div className="w-full rounded-xl border border-base-300 bg-base-200 p-3 text-left font-mono text-xs text-base-content/60">
+        <div className="w-full rounded-xl border border-base-300 bg-base-200 p-3 text-left font-mono text-xs text-base-content/70">
           <strong className="text-base-content">granted scopes</strong> →{" "}
           {tokenScope || "(none reported)"}
         </div>

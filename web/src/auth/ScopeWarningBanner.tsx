@@ -73,7 +73,7 @@ export function ScopeWarningBanner() {
           >
             Re-authorize
           </button>
-          <p className="text-xs text-base-content/50">
+          <p className="text-xs text-base-content/70">
             If re-authorizing doesn&apos;t clear this, an organization owner may
             need to approve the app in the org&apos;s OAuth policy settings.
           </p>

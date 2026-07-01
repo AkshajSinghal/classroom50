@@ -33,20 +33,20 @@
   --color-base-300: oklch(13% 0.02 262);
   --color-base-content: oklch(93% 0.01 262);
 
-  --color-primary: oklch(58% 0.158 241.966);
-  --color-primary-content: oklch(100% 0 0);
-  --color-secondary: oklch(55% 0.046 257.417);
-  --color-secondary-content: oklch(100% 0 0);
-  --color-accent: oklch(60% 0.118 184.704);
-  --color-accent-content: oklch(100% 0 0);
+  --color-primary: oklch(62% 0.158 241.966);
+  --color-primary-content: oklch(0% 0 0);
+  --color-secondary: oklch(62% 0.046 257.417);
+  --color-secondary-content: oklch(0% 0 0);
+  --color-accent: oklch(62% 0.118 184.704);
+  --color-accent-content: oklch(0% 0 0);
 
   /* Sidebar surface: a slightly lighter panel than base so it reads as a
      distinct rail in dark mode (in light mode corporate's neutral is black). */
   --color-neutral: oklch(26% 0.02 262);
   --color-neutral-content: oklch(93% 0.01 262);
 
-  --color-info: oklch(60% 0.126 221.723);
-  --color-info-content: oklch(100% 0 0);
+  --color-info: oklch(65% 0.126 221.723);
+  --color-info-content: oklch(0% 0 0);
   --color-success: oklch(62% 0.194 149.214);
   --color-success-content: oklch(0% 0 0);
   --color-warning: oklch(85% 0.199 91.936);
@@ -160,4 +160,66 @@ body {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* ── WCAG 2.1 AA contrast overrides (issue #212) ───────────────────────────
+   DaisyUI `corporate` ships several semantic colors that fail AA (4.5:1) as
+   text or button labels. We darken them (same hue, lower lightness) so they
+   clear AA against the app's white / #fafafa / light-tint backgrounds, while
+   staying close to the original palette. Declared unlayered so they win over
+   DaisyUI's layered theme definitions. Scoped to `[data-theme="corporate"]`
+   only (NOT bare `:root`): `data-theme` is always set on <html> — which IS
+   `:root` — so a `:root` branch would also match `corporate-dark` and clobber
+   its separately-tuned dark tokens. */
+[data-theme="corporate"] {
+  /* #0082ce → #0069b4 : 4.1 → 5.7:1 */
+  --color-primary: oklch(50% 0.158 241.966);
+  /* #0091b4 → #007196 : 3.7 → 5.5:1 */
+  --color-info: oklch(50% 0.126 221.723);
+  /* #fe6366 → #d2152b : 2.9 → 5.4:1 */
+  --color-error: oklch(55% 0.214 24);
+  /* black → white (text on darker error) */
+  --color-error-content: oklch(100% 0 0);
+  /* #01a53b → #007b2a : 3.0 → 5.4:1 */
+  --color-success: oklch(50% 0.16 150);
+  /* #fdc700 → #8f5e00 : 1.6 → 5.0:1 on soft badge */
+  --color-warning: oklch(52% 0.13 80);
+  /* dark → white (text on darker warning fill) */
+  --color-warning-content: oklch(100% 0 0);
+}
+
+/* Input placeholders ship at base-content/0.5 (~3.3:1). Raise to ~0.65 (~5.3:1). */
+.input::placeholder,
+.textarea::placeholder,
+input::placeholder,
+textarea::placeholder {
+  color: color-mix(in oklab, var(--color-base-content) 65%, transparent);
+  opacity: 1;
+}
+
+/* DaisyUI `.label` defaults to ~base-content/0.6 (4.45:1 on #fafafa, under AA).
+   Raise to /0.70 — the muted-text floor used elsewhere. */
+.label {
+  color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
+}
+
+/* Soft badges render the raw semantic token as text on an 8% tint of that same
+   token. Several land just under AA (4.5:1) at badge-sm/xs sizes — notably
+   `secondary` (4.4) in light, and `primary`/`info`/`secondary` (3.4–4.4) in
+   dark, where the token is tuned for white button labels rather than text.
+   Nudge the badge foreground per theme (darker in light, lighter in dark) so
+   every soft badge clears AA without touching the button-fill tokens. */
+[data-theme="corporate"] .badge-soft {
+  color: color-mix(
+    in oklab,
+    var(--badge-color, var(--color-base-content)) 88%,
+    black
+  );
+}
+[data-theme="corporate-dark"] .badge-soft {
+  color: color-mix(
+    in oklab,
+    var(--badge-color, var(--color-base-content)) 75%,
+    white
+  );
 }

@@ -103,7 +103,7 @@ function ConcernRow({
         <div className="min-w-0">
           <div className="text-sm font-semibold">{concern.title}</div>
           {concern.verdict.detail && (
-            <p className="mt-0.5 text-xs text-base-content/60">
+            <p className="mt-0.5 text-xs text-base-content/70">
               {concern.verdict.detail}
             </p>
           )}
@@ -111,7 +111,7 @@ function ConcernRow({
             href={concern.settingsUrl}
             target="_blank"
             rel="noreferrer"
-            className="mt-1 inline-flex items-center gap-1 text-xs text-base-content/50 hover:text-primary"
+            className="mt-1 inline-flex items-center gap-1 text-xs text-base-content/70 hover:text-primary"
           >
             View on GitHub
             <ExternalLink className="size-3" />
@@ -165,7 +165,7 @@ function ConcernRow({
                 <span className="text-base-content/70">
                   {d.desc}
                   {d.manualFix && (
-                    <span className="text-base-content/50">
+                    <span className="text-base-content/70">
                       {" "}
                       — {d.manualFix}
                     </span>
@@ -254,7 +254,7 @@ function AuditBody({
       {report.manualUnreadable.length > 0 && (
         <div className="mt-6">
           <h3 className="text-sm font-semibold">Confirm by hand</h3>
-          <p className="mt-1 text-xs text-base-content/50">
+          <p className="mt-1 text-xs text-base-content/70">
             GitHub exposes no API to read these settings, so we can&apos;t
             verify them automatically — confirm each one on the member
             privileges page.
@@ -273,7 +273,7 @@ function AuditBody({
                     href={step.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="mt-1 inline-flex items-center gap-1 text-xs text-base-content/50 hover:text-primary"
+                    className="mt-1 inline-flex items-center gap-1 text-xs text-base-content/70 hover:text-primary"
                   >
                     View on GitHub
                     <ExternalLink className="size-3" />
@@ -305,7 +305,7 @@ function AuditBody({
           </button>
           {showPermissions && (
             <>
-              <p className="mt-1 text-xs text-base-content/50">
+              <p className="mt-1 text-xs text-base-content/70">
                 The full list of organization member privileges Classroom 50
                 sets, including the ones already in place. Drifted ones are
                 called out above.
@@ -319,7 +319,7 @@ function AuditBody({
                     <span className="text-base-content/70">
                       {v.setting.desc}
                       {!v.enforced && v.setting.manualFix && (
-                        <span className="text-base-content/40">
+                        <span className="text-base-content/70">
                           {" "}
                           — {v.setting.manualFix}
                         </span>
@@ -409,7 +409,7 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
       }
     >
       {isLoading && (
-        <div className="flex items-center gap-2 text-sm text-base-content/60">
+        <div className="flex items-center gap-2 text-sm text-base-content/70">
           <span className="loading loading-spinner loading-sm" />
           Auditing organization policy…
         </div>

@@ -30,7 +30,7 @@ const RootErrorComponent = ({ error }: { error: Error }) => {
       </div>
       <div>
         <h1 className="text-2xl font-bold">Something went wrong</h1>
-        <p className="mt-1 max-w-md text-base-content/60">
+        <p className="mt-1 max-w-md text-base-content/70">
           {error?.message || "An unexpected error occurred."}
         </p>
       </div>

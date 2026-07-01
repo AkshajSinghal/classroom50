@@ -42,7 +42,7 @@ const ReleaseRow = ({ release }: { release: GitHubRelease }) => {
     <li className="flex items-center justify-between gap-4 px-4 py-3">
       <div className="min-w-0">
         <p className="truncate font-medium">{releaseLabel(release)}</p>
-        <p className="text-sm text-base-content/60">
+        <p className="text-sm text-base-content/70">
           Submitted {formatDueDateTime(when)}
         </p>
       </div>
@@ -57,7 +57,7 @@ const ReleaseRow = ({ release }: { release: GitHubRelease }) => {
           View grade
         </a>
       ) : (
-        <span className="text-sm text-base-content/40">Unavailable</span>
+        <span className="text-sm text-base-content/70">Unavailable</span>
       )}
     </li>
   )
@@ -189,7 +189,7 @@ const SubmissionBody = ({
   return (
     <div className="mt-6 space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-base-content/60">
+        <p className="text-sm text-base-content/70">
           Each submission opens its graded release on GitHub, with your score
           and per-test results.
         </p>

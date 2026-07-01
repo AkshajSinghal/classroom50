@@ -181,7 +181,7 @@ export const ReuseFromClassroomModal = ({
               />
               <span
                 className={`label-text-alt mt-1 ${
-                  reuse.slugTaken ? "text-error" : "text-base-content/50"
+                  reuse.slugTaken ? "text-error" : "text-base-content/70"
                 }`}
               >
                 {reuseSlugStatus({

@@ -218,7 +218,7 @@ const CreateClassroomForm = ({
                   <span className="font-bold">
                     Use an unlisted link for this classroom
                   </span>
-                  <span className="block text-sm text-base-content/60">
+                  <span className="block text-sm text-base-content/70">
                     Publishes this classroom&apos;s assignment data at an
                     unguessable URL instead of one anyone can reach by guessing
                     the org name. This is obscurity, not real access control:
@@ -266,7 +266,7 @@ const CreateClassroomForm = ({
                               Regenerate
                             </button>
                           </div>
-                          <p className="mt-1 text-xs text-base-content/50">
+                          <p className="mt-1 text-xs text-base-content/70">
                             {SECRET_PATTERN_DESCRIPTION}. Accept the generated
                             key or type your own. It becomes part of every
                             published URL for this classroom, so treat it like a

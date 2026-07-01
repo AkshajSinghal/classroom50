@@ -43,7 +43,7 @@ const SettingsSection = ({
             {titleAdornment}
           </div>
           {description && (
-            <p className="mt-1 text-sm text-base-content/60">{description}</p>
+            <p className="mt-1 text-sm text-base-content/70">{description}</p>
           )}
         </div>
         {action && <div className="shrink-0">{action}</div>}

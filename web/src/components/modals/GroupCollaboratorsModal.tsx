@@ -54,7 +54,7 @@ const CollaboratorIdentity = ({
   return name ? (
     <>
       <span className="block truncate text-sm font-medium">{name}</span>
-      <span className="block truncate font-mono text-xs text-base-content/60">
+      <span className="block truncate font-mono text-xs text-base-content/70">
         @{login}
       </span>
     </>
@@ -444,7 +444,7 @@ export function GroupCollaboratorsModal({
             <div className="mt-4">
               <div className="mb-2 flex items-center justify-between gap-4">
                 <span className="text-sm font-medium">Group members</span>
-                <span className="text-xs text-base-content/60">
+                <span className="text-xs text-base-content/70">
                   {personCount} {personCount === 1 ? "person" : "people"}
                 </span>
               </div>
@@ -500,7 +500,7 @@ export function GroupCollaboratorsModal({
                       {canManage && (
                         <button
                           type="button"
-                          className="btn btn-ghost btn-sm btn-square text-base-content/50 hover:text-error"
+                          className="btn btn-ghost btn-sm btn-square text-base-content/70 hover:text-error"
                           aria-label={`Remove ${username}`}
                           onClick={() => removeFromDraft(username)}
                         >
@@ -545,7 +545,7 @@ export function GroupCollaboratorsModal({
 
                 {draftCollaborators.length === 0 &&
                   markedForRemoval.length === 0 && (
-                    <li className="px-4 py-6 text-center text-sm text-base-content/50">
+                    <li className="px-4 py-6 text-center text-sm text-base-content/70">
                       No collaborators yet.
                     </li>
                   )}
@@ -589,7 +589,7 @@ export function GroupCollaboratorsModal({
               )}
 
               {canManage && isFull && (
-                <p className="mt-3 text-xs text-base-content/60">
+                <p className="mt-3 text-xs text-base-content/70">
                   Group is full — remove someone to add another collaborator.
                 </p>
               )}
