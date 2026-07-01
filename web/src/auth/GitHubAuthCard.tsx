@@ -18,8 +18,8 @@ export function GitHubAuthCard() {
   const auth = useGithubAuth()
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[#fafafa] px-4 py-8">
-      <section className="card w-full max-w-lg rounded-xl border border-[#eee] bg-base-100 shadow-sm">
+    <main className="flex min-h-screen items-center justify-center bg-base-200 px-4 py-8">
+      <section className="card w-full max-w-lg rounded-xl border border-base-300 bg-base-100 shadow-sm">
         <header className="flex items-center gap-4 border-b border-base-200 px-7 py-6">
           <div className="flex size-12 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
             <GraduationCap className="size-6" />

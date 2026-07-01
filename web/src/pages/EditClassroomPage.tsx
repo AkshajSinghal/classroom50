@@ -146,7 +146,7 @@ const EditClassroomPage = () => {
     <div className="min-h-screen">
       <Drawer>
         <DrawerToggle />
-        <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
+        <DrawerContent className="p-10 bg-base-200 2xl:px-50">
           <Breadcrumb endpoint="Settings" />
           <RequireTeacher allow="instructor">
             {!org || !classroom ? (

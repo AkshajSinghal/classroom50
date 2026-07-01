@@ -154,7 +154,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
           <form.Field name="name">
             {(field) => (
               <div className="flex mb-2 items-center">
-                <UserRound className="mr-2 text-[#bbb]" />
+                <UserRound className="mr-2 text-base-content/40" />
                 <input
                   id={field.name}
                   name={field.name}
@@ -172,7 +172,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
             {(field) => (
               <div className="mb-2">
                 <div className="flex items-center">
-                  <GitHub className="size-6 mr-2 text-[#ddd] opacity-25" />
+                  <GitHub className="size-6 mr-2 text-base-content/30 opacity-25" />
                   <input
                     id={field.name}
                     name={field.name}
@@ -196,7 +196,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
             {(field) => (
               <div className="mb-4">
                 <div className="flex items-center">
-                  <Mail className="size-6 mr-2 text-[#bbb]" />
+                  <Mail className="size-6 mr-2 text-base-content/40" />
                   <input
                     id={field.name}
                     name={field.name}
@@ -219,7 +219,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
           <form.Field name="section">
             {(field) => (
               <div className="flex mb-4 items-center">
-                <Users className="mr-2 text-[#bbb]" />
+                <Users className="mr-2 text-base-content/40" />
                 <input
                   id={field.name}
                   name={field.name}
@@ -241,7 +241,7 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
               <button
                 type="submit"
                 disabled={!canSubmit || isSubmitting || !team}
-                className="btn btn-primary w-full bg-[#4e80ee]"
+                className="btn btn-primary w-full"
               >
                 {!isSubmitting ? "+ Add Student" : "Submitting..."}
               </button>

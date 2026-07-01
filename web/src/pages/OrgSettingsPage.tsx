@@ -460,7 +460,7 @@ const OrgSettingsPage = () => {
     <div className="min-h-screen">
       <Drawer>
         <DrawerToggle />
-        <DrawerContent className="p-10 bg-[#fafafa] xl:px-50">
+        <DrawerContent className="p-10 bg-base-200 xl:px-50">
           <RequireTeacher allow="owner">
             <div>
               <h1 className="text-2xl font-bold tracking-tight">Settings</h1>

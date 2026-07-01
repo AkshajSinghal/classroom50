@@ -66,7 +66,7 @@ const ClassCard = ({
   if (filter === "archived" && !archived) return null
 
   return (
-    <EnterDiv className="card bg-base-100 rounded-xl col-span-6 border border-[#eee]">
+    <EnterDiv className="card bg-base-100 rounded-xl col-span-6 border border-base-300">
       {canEdit && (
         <Link
           to="/$org/$classroom/edit"
@@ -384,7 +384,7 @@ const ClassesPage = () => {
     <div className="min-h-screen">
       <Drawer>
         <DrawerToggle />
-        <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
+        <DrawerContent className="p-10 bg-base-200 2xl:px-50">
           <div className="mb-8">
             <div className="flex flex-col gap-6 p-6 sm:flex-row sm:items-center sm:justify-between">
               <div className="space-y-4">

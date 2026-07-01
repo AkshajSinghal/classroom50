@@ -4,6 +4,84 @@
   themes: corporate --default;
 }
 
+/* Keep the original dark-navy sidebar look in light mode (#265): the sidebar
+   uses `neutral`, but corporate's stock neutral is pure black. Pin it to the
+   pre-existing hand-picked palette (#212a3a rail / #accefb accent). The dark
+   theme redefines neutral separately below. */
+@plugin "daisyui/theme" {
+  name: "corporate";
+  default: true;
+  color-scheme: light;
+  --color-neutral: #212a3a;
+  --color-neutral-content: #ffffff;
+}
+
+/* Dark theme (#265). Deliberately NOT a stock daisyUI dark theme: we keep
+   corporate's exact primary/secondary/accent/status hues and its radius/border
+   so switching light<->dark only inverts the base surfaces — the app's feel
+   (blue accent, flat corporate shapes) is identical in both. Only the base and
+   neutral surface + content colors change. Accent/radius values below are
+   copied verbatim from daisyui/theme/corporate.css. */
+@plugin "daisyui/theme" {
+  name: "corporate-dark";
+  default: false;
+  prefersdark: true;
+  color-scheme: dark;
+
+  --color-base-100: oklch(21% 0.02 262);
+  --color-base-200: oklch(17% 0.02 262);
+  --color-base-300: oklch(13% 0.02 262);
+  --color-base-content: oklch(93% 0.01 262);
+
+  --color-primary: oklch(58% 0.158 241.966);
+  --color-primary-content: oklch(100% 0 0);
+  --color-secondary: oklch(55% 0.046 257.417);
+  --color-secondary-content: oklch(100% 0 0);
+  --color-accent: oklch(60% 0.118 184.704);
+  --color-accent-content: oklch(100% 0 0);
+
+  /* Sidebar surface: a slightly lighter panel than base so it reads as a
+     distinct rail in dark mode (in light mode corporate's neutral is black). */
+  --color-neutral: oklch(26% 0.02 262);
+  --color-neutral-content: oklch(93% 0.01 262);
+
+  --color-info: oklch(60% 0.126 221.723);
+  --color-info-content: oklch(100% 0 0);
+  --color-success: oklch(62% 0.194 149.214);
+  --color-success-content: oklch(0% 0 0);
+  --color-warning: oklch(85% 0.199 91.936);
+  --color-warning-content: oklch(0% 0 0);
+  --color-error: oklch(70% 0.191 22.216);
+  --color-error-content: oklch(0% 0 0);
+
+  --radius-selector: 0.25rem;
+  --radius-field: 0.25rem;
+  --radius-box: 0.25rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+/* Sidebar accent tokens (#265). The rail/text follow daisyUI `neutral`, but the
+   active-border/logo accent and the active/hover surface were hand-picked hexes
+   that don't map to a theme token. Scope them per theme so light mode keeps the
+   original #accefb / #323b49 exactly, and dark mode uses theme-appropriate
+   equivalents. Consumed via arbitrary values in components/drawer. */
+[data-theme="corporate"] {
+  --sidebar-accent: #accefb;
+  --sidebar-surface: #323b49;
+}
+[data-theme="corporate-dark"] {
+  --sidebar-accent: var(--color-primary);
+  --sidebar-surface: color-mix(
+    in oklch,
+    var(--color-neutral-content) 10%,
+    transparent
+  );
+}
+
 /* Motion design tokens. One source of truth for animation timing shared by the
    `.btn` press rule below and the JS variants in src/lib/motion.ts. Durations
    are deliberately short (a productivity tool should feel responsive, not
@@ -34,7 +112,7 @@ body {
     background: linear-gradient(
       90deg,
       transparent,
-      rgb(255 255 255 / 0.45),
+      color-mix(in oklch, currentColor 18%, transparent),
       transparent
     );
     animation: shimmer 1.5s ease-in-out infinite;

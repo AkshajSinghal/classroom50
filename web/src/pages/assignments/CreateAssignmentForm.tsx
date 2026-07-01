@@ -501,7 +501,7 @@ const CreateAssignmentForm = ({
               {(field) => (
                 <>
                   <label htmlFor={field.name} className="label font-bold">
-                    Assignment Name<span className="text-[#f00]">*</span>
+                    Assignment Name<span className="text-error">*</span>
                   </label>
                   <input
                     id={field.name}
@@ -527,7 +527,7 @@ const CreateAssignmentForm = ({
                 {(field) => (
                   <>
                     <label htmlFor={field.name} className="label font-bold">
-                      Assignment Slug<span className="text-[#f00]">*</span>
+                      Assignment Slug<span className="text-error">*</span>
                     </label>
                     <input
                       id={field.name}

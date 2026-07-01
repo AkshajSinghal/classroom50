@@ -22,14 +22,14 @@ const OnboardNavbar = () => (
   <div className="navbar bg-base-100 shadow-sm">
     <Link to="/">
       <div className="flex p-6 text-lg font-bold">
-        <GraduationCap className="size-8 text-[#accefb] mr-2" /> Classroom 50
+        <GraduationCap className="size-8 text-primary mr-2" /> Classroom 50
       </div>
     </Link>
   </div>
 )
 
 const OnboardCard = ({ children }: { children: React.ReactNode }) => (
-  <div className="card w-200 max-w-[calc(100vw-2em)] p-8 m-auto rounded-xl mt-10 border border-[#eee]">
+  <div className="card w-200 max-w-[calc(100vw-2em)] p-8 m-auto rounded-xl mt-10 border border-base-300">
     {children}
   </div>
 )
@@ -278,7 +278,7 @@ const OnboardingPage = () => {
           returning && pollExhausted && returnTo ? (
             <button
               type="button"
-              className="btn btn-primary w-full bg-[#4e80ee]"
+              className="btn btn-primary w-full"
               onClick={() => router.history.push(returnTo)}
             >
               Continue to your assignment
@@ -326,7 +326,7 @@ const OnboardingPage = () => {
             </p>
           </div>
 
-          <div className="flex gap-4 bg-[#fafafa] p-4 rounded-xl border border-[#ddd]">
+          <div className="flex gap-4 bg-base-200 p-4 rounded-xl border border-base-300">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1 text-sm text-base-content/60">
                 <GitHub className="size-4" />
@@ -384,7 +384,7 @@ const OnboardingPage = () => {
               match you to the class roster.
             </p>
             <div className="mt-2 flex">
-              <Mail className="size-6 mr-2 text-[#bbb]" />
+              <Mail className="size-6 mr-2 text-base-content/40" />
               <input
                 id="onboard-email"
                 type="email"
@@ -412,7 +412,7 @@ const OnboardingPage = () => {
 
           <button
             type="button"
-            className="btn btn-primary w-full bg-[#4e80ee]"
+            className="btn btn-primary w-full"
             disabled={onboardMutation.isPending || !formValid}
             onClick={() => void runOnboard(() => onboardMutation.mutateAsync())}
           >

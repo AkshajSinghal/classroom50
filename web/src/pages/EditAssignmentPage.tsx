@@ -181,7 +181,7 @@ const EditAssignmentPage = () => {
     <div className="min-h-screen">
       <Drawer>
         <DrawerToggle />
-        <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
+        <DrawerContent className="p-10 bg-base-200 2xl:px-50">
           <Breadcrumb endpoint="Assignment Settings" />
           {editError && (
             <div className="alert alert-error mt-6">{editError}</div>

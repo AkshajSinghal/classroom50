@@ -195,7 +195,7 @@ const EditStudent = ({
             <form.Field name="first_name">
               {(field) => (
                 <div className="flex items-center">
-                  <UserRound className="mr-2 text-[#bbb]" />
+                  <UserRound className="mr-2 text-base-content/40" />
                   <input
                     id={field.name}
                     name={field.name}
@@ -213,7 +213,7 @@ const EditStudent = ({
             <form.Field name="last_name">
               {(field) => (
                 <div className="flex items-center">
-                  <UserRound className="mr-2 text-[#bbb]" />
+                  <UserRound className="mr-2 text-base-content/40" />
                   <input
                     id={field.name}
                     name={field.name}
@@ -247,7 +247,7 @@ const EditStudent = ({
                 return (
                   <div>
                     <div className="flex items-center">
-                      <Mail className="size-6 mr-2 text-[#bbb]" />
+                      <Mail className="size-6 mr-2 text-base-content/40" />
                       <input
                         id={field.name}
                         name={field.name}
@@ -284,7 +284,7 @@ const EditStudent = ({
             <form.Field name="section">
               {(field) => (
                 <div className="flex items-center">
-                  <Users className="mr-2 text-[#bbb]" />
+                  <Users className="mr-2 text-base-content/40" />
                   <input
                     id={field.name}
                     name={field.name}

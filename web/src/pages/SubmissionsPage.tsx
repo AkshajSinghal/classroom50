@@ -105,7 +105,7 @@ const StatCard = ({
   label: string
   children: React.ReactNode
 }) => (
-  <div className="card bg-base-100 rounded-xl border border-[#eee]">
+  <div className="card bg-base-100 rounded-xl border border-base-300">
     <div className="card-body gap-1 p-4">
       <label className="text-xs uppercase tracking-wide text-base-content/50">
         {label}
@@ -444,7 +444,7 @@ const SubmissionsPageContent = () => {
     <div className="min-h-screen">
       <Drawer>
         <DrawerToggle />
-        <DrawerContent className="p-10 bg-[#fafafa] 2xl:px-50">
+        <DrawerContent className="p-10 bg-base-200 2xl:px-50">
           <Breadcrumb endpoint="Submissions" />
           {emptyRoster.show && (
             <EmptyRosterNotice
@@ -667,7 +667,7 @@ const SubmissionsPageContent = () => {
           </div>
           <details
             open
-            className="card bg-base-100 rounded-xl border border-[#eee] mb-4 group"
+            className="card bg-base-100 rounded-xl border border-base-300 mb-4 group"
           >
             <summary className="card-body flex-row items-center gap-3 cursor-pointer list-none py-4">
               <div className="rounded-xl bg-primary/10 p-2.5 text-primary">
