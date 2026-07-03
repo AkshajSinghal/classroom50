@@ -16,9 +16,11 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import type { GitHubUser } from "@/hooks/github/types"
 import { Link, Navigate, useParams, useSearch } from "@tanstack/react-router"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
+import { GitHubAPIError } from "@/hooks/github/errors"
 import { useGithubAuth } from "@/auth/useGithubAuth"
 import { useMutation } from "@tanstack/react-query"
 import { useState } from "react"
+import { useTranslation } from "react-i18next"
 import confetti from "canvas-confetti"
 import {
   acceptAssignment,
@@ -45,6 +47,7 @@ const initialsFor = (user: GitHubUser | null) => {
 }
 
 const AcceptNavbar = () => {
+  const { t } = useTranslation()
   return (
     <div className="navbar bg-base-100 shadow-sm">
       <Link to="/">
@@ -53,7 +56,7 @@ const AcceptNavbar = () => {
             aria-hidden="true"
             className="size-8 text-primary mr-2"
           />{" "}
-          Classroom 50
+          {t("nav.appName")}
         </div>
       </Link>
     </div>
@@ -69,15 +72,19 @@ const AcceptCard = ({ children }: { children: React.ReactNode }) => {
 }
 
 const UserInfo = ({ user }: { user: GitHubUser | null }) => {
+  const { t } = useTranslation()
   const username = user?.login
-  const displayName = user?.name || user?.login || "GitHub user"
+  const displayName = user?.name || user?.login || t("accept.githubUser")
 
   return (
     <div className="flex gap-4 bg-base-200 p-4 rounded-xl border border-base-300">
       <div className="avatar avatar-placeholder">
         {user?.avatar_url ? (
           <div className="w-12 rounded-full">
-            <img src={user.avatar_url} alt={`${displayName}'s GitHub avatar`} />
+            <img
+              src={user.avatar_url}
+              alt={t("accept.avatarAlt", { name: displayName })}
+            />
           </div>
         ) : (
           <div className="bg-base-200 text-black rounded-full w-12">
@@ -91,7 +98,7 @@ const UserInfo = ({ user }: { user: GitHubUser | null }) => {
 
         <div className="flex items-center gap-1 text-sm text-base-content/70">
           <GitHub aria-hidden="true" className="size-4" />
-          <span>{username ?? "Checking GitHub user..."}</span>
+          <span>{username ?? t("accept.checkingUser")}</span>
         </div>
       </div>
     </div>
@@ -105,6 +112,7 @@ const AssignmentNotFound = ({
   user: GitHubUser | null
   assignment?: string
 }) => {
+  const { t } = useTranslation()
   return (
     <div className="min-h-screen bg-base-100">
       <AcceptNavbar />
@@ -114,18 +122,19 @@ const AssignmentNotFound = ({
           <div>
             <span className="badge badge-error badge-soft gap-2">
               <AlertTriangle aria-hidden="true" className="size-4" />
-              Assignment unavailable
+              {t("accept.notFound.badge")}
             </span>
 
-            <h1 className="mt-6 text-2xl font-bold">Assignment not found</h1>
+            <h1 className="mt-6 text-2xl font-bold">
+              {t("accept.notFound.title")}
+            </h1>
 
             <p className="mt-2 text-base text-base-content/70">
-              We couldn&apos;t find an assignment matching{" "}
+              {t("accept.notFound.body_prefix")}{" "}
               <span className="font-mono font-semibold text-base-content">
                 {assignment}
               </span>{" "}
-              in this classroom. The link may be incorrect, or the assignment
-              may not have been published yet.
+              {t("accept.notFound.body_suffix")}
             </p>
           </div>
 
@@ -137,11 +146,11 @@ const AssignmentNotFound = ({
 
               <div className="min-w-0">
                 <div className="font-bold text-error">
-                  Unable to load assignment
+                  {t("accept.notFound.unableToLoad")}
                 </div>
 
                 <div className="mt-1 text-sm text-base-content/70">
-                  Expected to find assignment slug:
+                  {t("accept.notFound.expectedSlug")}
                 </div>
 
                 <pre className="mt-3 overflow-x-auto rounded-lg bg-base-100 p-3 text-sm">
@@ -152,19 +161,18 @@ const AssignmentNotFound = ({
           </div>
 
           <div className="rounded-xl border border-base-300 bg-base-200/40 p-4 text-sm text-base-content/70">
-            Check that the URL is correct, or ask your instructor to confirm
-            that this assignment has been added to{" "}
+            {t("accept.notFound.checkUrl_prefix")}{" "}
             <span className="font-mono text-base-content">
               assignments.json
             </span>
-            .
+            {t("accept.notFound.checkUrl_suffix")}
           </div>
 
           <div className="divider my-0" />
 
           <div className="space-y-3">
             <label className="label p-0 text-base font-semibold">
-              Signed in as
+              {t("accept.signedInAs")}
             </label>
 
             <UserInfo user={user} />
@@ -184,6 +192,7 @@ const NotOrgMember = ({
   org?: string
   classroom?: string
 }) => {
+  const { t } = useTranslation()
   return (
     <div className="min-h-screen bg-base-100">
       <AcceptNavbar />
@@ -193,14 +202,17 @@ const NotOrgMember = ({
           <div>
             <span className="badge badge-error badge-soft gap-2">
               <AlertTriangle aria-hidden="true" className="size-4" />
-              Access Denied
+              {t("accept.notOrgMember.badge")}
             </span>
 
-            <h1 className="mt-6 text-2xl font-bold">Not an org member</h1>
+            <h1 className="mt-6 text-2xl font-bold">
+              {t("accept.notOrgMember.title")}
+            </h1>
 
             <p className="mt-2 text-base text-base-content/70">
-              You are not currently a member of the{" "}
-              <span className="font-bold">{org}</span> organization.
+              {t("accept.notOrgMember.body_prefix")}{" "}
+              <span className="font-bold">{org}</span>{" "}
+              {t("accept.notOrgMember.body_suffix")}
             </p>
           </div>
 
@@ -212,22 +224,21 @@ const NotOrgMember = ({
 
               <div className="min-w-0">
                 <h2 className="font-semibold text-base-content">
-                  Ask your instructor for access
+                  {t("accept.notOrgMember.askInstructor")}
                 </h2>
 
                 <p className="mt-2 leading-5 text-sm text-base-content/70">
-                  Your instructor needs to invite you to the{" "}
+                  {t("accept.notOrgMember.inviteBody_prefix")}{" "}
                   <span className="font-semibold text-base-content">{org}</span>{" "}
-                  GitHub organization and the{" "}
+                  {t("accept.notOrgMember.inviteBody_middle")}{" "}
                   <span className="font-semibold text-base-content">
                     {classroom}
                   </span>{" "}
-                  class roster before you can accept this assignment.
+                  {t("accept.notOrgMember.inviteBody_suffix")}
                 </p>
 
                 <p className="mt-3 text-xs leading-5 text-base-content/70">
-                  After accepting the GitHub organization invite, return to this
-                  page and try again.
+                  {t("accept.notOrgMember.afterAccepting")}
                 </p>
               </div>
             </div>
@@ -237,7 +248,7 @@ const NotOrgMember = ({
 
           <div className="space-y-3">
             <label className="label p-0 text-base font-semibold">
-              Signed in as
+              {t("accept.signedInAs")}
             </label>
 
             <UserInfo user={user} />
@@ -248,20 +259,87 @@ const NotOrgMember = ({
   )
 }
 
-const modeMap: Record<string, string> = {
-  individual: "Individual Assignment",
-  group: "Group Assignment",
+// Shown when GitHub reports the org/enterprise enforces SAML SSO and the
+// student's token has no live SSO session (403 + X-GitHub-SSO). Distinct from
+// NotOrgMember: the student may well BE a member — they just need to authorize
+// SSO for this org. When GitHub handed us an authorization URL, offer it as the
+// primary action; otherwise explain that opening the link from the SSO-gated
+// LMS (or re-authenticating) is required.
+const SsoRequired = ({
+  user,
+  org,
+  ssoUrl,
+}: {
+  user: GitHubUser | null
+  org?: string
+  ssoUrl: string | null
+}) => {
+  const { t } = useTranslation()
+  return (
+    <div className="min-h-screen bg-base-100">
+      <AcceptNavbar />
+      <AcceptCard>
+        <div className="card-body gap-8">
+          <div>
+            <span className="badge badge-warning badge-soft gap-2">
+              <AlertTriangle aria-hidden="true" className="size-4" />
+              {t("accept.ssoRequired.badge")}
+            </span>
+
+            <h1 className="mt-6 text-2xl font-bold">
+              {t("accept.ssoRequired.title")}
+            </h1>
+
+            <p className="mt-2 text-base text-base-content/70">
+              {t("accept.ssoRequired.body_prefix")}{" "}
+              <span className="font-bold">{org}</span>{" "}
+              {t("accept.ssoRequired.body_suffix")}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-info/20 bg-info/5 p-5">
+            <p className="text-sm leading-5 text-base-content/70">
+              {t("accept.ssoRequired.instructions")}
+            </p>
+            {ssoUrl && (
+              <a
+                href={ssoUrl}
+                className="btn btn-primary btn-sm mt-4"
+                rel="noopener noreferrer"
+              >
+                {t("accept.ssoRequired.authorizeButton")}
+              </a>
+            )}
+          </div>
+
+          <div className="divider my-0" />
+
+          <div className="space-y-3">
+            <label className="label p-0 text-base font-semibold">
+              {t("accept.signedInAs")}
+            </label>
+            <UserInfo user={user} />
+          </div>
+        </div>
+      </AcceptCard>
+    </div>
+  )
+}
+
+const modeLabelKey: Record<string, string> = {
+  individual: "accept.modeIndividual",
+  group: "accept.modeGroup",
 }
 
 // Pending-state placeholders; once a step emits, the live withAcceptStep
 // message (assignments.ts) overrides these, so they only need loose parity.
-const ACCEPT_STEP_ORDER: { id: AcceptStepId; label: string }[] = [
-  { id: "account", label: "Checking your GitHub account" },
-  { id: "assignment", label: "Looking up the assignment" },
-  { id: "autograder", label: "Resolving the autograder" },
-  { id: "repo", label: "Creating your repository" },
-  { id: "access", label: "Granting you access" },
-  { id: "setup", label: "Setting up autograding" },
+const ACCEPT_STEP_ORDER: { id: AcceptStepId; labelKey: string }[] = [
+  { id: "account", labelKey: "accept.steps.account" },
+  { id: "assignment", labelKey: "accept.steps.assignment" },
+  { id: "autograder", labelKey: "accept.steps.autograder" },
+  { id: "repo", labelKey: "accept.steps.repo" },
+  { id: "access", labelKey: "accept.steps.access" },
+  { id: "setup", labelKey: "accept.steps.setup" },
 ]
 
 type StepState = Record<
@@ -331,6 +409,7 @@ const StepRow = ({
 }
 
 const AcceptProgress = ({ steps }: { steps: StepState }) => {
+  const { t } = useTranslation()
   const stepStates = ACCEPT_STEP_ORDER.map((step) => steps[step.id])
   const completed = stepStates.filter((s) => s.status === "complete").length
   const hasError = stepStates.some((s) => s.status === "error")
@@ -352,10 +431,10 @@ const AcceptProgress = ({ steps }: { steps: StepState }) => {
         : "pending"
 
   const summary = {
-    error: "Setup failed — review the steps",
-    complete: "Setup complete",
-    running: "Setting up your repository…",
-    pending: "Setup progress",
+    error: t("accept.progress.error"),
+    complete: t("accept.progress.complete"),
+    running: t("accept.progress.running"),
+    pending: t("accept.progress.pending"),
   }[headerStatus]
 
   return (
@@ -387,7 +466,11 @@ const AcceptProgress = ({ steps }: { steps: StepState }) => {
       {expanded && (
         <div className="flex flex-col gap-3 border-t border-base-300 p-5">
           {ACCEPT_STEP_ORDER.map((step) => (
-            <StepRow key={step.id} label={step.label} state={steps[step.id]} />
+            <StepRow
+              key={step.id}
+              label={t(step.labelKey)}
+              state={steps[step.id]}
+            />
           ))}
         </div>
       )}
@@ -417,10 +500,11 @@ const RepairToggle = ({
   disabled: boolean
   onRerun: () => void
 }) => {
+  const { t } = useTranslation()
   return (
     <details className="group rounded-xl border border-base-300 bg-base-200/40">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 text-sm font-medium">
-        <span>Having trouble?</span>
+        <span>{t("accept.repair.havingTrouble")}</span>
         <ChevronDown
           aria-hidden="true"
           className="size-4 transition-transform group-open:rotate-180"
@@ -429,8 +513,7 @@ const RepairToggle = ({
 
       <div className="border-t border-base-300 p-4">
         <p className="text-sm text-base-content/70">
-          Autograding not running, or setup files missing? Re-run setup to
-          repair your repository.
+          {t("accept.repair.hint")}
         </p>
         <button
           type="button"
@@ -438,7 +521,7 @@ const RepairToggle = ({
           disabled={disabled}
           onClick={onRerun}
         >
-          Re-run setup
+          {t("accept.repair.rerun")}
         </button>
       </div>
     </details>
@@ -446,7 +529,8 @@ const RepairToggle = ({
 }
 
 const AcceptAssignmentPage = () => {
-  useDocumentTitle("Accept Assignment")
+  const { t } = useTranslation()
+  useDocumentTitle(t("documentTitle.acceptAssignment"))
   const { org, classroom, assignment } = useParams({ strict: false })
   // The capability key from the accept link (?k=...). For a protected
   // classroom this selects the <classroom>/<secret>/ Pages path; absent for
@@ -461,8 +545,11 @@ const AcceptAssignmentPage = () => {
 
   const { data: assignmentsData, isLoading: loadingAssignments } =
     usePagesAssignments(org, classroom, secret)
-  const { data: orgInvite, isLoading: loadingOrgMembership } =
-    useGetOwnOrgMembership(org)
+  const {
+    data: orgInvite,
+    isLoading: loadingOrgMembership,
+    error: orgMembershipError,
+  } = useGetOwnOrgMembership(org)
 
   const assignmentData = assignmentsData?.find((a) => a.slug === assignment)
 
@@ -521,11 +608,41 @@ const AcceptAssignmentPage = () => {
         <AcceptNavbar />
         <AcceptCard>
           <div className="flex justify-center">
-            <Spinner size="xl" label="Loading assignment" />
+            <Spinner size="xl" label={t("accept.loadingAssignment")} />
           </div>
         </AcceptCard>
       </div>
     )
+  }
+
+  // Membership read failed. Distinguish causes rather than blanket "not a
+  // member": a 403 carrying X-GitHub-SSO means the org/enterprise enforces SAML
+  // SSO and this token has no live SSO session (the student may well be a
+  // member) — route them to authorize instead. We only take the SSO detour when
+  // GitHub gave us an actionable authorization URL; the header-only
+  // `partial-results` shape (ssoAuthorizationUrl === null) has no button to
+  // offer, so it falls through to the not-a-member screen (which at least points
+  // the student at their instructor / re-opening from the LMS) rather than
+  // dead-ending them on a button-less SSO screen. Any other definitive failure
+  // (404 / non-SSO 403) also renders not-a-member. (Transient 5xx/429 are
+  // retried by the query, so they don't reach here as errors — and on any error
+  // the query's `data` is undefined, so the pending-invite onboarding redirect
+  // below is only reachable from a successful read.)
+  if (orgMembershipError) {
+    if (
+      orgMembershipError instanceof GitHubAPIError &&
+      orgMembershipError.isSsoRequired &&
+      orgMembershipError.ssoAuthorizationUrl
+    ) {
+      return (
+        <SsoRequired
+          user={user}
+          org={org}
+          ssoUrl={orgMembershipError.ssoAuthorizationUrl}
+        />
+      )
+    }
+    return <NotOrgMember classroom={classroom} user={user} org={org} />
   }
 
   if (!orgInvite) {
@@ -562,14 +679,18 @@ const AcceptAssignmentPage = () => {
           <div className="flex justify-between">
             <span className="badge badge-primary badge-soft">
               <UserRound aria-hidden="true" className="size-4" />
-              {modeMap[assignmentData?.mode ?? ""] ?? ""}
+              {assignmentData?.mode && modeLabelKey[assignmentData.mode]
+                ? t(modeLabelKey[assignmentData.mode])
+                : ""}
             </span>
             <span
               className={`badge ${pastDue ? "badge-error badge-soft" : ""}`}
             >
               {assignmentData?.due
-                ? `Due ${formatDueDateTime(assignmentData.due)}`
-                : "No due date"}
+                ? t("accept.due", {
+                    date: formatDueDateTime(assignmentData.due),
+                  })
+                : t("accept.noDueDate")}
             </span>
           </div>
           <h1 className="text-2xl font-bold tracking-tight pt-2">
@@ -577,23 +698,20 @@ const AcceptAssignmentPage = () => {
           </h1>
           <h2 className="text-lg">
             {repoExistsAlready
-              ? "You've already accepted this assignment. Open your repository to keep working on it."
-              : "Accept this assignment to get your own copy of the starter code repository."}
+              ? t("accept.alreadyAcceptedHeading")
+              : t("accept.acceptHeading")}
           </h2>
 
           {pastDue && (
             <div className="alert alert-warning items-start">
               <AlertTriangle aria-hidden="true" className="size-5 shrink-0" />
-              <div className="text-sm">
-                This assignment is past due. You can still accept it, but check
-                with your instructor about late submissions.
-              </div>
+              <div className="text-sm">{t("accept.pastDueWarning")}</div>
             </div>
           )}
 
           <div className="divider my-0" />
 
-          <label className="label text-lg">Signed in as</label>
+          <label className="label text-lg">{t("accept.signedInAs")}</label>
 
           <div className="flex flex-col gap-4">
             <UserInfo user={user} />
@@ -601,8 +719,8 @@ const AcceptAssignmentPage = () => {
             <div className="flex gap-2 flex-col bg-base-200 p-4 rounded-xl border border-base-300">
               <label className="label text-lg">
                 {repoExistsAlready
-                  ? "Repository already exists as:"
-                  : "Repository will be created as:"}
+                  ? t("accept.repoAlreadyExists")
+                  : t("accept.repoWillBeCreated")}
               </label>
 
               <div className="flex gap-4 min-w-0">
@@ -621,16 +739,14 @@ const AcceptAssignmentPage = () => {
               <div className="alert alert-error items-start">
                 <AlertTriangle aria-hidden="true" className="size-5 shrink-0" />
                 <div>
-                  <div className="font-bold">Could not accept assignment</div>
+                  <div className="font-bold">{t("accept.errorTitle")}</div>
                   <div className="mt-1 whitespace-pre-wrap text-sm">
                     {acceptMutation.error instanceof Error
                       ? acceptMutation.error.message
-                      : "Something went wrong while accepting the assignment."}
+                      : t("accept.errorGeneric")}
                   </div>
                   <div className="mt-2 text-xs opacity-80">
-                    This is safe to retry — address anything noted above if you
-                    can, then use the button below. Some errors (rate limits,
-                    GitHub hiccups) just need a moment before retrying.
+                    {t("accept.errorRetryHint")}
                   </div>
                 </div>
               </div>
@@ -642,12 +758,12 @@ const AcceptAssignmentPage = () => {
                 <div className="min-w-0">
                   <div className="font-bold">
                     {acceptMutation.data.status === "already-accepted"
-                      ? "Assignment already accepted"
-                      : "Assignment accepted"}
+                      ? t("accept.alreadyAcceptedTitle")
+                      : t("accept.acceptedTitle")}
                   </div>
 
                   <div className="mt-1">
-                    Repository:{" "}
+                    {t("accept.repositoryLabel")}{" "}
                     <a
                       className="link font-mono"
                       href={acceptMutation.data.repo.html_url}
@@ -672,7 +788,7 @@ const AcceptAssignmentPage = () => {
                 rel="noreferrer"
               >
                 <GitHubWhite aria-hidden="true" className="size-6" />
-                Open Repository
+                {t("accept.openRepository")}
               </a>
             )}
 
@@ -684,7 +800,7 @@ const AcceptAssignmentPage = () => {
                   onClick={() => setCollaboratorsOpen(true)}
                 >
                   <UsersRound aria-hidden="true" className="size-5" />
-                  Edit collaborators
+                  {t("accept.editCollaborators")}
                 </button>
               )}
 
@@ -700,7 +816,7 @@ const AcceptAssignmentPage = () => {
                   }
                 >
                   <GitHubWhite aria-hidden="true" className="size-6" />
-                  Accept Assignment & Create Repository
+                  {t("accept.acceptButton")}
                 </button>
               )}
 

@@ -16,7 +16,9 @@ import {
   pollDeviceToken,
   requestDeviceCode,
 } from "./github-oauth-api"
-import { fetchGithubUser } from "./github-user-api"
+import { fetchGithubUser, GitHubUserFetchError } from "./github-user-api"
+import { isDefinitiveGitHubStatus } from "@/hooks/github/errors"
+import router from "@/router"
 import { deriveChallenge, generateVerifier, randomBase64Url } from "./pkce"
 import {
   clearGithubToken,
@@ -65,6 +67,9 @@ function useGithubAuthState() {
   const queryClient = useQueryClient()
   const abortRef = useRef<AbortController | null>(null)
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Deep link (#71) stashed at code-exchange, consumed by the status-driven
+  // effect below so navigation runs against an authenticated router context.
+  const pendingReturnToRef = useRef<string | null>(null)
 
   const [screen, setScreen] = useState<GithubAuthScreen>("config")
   const [clientId, setClientId] = useState(GITHUB_OAUTH_CLIENT_ID)
@@ -74,13 +79,31 @@ function useGithubAuthState() {
   const [device, setDevice] = useState<DeviceAuthState | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const [hasLoadedStoredAuth, setHasLoadedStoredAuth] = useState(false)
+  // Set when a live API 401 (revoked/expired token) tears the session down,
+  // so /login can explain why the user was signed out. A deliberate signOut()
+  // clears it.
+  const [sessionExpired, setSessionExpired] = useState(false)
 
   const githubUserQuery = useQuery({
     queryKey: ["github", "user", token],
     queryFn: () => fetchGithubUser(token!),
     enabled: Boolean(token),
     staleTime: 60 * 60 * 1000,
-    retry: 1,
+    // A definitive status (401 revoked, 403 SSO/blocked, 404) resolves
+    // immediately — retrying can't change it and only widens the window before
+    // the session settles. Transient failures (5xx / network) still self-heal
+    // with a bounded retry so a momentary GitHub blip doesn't eject a signed-in
+    // user. Shares the definitive-status policy with the GitHub-client reads
+    // (see retryTransientGitHubError / isDefinitiveGitHubStatus).
+    retry: (failureCount, error) => {
+      if (
+        error instanceof GitHubUserFetchError &&
+        isDefinitiveGitHubStatus(error.status)
+      ) {
+        return false
+      }
+      return failureCount < 2
+    },
   })
 
   const exchangeCodeMutation = useMutation({
@@ -100,6 +123,7 @@ function useGithubAuthState() {
       persistGithubToken(data.access_token, data.scope || "")
       setToken(data.access_token)
       setTokenScope(data.scope || "")
+      setSessionExpired(false)
       setDevice(null)
       setScreen("success")
 
@@ -168,6 +192,7 @@ function useGithubAuthState() {
       verifier,
       expectedState,
       clientId: callbackClientId,
+      returnTo,
     } = consumeOAuthSession()
 
     if (!returnedState || returnedState !== expectedState) {
@@ -199,6 +224,10 @@ function useGithubAuthState() {
       {
         onSuccess: (data) => {
           completeSignIn(data)
+          // Defer the return until status is "authenticated" (effect below);
+          // navigating now would race the router context and bounce through
+          // the _authed guard (#71).
+          pendingReturnToRef.current = returnTo
         },
         onError: (err) => {
           setError(formatError(err))
@@ -237,11 +266,16 @@ function useGithubAuthState() {
     const challenge = await deriveChallenge(verifier)
     const oauthState = randomBase64Url(16)
 
+    // Stash the deep link (from /login?redirect=) in the OAuth session so it
+    // survives the GitHub round-trip; restored after the code exchange (#71).
+    const returnTo = new URLSearchParams(window.location.search).get("redirect")
+
     saveOAuthSession({
       verifier,
       state: oauthState,
       clientId: config.clientId,
       scope: config.scope,
+      returnTo,
     })
 
     window.location.href = buildGithubAuthorizeUrl({
@@ -429,16 +463,48 @@ function useGithubAuthState() {
     )
   }, [])
 
-  const signOut = useCallback(() => {
-    abortRef.current?.abort()
-    clearGithubToken()
-    setToken(null)
-    setTokenScope("")
-    setDevice(null)
-    setError(null)
-    setScreen("config")
-    queryClient.removeQueries({ queryKey: ["github"] })
-  }, [queryClient])
+  // Shared teardown for both a deliberate sign-out and an involuntary expiry.
+  // `expired` flags the involuntary case so /login can explain the redirect.
+  const clearSession = useCallback(
+    (expired: boolean) => {
+      abortRef.current?.abort()
+      clearGithubToken()
+      setToken(null)
+      setTokenScope("")
+      setDevice(null)
+      setError(null)
+      setScreen("config")
+      setSessionExpired(expired)
+      // Cancel in-flight ["github"] requests before evicting them so they
+      // don't resolve/reject into removed cache state after teardown.
+      void queryClient.cancelQueries({ queryKey: ["github"] })
+      queryClient.removeQueries({ queryKey: ["github"] })
+    },
+    [queryClient],
+  )
+
+  const signOut = useCallback(() => clearSession(false), [clearSession])
+
+  // Called when a revoked/expired token is detected on a live API 401. Clears
+  // the token so `status` flips to unauthenticated and the _authed guard
+  // redirects to /login. Guards on the in-memory token (the authoritative
+  // source) rather than localStorage, so a live 401 still tears the session
+  // down even if storage was cleared out-of-band. No-ops once the token is
+  // already gone, keeping it safe to call repeatedly.
+  const expireSession = useCallback(() => {
+    if (!token) return
+    clearSession(true)
+  }, [clearSession, token])
+
+  // Cold-reload path: a stored-but-revoked token fails /user validation with a
+  // 401. Tear the session down so the token doesn't linger across reloads and
+  // the guard redirects to /login.
+  useEffect(() => {
+    const error = githubUserQuery.error
+    if (error instanceof GitHubUserFetchError && error.status === 401) {
+      expireSession()
+    }
+  }, [githubUserQuery.error, expireSession])
 
   const deviceStatus = useMemo(() => {
     if (!device) return null
@@ -490,6 +556,23 @@ function useGithubAuthState() {
     githubUserQuery.data,
   ])
 
+  // Navigate to the stashed deep link once status is "authenticated", so the
+  // target _authed guard sees an authenticated context instead of bouncing
+  // through /login (#71). history.push (not navigate({ to })) preserves the
+  // query — e.g. the ?k= accept key — which navigate({ to }) would fold into
+  // the pathname. A bad path degrades to the homepage.
+  useEffect(() => {
+    if (status !== "authenticated") return
+    const returnTo = pendingReturnToRef.current
+    if (!returnTo) return
+    pendingReturnToRef.current = null
+    try {
+      router.history.push(returnTo)
+    } catch {
+      router.history.push("/")
+    }
+  }, [status])
+
   return {
     screen,
     token,
@@ -507,6 +590,8 @@ function useGithubAuthState() {
     markDeviceCodeCopied,
     markVerificationOpened,
     signOut,
+    expireSession,
+    sessionExpired,
     status,
   }
 }

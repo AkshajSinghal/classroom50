@@ -12,6 +12,11 @@ export class GitHubAPIError extends Error {
   url: string
   body: unknown
   rateLimit: GitHubRateLimit
+  // Raw X-GitHub-SSO response header, when present. GitHub sets this on a
+  // 403 (and omits SSO-gated orgs from multi-org reads) when the token lacks a
+  // live SAML SSO session for the org/enterprise. `null` when the header was
+  // absent. See parseSsoAuthorizationUrl for extracting the authorization URL.
+  ssoHeader: string | null
 
   constructor(args: {
     status: number
@@ -19,6 +24,7 @@ export class GitHubAPIError extends Error {
     message: string
     body: unknown
     rateLimit: GitHubRateLimit
+    ssoHeader?: string | null
   }) {
     super(args.message)
     this.name = "GitHubAPIError"
@@ -26,6 +32,7 @@ export class GitHubAPIError extends Error {
     this.url = args.url
     this.body = args.body
     this.rateLimit = args.rateLimit
+    this.ssoHeader = args.ssoHeader ?? null
   }
 
   get isNotFound() {
@@ -47,22 +54,79 @@ export class GitHubAPIError extends Error {
         (this.rateLimit.remaining === 0 || this.rateLimit.retryAfter !== null))
     )
   }
+
+  // The org/enterprise enforces SAML SSO and this token has no live SSO session
+  // for it. GitHub signals this with the X-GitHub-SSO header (a 403 carrying
+  // `required; url=…`, or `partial-results; organizations=…` on multi-org reads).
+  // Scoped to 403: GitHub only emits X-GitHub-SSO on a forbidden response, so a
+  // header echoed on any other status (a 401 dead token, a 5xx/429 that a proxy
+  // copied the header onto) is NOT an SSO gate and must not misroute the user.
+  get isSsoRequired() {
+    return this.status === 403 && this.ssoHeader !== null
+  }
+
+  // The GitHub SSO authorization URL to send the user to, if the header carried
+  // one (`required; url=…`). Returns null for the `partial-results` shape or
+  // when no header is present.
+  get ssoAuthorizationUrl() {
+    return parseSsoAuthorizationUrl(this.ssoHeader)
+  }
+}
+
+// Extract the authorization URL from an X-GitHub-SSO header value. GitHub uses
+// two shapes:
+//   - `required; url=https://github.com/orgs/<org>/sso?authorization_request=…`
+//     (or `enterprises/<ent>/sso`) — a single-org read the token can't see.
+//   - `partial-results; organizations=21955855,20582480` — a multi-org read
+//     that silently omitted SSO-gated orgs; carries org IDs, not a URL.
+// Returns the URL for the first shape, or null otherwise.
+export function parseSsoAuthorizationUrl(
+  ssoHeader: string | null | undefined,
+): string | null {
+  if (!ssoHeader) return null
+  const match = ssoHeader.match(/url=(\S+)/)
+  if (!match) return null
+  try {
+    const url = new URL(match[1])
+    // Only ever hand back an https://github.com SSO URL, never an
+    // attacker-influenced origin or scheme (the header is from GitHub, but stay
+    // defensive since we render this as a clickable redirect). The explicit
+    // https: check makes the intent durable rather than relying on the
+    // incidental fact that javascript:/data: URLs parse to an empty hostname.
+    if (url.protocol !== "https:") return null
+    if (url.hostname !== "github.com") return null
+    return url.toString()
+  } catch {
+    return null
+  }
 }
 
 // Shared React Query `retry` predicate for fail-closed role/permission reads: a
-// 404 (not found / not a member) or 403 (blocked) is DEFINITIVE and must NOT
-// retry, while a transient 5xx/429/network blip self-heals (bounded to 2).
-export function retryTransientNotFoundForbidden(
+// definitive status (401 revoked/expired, 403 blocked, 404 not found / not a
+// member — see isDefinitiveGitHubStatus) must NOT retry, while a transient
+// 5xx/429/network blip self-heals (bounded to 2). Named for its behavior (retry
+// only transient errors); the definitive set includes 401 as well as 403/404.
+export function retryTransientGitHubError(
   failureCount: number,
   error: unknown,
 ): boolean {
   if (
     error instanceof GitHubAPIError &&
-    (error.status === 404 || error.status === 403)
+    isDefinitiveGitHubStatus(error.status)
   ) {
     return false
   }
   return failureCount < 2
+}
+
+// Statuses that are DEFINITIVE for a GitHub read — retrying cannot change the
+// outcome, so the query should resolve immediately: 401 (revoked/expired
+// credentials), 403 (blocked, incl. SAML-SSO-gated — see #66), 404 (absent).
+// Any other failure (5xx / 429 / network) is treated as transient by the retry
+// predicates above/below. Works off a bare status so it is shared across the
+// bespoke GitHubUserFetchError and the canonical GitHubAPIError.
+export function isDefinitiveGitHubStatus(status: number): boolean {
+  return status === 401 || status === 403 || status === 404
 }
 
 export function readGitHubRateLimitHeaders(res: Response): GitHubRateLimit {

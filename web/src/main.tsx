@@ -5,12 +5,22 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools"
 import { MotionConfig } from "motion/react"
 
 import "./index.css"
+import "./i18n"
 import { GitHubAuthProvider } from "./auth/useGithubAuth"
 import { GitHubClientProviderFromAuth } from "./context/github/GitHubClientProviderFromAuth"
 import { NotificationProvider } from "./context/notifications/NotificationProvider"
 import App from "./App"
+import { appVersion, formatAppVersion } from "./version"
 
 const client = new QueryClient()
+
+// Make the deployed release identifiable from the browser console (there is no
+// version in the URL or a server header for a static SPA). Deliberate release
+// diagnostic, not stray debug logging — hence the no-console exception.
+// eslint-disable-next-line no-console
+console.info(
+  `Classroom 50 — ${formatAppVersion()} — built ${appVersion.buildDate}`,
+)
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

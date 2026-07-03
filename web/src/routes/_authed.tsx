@@ -8,7 +8,10 @@ export const Route = createFileRoute("/_authed")({
       throw redirect({
         to: "/login",
         search: {
-          redirect: location.href,
+          // Same-origin relative path only (see isSafeReturnTo), so the
+          // destination survives the round-trip without open-redirect risk.
+          // Consumed post-auth in useGithubAuth and login.tsx's guard (#71).
+          redirect: location.pathname + location.searchStr,
         },
       })
     }

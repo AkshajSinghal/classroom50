@@ -2,10 +2,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { orgMembershipQuery } from "./github/queries"
 import { useGitHubRepo } from "./github/hooks"
-import {
-  GitHubAPIError,
-  retryTransientNotFoundForbidden,
-} from "./github/errors"
+import { GitHubAPIError, retryTransientGitHubError } from "./github/errors"
 import { resolveTeacherVerdict } from "./useCourseTeacherAccess"
 import { staffTeamName } from "./github/mutations"
 import { useRoleView } from "@/context/roleView/RoleViewProvider"
@@ -133,18 +130,19 @@ export function applyViewAs(
   return ROLE_RANK[viewAs] < ROLE_RANK[actual] ? viewAs : actual
 }
 
-// Human label per the product mapping: owner + instructor => "Instructor",
-// ta => "TA", student => "Student", unresolved => null (so callers show a
-// skeleton rather than guessing mid-load).
-export function roleLabel(role: EffectiveRole): string | null {
+// Translation key for the human role label per the product mapping:
+// owner + instructor => "nav.roleInstructor", ta => "nav.roleTa",
+// student => "nav.roleStudent", unresolved => null (so callers show a skeleton
+// rather than guessing mid-load). Callers pass the returned key through t().
+export function roleLabelKey(role: EffectiveRole): string | null {
   switch (role) {
     case "owner":
     case "instructor":
-      return "Instructor"
+      return "nav.roleInstructor"
     case "ta":
-      return "TA"
+      return "nav.roleTa"
     case "student":
-      return "Student"
+      return "nav.roleStudent"
     case "unresolved":
       return null
   }
@@ -224,11 +222,11 @@ export function useClassroomRole(
     // orgMembershipQuery defaults to retry:false, but a transient blip on the
     // membership read must self-heal rather than pin isOwner at `undefined`
     // (which would silently demote a real owner). A 404/403 is definitive.
-    retry: retryTransientNotFoundForbidden,
+    retry: retryTransientGitHubError,
   })
 
   const staffRepoQuery = useGitHubRepo(org, "classroom50", {
-    retry: retryTransientNotFoundForbidden,
+    retry: retryTransientGitHubError,
   })
   const staff = resolveTeacherVerdict({
     org,

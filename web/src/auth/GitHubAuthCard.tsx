@@ -1,10 +1,13 @@
 import { AlertTriangle, CheckCircle, GraduationCap } from "lucide-react"
+import { useTranslation } from "react-i18next"
 import GitHub from "@/assets/github.svg?react"
 
 import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import { useGithubAuth } from "./useGithubAuth"
 import { GitHubAuthedPanel } from "./GitHubAuthedPanel"
 import { GitHubDevicePrompt } from "./GitHubDevicePrompt"
+import { LoginLanguageMenu } from "./LoginLanguageMenu"
+import { AppVersionBadge } from "@/components/AppVersionBadge"
 
 function LoadingScreen({ label }: { label: string }) {
   return (
@@ -19,20 +22,26 @@ function LoadingScreen({ label }: { label: string }) {
 }
 
 export function GitHubAuthCard() {
-  useDocumentTitle("Sign in")
+  const { t } = useTranslation()
+  useDocumentTitle(t("auth.signInTitle"))
   const auth = useGithubAuth()
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-base-200 px-4 py-8">
-      <section className="card w-full max-w-lg rounded-xl border border-base-300 bg-base-100 shadow-sm">
+      <section className="card relative w-full max-w-lg rounded-xl border border-base-300 bg-base-100 shadow-sm">
+        <div className="absolute right-3 top-3 z-10">
+          <LoginLanguageMenu />
+        </div>
         <header className="flex items-center gap-4 border-b border-base-200 px-7 py-6">
           <div className="flex size-12 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
             <GraduationCap aria-hidden="true" className="size-6" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Classroom 50</h1>
+            <h1 className="text-2xl font-bold tracking-tight">
+              {t("nav.appName")}
+            </h1>
             <p className="mt-1 text-sm text-base-content/70">
-              Sign in with your GitHub account to continue.
+              {t("auth.signInSubtitle")}
             </p>
           </div>
         </header>
@@ -47,7 +56,7 @@ export function GitHubAuthCard() {
               onSignOut={auth.signOut}
             />
           ) : auth.screen === "exchanging" ? (
-            <LoadingScreen label="Exchanging code for access token..." />
+            <LoadingScreen label={t("auth.exchangingCode")} />
           ) : auth.screen === "success" ? (
             <div className="flex flex-col items-center gap-4 py-10 text-center">
               <div className="flex size-14 items-center justify-center rounded-full bg-success/10 text-success">
@@ -55,10 +64,10 @@ export function GitHubAuthCard() {
               </div>
               <div>
                 <h2 className="text-xl font-bold tracking-tight">
-                  Authentication successful
+                  {t("auth.successTitle")}
                 </h2>
                 <p className="mt-2 text-sm text-base-content/70">
-                  Redirecting you to the app...
+                  {t("auth.successRedirecting")}
                 </p>
               </div>
             </div>
@@ -86,6 +95,14 @@ export function GitHubAuthCard() {
                   />
                   <span>{auth.error}</span>
                 </div>
+              ) : auth.sessionExpired ? (
+                <div className="alert alert-warning items-start text-sm">
+                  <AlertTriangle
+                    aria-hidden="true"
+                    className="size-4 shrink-0"
+                  />
+                  <span>Your session expired — sign in again to continue.</span>
+                </div>
               ) : null}
 
               <div className="space-y-3">
@@ -102,7 +119,7 @@ export function GitHubAuthCard() {
                   ) : (
                     <GitHub aria-hidden="true" className="size-4" />
                   )}
-                  Sign in with GitHub
+                  {t("auth.signInWithGitHub")}
                 </button>
 
                 <button
@@ -117,23 +134,26 @@ export function GitHubAuthCard() {
                       aria-hidden="true"
                     />
                   ) : null}
-                  Use a device code instead
+                  {t("auth.useDeviceCode")}
                 </button>
               </div>
             </form>
           )}
         </div>
 
-        <footer className="flex items-center justify-between border-t border-base-200 px-7 py-4 text-xs text-base-content/70">
-          <span>Manage assignments and submissions via GitHub.</span>
-          <a
-            className="link link-info link-hover shrink-0"
-            href="https://github.com/foundation50/classroom50/wiki"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Visit Classroom 50's docs
-          </a>
+        <footer className="flex items-center justify-between gap-3 border-t border-base-200 px-7 py-4 text-xs text-base-content/70">
+          <span>{t("auth.footerTagline")}</span>
+          <div className="flex shrink-0 items-center gap-3">
+            <AppVersionBadge className="tabular-nums text-base-content/50" />
+            <a
+              className="link link-info link-hover"
+              href="https://github.com/foundation50/classroom50/wiki"
+              target="_blank"
+              rel="noreferrer"
+            >
+              {t("auth.visitDocs")}
+            </a>
+          </div>
         </footer>
       </section>
     </main>
