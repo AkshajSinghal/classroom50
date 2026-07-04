@@ -15,6 +15,10 @@ name: web Deploy to Preview (preview.classroom50.org)
 # Why a separate repo: GitHub Pages allows only one custom domain per repo, so
 # production (classroom50.org) and preview must live in different repos. Source
 # stays here; the preview repo holds only the built artifact + its own CNAME.
+#
+# Deploy mechanism: the preview repo uses Actions-based Pages. This force-pushes
+# dist/ to the preview repo's `build` branch, and its deploy-pages.yaml (on
+# `main`) publishes it.
 
 on:
   push:
@@ -74,15 +78,17 @@ jobs:
       - name: Write CNAME for preview domain
         run: echo "preview.classroom50.org" > dist/CNAME
 
-      # Publish the built site to the preview repo's `main` branch (its Pages
-      # source). Uses an SSH deploy key (least privilege, no expiry) that has
-      # write access to ONLY the preview repo.
+      # Publish dist/ to the preview repo's `build` branch, which triggers its
+      # Actions-based Pages deploy. A separate branch (not `main`) is required:
+      # force_orphan recreates the branch with only these files, which would
+      # delete the preview repo's deploy workflow. Uses an SSH deploy key scoped
+      # to only the preview repo.
       - name: Publish to preview repo
         uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.1.0
         with:
           deploy_key: ${{ secrets.PREVIEW_DEPLOY_KEY }}
           external_repository: foundation50/classroom50-web-preview
-          publish_branch: main
+          publish_branch: build
           # Repo-root-relative; the build wrote to web/dist.
           publish_dir: ./web/dist
           # Replace the branch contents wholesale each deploy (the preview repo
