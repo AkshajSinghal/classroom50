@@ -1,4 +1,5 @@
 import {
+  ArrowRight,
   CheckCircle2,
   GraduationCap,
   Loader2,
@@ -6,12 +7,19 @@ import {
   UserPlus,
 } from "lucide-react"
 import { Spinner } from "@/components/Spinner"
-import { MembershipError } from "@/components/MembershipError"
+import {
+  MembershipError,
+  classifyMembershipError,
+} from "@/components/MembershipError"
 import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import { Link, useParams, useSearch, useRouter } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { useOnboardingState } from "@/hooks/onboarding/useOnboardingState"
+import { useGithubAuth } from "@/auth/useGithubAuth"
+import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
+import { useAcceptAndVerifyMembership } from "@/hooks/useAcceptAndVerifyMembership"
+import { isMembershipReadError } from "@/util/membershipReadError"
+import { deriveOnboardingState } from "@/util/onboardingState"
 import { EnterDiv } from "@/lib/motionComponents"
 
 const OnboardNavbar = () => {
@@ -97,11 +105,13 @@ const NotInvited = ({
 }
 
 const AllSet = ({
+  org,
   classroom,
   returning,
   returnTo,
   onContinue,
 }: {
+  org?: string
   classroom?: string
   returning: boolean
   returnTo?: string
@@ -136,7 +146,7 @@ const AllSet = ({
             </p>
           </div>
         </div>
-        {returning && returnTo && (
+        {returning && returnTo ? (
           <button
             type="button"
             className="btn btn-primary w-full"
@@ -144,6 +154,18 @@ const AllSet = ({
           >
             {t("getStarted.continueToAssignment")}
           </button>
+        ) : (
+          org &&
+          classroom && (
+            <Link
+              to="/$org/$classroom"
+              params={{ org, classroom }}
+              className="btn btn-primary w-full"
+            >
+              {t("getStarted.active.goToClassroom")}
+              <ArrowRight aria-hidden="true" className="size-4" />
+            </Link>
+          )
         )}
       </EnterDiv>
     </OnboardShell>
@@ -159,6 +181,7 @@ const OnboardingPage = () => {
   const { t } = useTranslation()
   useDocumentTitle(t("documentTitle.getStarted"))
   const { org, classroom } = useParams({ strict: false })
+  const { user } = useGithubAuth()
   // Where to send the student once they've become an active org member (set by
   // the accept page). The route already validated it's a safe relative path.
   const search = useSearch({ strict: false }) as { returnTo?: string }
@@ -166,7 +189,48 @@ const OnboardingPage = () => {
     typeof search.returnTo === "string" ? search.returnTo : undefined
   const router = useRouter()
 
-  const { state, errorInfo, retry } = useOnboardingState({ org, classroom })
+  const {
+    data: orgMembership,
+    isLoading: loadingMembership,
+    error: rawMembershipError,
+    refetch: refetchMembership,
+  } = useGetOwnOrgMembership(org)
+
+  // A 404 from GET /user/memberships/orgs/{org} is not a read *failure* — it is
+  // GitHub's authoritative "no membership record", i.e. the student was never
+  // invited. Treat it as "no membership" so we fall through to the calm
+  // notInvited screen, and reserve the error screen for genuine read failures
+  // (403 / SSO-gated / transient). The accept page keeps its own 404 handling;
+  // this remapping is scoped to /onboard.
+  const membershipReadError = isMembershipReadError(rawMembershipError)
+
+  const hasMembership = Boolean(orgMembership)
+  const alreadyActive = orgMembership?.state === "active"
+
+  // Fire the accept/verify only when a (pending) membership record exists, isn't
+  // already active, and the read didn't error. The hook owns fire-once semantics.
+  const shouldAccept = hasMembership && !alreadyActive && !membershipReadError
+  const accept = useAcceptAndVerifyMembership({ org, enabled: shouldAccept })
+
+  const active = alreadyActive || accept.isActive
+
+  // Precedence: a read error (or accept failure) takes priority over everything
+  // else so a stale "active" can't mask a failure; then active; then loading
+  // (initial read OR accept/verify in flight); then notInvited (no record).
+  const state = deriveOnboardingState({
+    loadingMembership,
+    membershipReadError,
+    hasMembership,
+    acceptError: accept.isError,
+    active,
+  })
+
+  // A read error can't be recovered by re-running accept (the read failed before
+  // any pending record was seen), so refetch the membership query in that case;
+  // otherwise re-run the accept/verify.
+  const retry = membershipReadError
+    ? () => void refetchMembership()
+    : accept.retry
 
   // One-shot latch: history.push stacks entries, so fire once when membership
   // first goes active rather than on every re-render.
@@ -228,7 +292,15 @@ const OnboardingPage = () => {
     return <NotInvited org={org} classroom={classroom} />
   }
 
-  if (state === "error" && errorInfo) {
+  if (state === "error") {
+    // Mirror the precedence above: a read error takes priority, so classify it
+    // over any accept error. (A 404 never reaches here — it maps to notInvited.)
+    const err = membershipReadError ? rawMembershipError : accept.error
+    const errorInfo = classifyMembershipError(err, {
+      org,
+      username: user?.login,
+      membershipState: orgMembership?.state,
+    })
     return (
       <OnboardShell>
         <MembershipError info={errorInfo} org={org} onRetry={retry} />
@@ -239,6 +311,7 @@ const OnboardingPage = () => {
   // active
   return (
     <AllSet
+      org={org}
       classroom={classroom}
       returning={Boolean(returnTo)}
       returnTo={returnTo}

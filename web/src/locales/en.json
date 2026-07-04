@@ -655,7 +655,8 @@
     "active": {
       "title": "You're all set",
       "message": "You now have access to this classroom — there's nothing more you need to do here. You can accept assignments your instructor shares with you.",
-      "takingBack": "Taking you back to your assignment…"
+      "takingBack": "Taking you back to your assignment…",
+      "goToClassroom": "Go to your classroom"
     }
   },
   "membership": {
@@ -946,7 +947,7 @@
   },
   "skeletonDrift": {
     "title": "Classroom workflow files are out of date",
-    "body": "The GitHub Actions workflows in this org's classroom50 config repo are out of date. Re-run onboarding to update them and keep grading, score collection, and Pages publishing working.",
+    "body": "The GitHub Actions workflows in this org's classroom50 config repo are out of date. Re-run org setup to update them and keep grading, score collection, and Pages publishing working.",
     "overwriteWarning_label": "Heads up:",
     "overwriteWarning": "Updating overwrites the scaffolded workflow files (collect-scores, regrade, publish-pages, autograde-runner) with the defaults, replacing any manual edits — you'll confirm each one first.",
     "action": "Update workflows"

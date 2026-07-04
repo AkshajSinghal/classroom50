@@ -7,10 +7,14 @@ import { useTranslation } from "react-i18next"
 import useEnsureTeam from "@/hooks/useEnsureTeam"
 import { invalidateInviteQueries } from "@/hooks/github/queries"
 import { useUpdateRosterCache } from "@/hooks/useGetStudents"
+import {
+  useInvalidateTeamRoster,
+  useSeedTeamMember,
+} from "@/hooks/useTeamRoster"
 import { enrollStudentInClassroom } from "@/hooks/github/mutations"
 import { inviteStudentByEmail } from "@/api/mutations/students"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
-import { isValidEmail } from "@/util/onboarding"
+import { isValidEmail } from "@/util/orgMembership"
 import { splitName, toStudent } from "@/util/roster"
 
 type AddStudentProps = {
@@ -28,12 +32,14 @@ type AddStudentFormValues = {
 
 // Single add/invite form. A username enrolls via GitHub (resolve, add to team,
 // send org invite) and still stores the email; email-only sends an email invite.
-// Either way the student completes their roster row through onboarding.
+// Either way the student joins the classroom team when they accept the invite.
 const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
   const { team } = useEnsureTeam(org, classroom)
   const queryClient = useQueryClient()
   const githubClient = useGitHubClient()
   const updateRosterCache = useUpdateRosterCache(org, classroom)
+  const invalidateTeamRoster = useInvalidateTeamRoster(org, classroom)
+  const seedTeamMember = useSeedTeamMember(org, classroom)
   const { t } = useTranslation()
   const [warning, setWarning] = useState("")
   const [success, setSuccess] = useState("")
@@ -60,11 +66,19 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
           label: username,
           warning: result?.teamWarning ?? "",
           student: toStudent(result.student),
+          // Already-active org member: team-added directly (no invite), so seed
+          // the members cache to avoid an "unprovisioned" flash.
+          enrolledMember: result.enrolled
+            ? {
+                id: Number(result.student.github_id),
+                login: result.student.username,
+              }
+            : null,
         }
       }
 
-      // Email-only -> email invite. A per-student invite token is always minted,
-      // so the secure per-student onboarding link is available too.
+      // Email-only -> email invite carrying the classroom team, so the student
+      // lands in the team when they accept.
       const result = await inviteStudentByEmail(githubClient, {
         org,
         classroom,
@@ -77,9 +91,15 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
         label: email,
         warning: result?.inviteWarning ?? "",
         student: toStudent(result.student),
+        enrolledMember: null,
       }
     },
-    onSuccess: ({ label, warning: warningMessage, student }) => {
+    onSuccess: ({
+      label,
+      warning: warningMessage,
+      student,
+      enrolledMember,
+    }) => {
       setWarning(warningMessage)
       // Clear the form so the next student starts clean and a stray re-click
       // can't resubmit into a duplicate error. A warning still shows alongside.
@@ -88,6 +108,14 @@ const AddStudent = ({ className = "", org, classroom }: AddStudentProps) => {
       // Show the new row immediately (see useUpdateRosterCache).
       updateRosterCache((current) => [...current, student])
       invalidateInviteQueries(queryClient, org)
+      // Enrolled member -> seed the team-members cache (drives the enrolled
+      // list) so the row shows enrolled at once; the invited path is already
+      // represented by a pending invite, so just invalidate.
+      if (enrolledMember) {
+        seedTeamMember(enrolledMember)
+      } else {
+        invalidateTeamRoster()
+      }
     },
   })
 

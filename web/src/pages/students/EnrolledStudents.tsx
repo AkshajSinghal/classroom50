@@ -32,7 +32,7 @@ import {
   invalidateInviteQueries as invalidateInviteQueriesForOrg,
 } from "@/hooks/github/queries"
 import { useUpdateRosterCache } from "@/hooks/useGetStudents"
-import { useTeamRoster } from "@/hooks/useTeamRoster"
+import { useTeamRoster, useInvalidateTeamRoster } from "@/hooks/useTeamRoster"
 import { rowToStudent, type TeamRosterRow } from "@/util/teamRoster"
 import { unmatchedTeamMembers, type MatchCandidate } from "@/util/orgMembers"
 import { studentKey, toStudent } from "@/util/roster"
@@ -270,8 +270,9 @@ const UnenrollStudentButton = ({
   )
 }
 
-// Native GitHub org-invite link, behind an expandable toggle (the in-app
-// onboarding link is the primary path). Same org-wide URL for everyone.
+// Native GitHub org-invite link. This is how most students join: they accept
+// the org invite directly on GitHub. Behind an expandable toggle; same org-wide
+// URL for everyone.
 const InviteLink = ({
   org,
   expanded,
@@ -339,9 +340,10 @@ const InviteLink = ({
   )
 }
 
-// Classroom-wide onboarding link. Students open it after accepting the org
-// invite; it auto-accepts + verifies membership (no self-report form). Same URL
-// for everyone, so no per-student token.
+// Classroom-wide /onboard link. A secondary/courtesy path (most students join
+// by accepting the GitHub org invite directly): opening it accepts any pending
+// org invite and verifies membership. Same URL for everyone, so no per-student
+// token.
 const OnboardingLink = ({
   org,
   classroom,
@@ -654,6 +656,7 @@ const EnrolledStudents = ({
   const { t } = useTranslation()
   const { notify } = useToast()
   const updateRosterCache = useUpdateRosterCache(org, classroom)
+  const invalidateTeamRoster = useInvalidateTeamRoster(org, classroom)
 
   // Keyed by username/email so a clean action can't clobber another's warning.
   const [warnings, setWarnings] = useState<Record<string, string>>({})
@@ -935,6 +938,8 @@ const EnrolledStudents = ({
                   ),
                 )
                 invalidateInviteQueries()
+                // Match binds an active member; refresh the enrolled list.
+                invalidateTeamRoster()
                 notify({
                   tone: warning ? "warning" : "success",
                   durationMs: 6000,
@@ -963,7 +968,14 @@ const EnrolledStudents = ({
             isMember={row.state === "enrolled"}
             onRemoveStudent={(_username, warning) => {
               if (warning) setWarning(row.key, warning)
+              // Drop the CSV metadata row so nothing lingers as
+              // unprovisioned/pending, then refresh the team-driven enrolled
+              // list (unenroll removed them from the classroom team).
+              updateRosterCache((current) =>
+                current.filter((s) => studentKey(s) !== row.key),
+              )
               invalidateInviteQueries()
+              invalidateTeamRoster()
             }}
           />
         </div>
@@ -973,32 +985,36 @@ const EnrolledStudents = ({
 
   return (
     <div className="flex w-full flex-col gap-6">
-      {/* Warnings / action results surface at the top. */}
-      <div className="flex w-full flex-col gap-2">
-        <AnimatePresence initial={false}>
-          {Object.entries(warnings).map(([key, warning]) => (
-            <motion.div
-              key={key}
-              layout
-              variants={collapseVariants}
-              initial="initial"
-              animate="animate"
-              exit="exit"
-              role="alert"
-              className="alert alert-warning alert-soft overflow-hidden"
-            >
-              <span className="text-sm">{warning}</span>
-              <button
-                type="button"
-                className="btn btn-ghost btn-xs"
-                onClick={() => dismissWarning(key)}
+      {/* Warnings / action results surface at the top. Rendered only when
+          present so the empty container doesn't add a phantom gap that pushes
+          the first card below the sibling column's top. */}
+      {Object.keys(warnings).length > 0 ? (
+        <div className="flex w-full flex-col gap-2">
+          <AnimatePresence initial={false}>
+            {Object.entries(warnings).map(([key, warning]) => (
+              <motion.div
+                key={key}
+                layout
+                variants={collapseVariants}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                role="alert"
+                className="alert alert-warning alert-soft overflow-hidden"
               >
-                {t("students.dismiss")}
-              </button>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
+                <span className="text-sm">{warning}</span>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-xs"
+                  onClick={() => dismissWarning(key)}
+                >
+                  {t("students.dismiss")}
+                </button>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </div>
+      ) : null}
 
       {/* Data-drift banner: CSV-only rows with no team member / pending invite.
           Kept VISIBLE below as a distinct "not yet provisioned" section, but the
