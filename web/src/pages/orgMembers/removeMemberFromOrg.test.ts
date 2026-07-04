@@ -34,14 +34,15 @@ const row = (over: Partial<OrgMemberRow>): OrgMemberRow => ({
   isMember: true,
   classrooms: [],
   classification: "member-on-roster",
+  unprovisionedClassrooms: [],
   ...over,
 })
 
 const access = (classroom: string) => ({
   classroom,
   archived: false,
-  enrollment_status: "enrolled" as const,
   section: "",
+  state: "enrolled" as const,
 })
 
 describe("removeMemberFromOrg", () => {

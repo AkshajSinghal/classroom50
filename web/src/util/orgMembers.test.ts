@@ -207,3 +207,78 @@ describe("unmatchedTeamMembers — manual-match candidate set", () => {
     expect(candidates.map((c) => c.login)).toEqual(["alice"])
   })
 })
+
+describe("aggregateOrgMembers — team-verified membership / unprovisioned", () => {
+  it("marks a member on the team as enrolled with nothing unprovisioned", () => {
+    const rows = aggregateOrgMembers(
+      [member(42, "alice")],
+      [roster("cs101", [student({ username: "alice", github_id: "42" })])],
+      new Map([["cs101", new Set(["42"])]]),
+    )
+    expect(rows[0].classrooms[0].state).toBe("enrolled")
+    expect(rows[0].unprovisionedClassrooms).toEqual([])
+  })
+
+  it("flags a member on the CSV roster but NOT the team as unprovisioned", () => {
+    const rows = aggregateOrgMembers(
+      [member(42, "alice")],
+      [roster("cs101", [student({ username: "alice", github_id: "42" })])],
+      // team data present for cs101, but alice's id is not in it.
+      new Map([["cs101", new Set<string>()]]),
+    )
+    expect(rows[0].classrooms[0].state).toBe("unprovisioned")
+    expect(rows[0].unprovisionedClassrooms).toEqual(["cs101"])
+  })
+
+  it("treats a classroom with no team data as unknown (enrolled, never flagged)", () => {
+    const rows = aggregateOrgMembers(
+      [member(42, "alice")],
+      [roster("cs101", [student({ username: "alice", github_id: "42" })])],
+      new Map(), // no entry for cs101
+    )
+    expect(rows[0].classrooms[0].state).toBe("enrolled")
+    expect(rows[0].unprovisionedClassrooms).toEqual([])
+  })
+
+  it("does not flag an archived classroom (its team may be gone)", () => {
+    const rows = aggregateOrgMembers(
+      [member(42, "alice")],
+      [
+        roster(
+          "cs-old",
+          [student({ username: "alice", github_id: "42" })],
+          true,
+        ),
+      ],
+      new Map([["cs-old", new Set<string>()]]),
+    )
+    expect(rows[0].unprovisionedClassrooms).toEqual([])
+  })
+
+  it("does not flag a non-member (already on-roster-not-member)", () => {
+    const rows = aggregateOrgMembers(
+      [], // not a member
+      [roster("cs101", [student({ username: "bob", github_id: "43" })])],
+      new Map([["cs101", new Set<string>()]]),
+    )
+    expect(rows[0].classification).toBe("on-roster-not-member")
+    expect(rows[0].unprovisionedClassrooms).toEqual([])
+  })
+
+  it("flags only the classroom the member is missing from", () => {
+    const rows = aggregateOrgMembers(
+      [member(42, "alice")],
+      [
+        roster("cs101", [student({ username: "alice", github_id: "42" })]),
+        roster("cs201", [student({ username: "alice", github_id: "42" })]),
+      ],
+      new Map([
+        ["cs101", new Set(["42"])], // on team
+        ["cs201", new Set<string>()], // unprovisioned
+      ]),
+    )
+    expect(rows[0].unprovisionedClassrooms).toEqual(["cs201"])
+    const cs201 = rows[0].classrooms.find((c) => c.classroom === "cs201")
+    expect(cs201?.state).toBe("unprovisioned")
+  })
+})

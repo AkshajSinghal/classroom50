@@ -6,6 +6,7 @@ import {
   inviteStudentByEmail,
   matchStudentToAccountWithConflictRetry,
   unenrollStudent,
+  bulkUnenrollStudents,
   updateStudent,
   updateStudentWithConflictRetry,
   STUDENT_CSV_FIELDS,
@@ -1221,5 +1222,121 @@ describe("matchStudentToAccountWithConflictRetry — teacher manual match (email
         github_id: "0",
       }),
     ).rejects.toThrow(/no unmatched roster row/i)
+  })
+})
+
+describe("bulkUnenrollStudents — single-commit batch removal", () => {
+  const rosterWith = (usernames: string[]) =>
+    HEADER +
+    usernames.map((u, i) => `${u},,,${u}@x.edu,,${100 + i}`).join("\n") +
+    "\n"
+
+  const student = (username: string, github_id: string) => ({
+    username,
+    first_name: "",
+    last_name: "",
+    email: `${username}@x.edu`,
+    section: "",
+    github_id,
+  })
+
+  it("drops every matched row in exactly ONE commit", async () => {
+    const { client, committed } = makeClient({
+      startingCsv: rosterWith(["alice", "bob", "carol"]),
+    })
+    const request = client.request as ReturnType<typeof vi.fn>
+
+    const result = await bulkUnenrollStudents(client, {
+      org: "acme",
+      classroom: "cs101",
+      students: [student("alice", "100"), student("bob", "101")],
+    })
+
+    // The whole point: one roster commit for the batch, not one per student.
+    const commitPosts = request.mock.calls.filter((c) =>
+      String(c[0]).endsWith("/git/commits"),
+    )
+    expect(commitPosts).toHaveLength(1)
+
+    // Only carol survives in the committed CSV.
+    const survivors = rowsFromCsv(committed.content!).map((r) => r.username)
+    expect(survivors).toEqual(["carol"])
+    expect(result.removed.map((s) => s.username)).toEqual(["alice", "bob"])
+    expect(result.notFound).toHaveLength(0)
+  })
+
+  it("reports rows already gone as notFound and still commits the rest", async () => {
+    const { client, committed } = makeClient({
+      startingCsv: rosterWith(["alice"]),
+    })
+
+    const result = await bulkUnenrollStudents(client, {
+      org: "acme",
+      classroom: "cs101",
+      students: [student("alice", "100"), student("ghost", "999")],
+    })
+
+    expect(result.removed.map((s) => s.username)).toEqual(["alice"])
+    expect(result.notFound.map((s) => s.username)).toEqual(["ghost"])
+    const survivors = rowsFromCsv(committed.content ?? HEADER).map(
+      (r) => r.username,
+    )
+    expect(survivors).toEqual([])
+  })
+
+  it("makes no commit when nothing matches", async () => {
+    const { client, committed } = makeClient({
+      startingCsv: rosterWith(["alice"]),
+    })
+    const request = client.request as ReturnType<typeof vi.fn>
+
+    const result = await bulkUnenrollStudents(client, {
+      org: "acme",
+      classroom: "cs101",
+      students: [student("ghost", "999")],
+    })
+
+    const commitPosts = request.mock.calls.filter((c) =>
+      String(c[0]).endsWith("/git/commits"),
+    )
+    expect(commitPosts).toHaveLength(0)
+    expect(result.removed).toHaveLength(0)
+    expect(committed.content).toBeNull()
+  })
+
+  it("email-only target drops ONLY an email-only row, never a same-email identified sibling", async () => {
+    // Regression: an email-only removal target (no username, no github_id) must
+    // match only an unclaimed email-only row. Two rows share sam@x.edu — one is
+    // a fully-identified enrolled student, the other an unclaimed email invite.
+    // Removing the email-only target must not silently unenroll the sibling.
+    const startingCsv =
+      HEADER +
+      // Identified sibling (must survive): username + github_id, same email.
+      "sam,,,sam@x.edu,,100\n" +
+      // Email-only invite (the actual target): no username, no github_id.
+      ",,,sam@x.edu,,\n"
+    const { client, committed } = makeClient({ startingCsv })
+
+    const result = await bulkUnenrollStudents(client, {
+      org: "acme",
+      classroom: "cs101",
+      students: [
+        {
+          username: "",
+          first_name: "",
+          last_name: "",
+          email: "sam@x.edu",
+          section: "",
+          github_id: "",
+        },
+      ],
+    })
+
+    const survivors = rowsFromCsv(committed.content ?? HEADER)
+    // The identified sibling survives; only the email-only row was dropped.
+    expect(survivors).toHaveLength(1)
+    expect(survivors[0]).toMatchObject({ username: "sam", github_id: "100" })
+    expect(result.removed).toHaveLength(1)
+    expect(result.notFound).toHaveLength(0)
   })
 })

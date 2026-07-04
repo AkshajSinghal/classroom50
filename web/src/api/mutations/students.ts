@@ -1407,6 +1407,38 @@ export async function bulkEnrollStudentsInClassroom(
   }
 }
 
+// Does a students.csv row identify the same person as `target`? The single
+// authority for matching a removal target to a roster row, shared by
+// unenrollStudent and bulkUnenrollStudents so the two can't drift.
+//
+// Precedence mirrors enrollment identity: when the target carries a username or
+// github_id, match on those only (never on email — a shared email must not
+// widen the match). Email is a fallback ONLY for an email-only target (no
+// username, no github_id), and then it matches ONLY an email-only row (a row
+// that is itself unclaimed: no username, no github_id). Without that guard a
+// batch remove of one email-only invite would drop every other roster row that
+// happens to share the email, silently unenrolling an unselected student.
+export function matchesRosterRow(row: StudentCsvRow, target: Student): boolean {
+  const username = target.username?.trim()
+  const githubId = target.github_id?.trim()
+  if (username || githubId) {
+    return (
+      (Boolean(username) &&
+        row.username.toLowerCase() === username!.toLowerCase()) ||
+      (Boolean(githubId) &&
+        Boolean(row.github_id) &&
+        row.github_id === githubId)
+    )
+  }
+  const email = target.email?.trim()
+  return (
+    Boolean(email) &&
+    !row.username.trim() &&
+    !row.github_id.trim() &&
+    row.email.toLowerCase() === email!.toLowerCase()
+  )
+}
+
 export type UnenrollStudentInput = {
   org: string
   classroom: string
@@ -1455,22 +1487,10 @@ export async function unenrollStudent(
 
   const currentStudents = parseStudentsCsv(currentCsv)
 
-  // Match the target row. Prefer username/github_id; fall back to email for a
-  // not-yet-reconciled email row.
-  const sameRow = (student: StudentCsvRow) => {
-    if (normalizedUsername || toRemoveStudent.github_id) {
-      return (
-        student.username.toLowerCase() ===
-          toRemoveStudent.username.toLowerCase() ||
-        (Boolean(student.github_id) &&
-          student.github_id === String(toRemoveStudent.github_id))
-      )
-    }
-    return (
-      Boolean(normalizedEmail) &&
-      student.email.toLowerCase() === normalizedEmail!.toLowerCase()
-    )
-  }
+  // Match the target row via the shared roster-row matcher (username/github_id,
+  // email only for a fully email-only target).
+  const sameRow = (student: StudentCsvRow) =>
+    matchesRosterRow(student, toRemoveStudent)
 
   const exists = currentStudents.some(sameRow)
 
@@ -1572,6 +1592,199 @@ export async function unenrollStudent(
     updatedRef,
     teamWarning: warnings.length > 0 ? warnings.join(" ") : undefined,
   }
+}
+
+export type BulkUnenrollProgress = {
+  processed: number
+  total: number
+  message: string
+}
+
+export type BulkUnenrollStudentsInput = {
+  org: string
+  classroom: string
+  students: Student[]
+  onProgress?: (progress: BulkUnenrollProgress) => void
+}
+
+export type BulkUnenrollStudentsResult = {
+  // Students whose roster row was dropped in the single CSV commit.
+  removed: Student[]
+  // Students whose row wasn't found in the CSV (already gone) — no-op, not an error.
+  notFound: Student[]
+  // Per-student non-fatal side-effect failures (team drop / invite cancel).
+  warnings: string[]
+  // The single roster commit's sha (undefined when nothing matched).
+  newCommitSha?: string
+}
+
+// Remove MANY students from one classroom in a SINGLE roster commit, then run
+// the per-student org-side side effects (team drop + pending-invite cancel)
+// best-effort. This is the batch form of unenrollStudent: looping that per
+// student produces one commit PER student (N noisy "Remove student" commits
+// racing the same ref), whereas real classes are unenrolled in bulk. Mirrors
+// bulkEnrollStudentsInClassroom / addStudentsToClassroom, which already write
+// all rows in one commit.
+//
+// The CSV rewrite is conflict-retried and re-reads inside the closure, so a
+// concurrent edit can't be clobbered. Org-side steps run only AFTER the commit
+// lands, so — as in unenrollStudent — they are non-fatal warnings, never fail
+// the removal. Active members are never removed from the org here (unenroll is
+// classroom-scoped); only a still-PENDING invite is cancelled, and never the
+// signed-in teacher's own.
+export async function bulkUnenrollStudents(
+  client: GitHubClient,
+  input: BulkUnenrollStudentsInput,
+): Promise<BulkUnenrollStudentsResult> {
+  const { org, classroom, students, onProgress } = input
+  await assertClassroomNotArchived(client, org, classroom)
+
+  const targets = students.filter(
+    (s) => s.username?.trim() || s.email?.trim() || s.github_id?.trim(),
+  )
+  if (targets.length === 0) {
+    return { removed: [], notFound: [], warnings: [] }
+  }
+
+  // Same per-row match predicate as unenrollStudent (shared matchesRosterRow):
+  // username/github_id when present, email only for a fully email-only target.
+  const matchesTarget = (row: StudentCsvRow, target: Student): boolean =>
+    matchesRosterRow(row, target)
+
+  // Resolve slug + viewer once, concurrently with the commit.
+  const teamSlugPromise = resolveClassroomTeamSlug(client, org, classroom)
+  teamSlugPromise.catch(() => {})
+  const viewerPromise = getAuthenticatedUser(client)
+  viewerPromise.catch(() => {})
+
+  onProgress?.({
+    processed: 0,
+    total: targets.length,
+    message: "Updating classroom roster...",
+  })
+
+  // One conflict-retried CSV commit dropping every matched row. Re-reads the CSV
+  // each attempt so a concurrent edit is preserved. Reports which targets were
+  // actually present (removed) vs. missing (notFound).
+  const studentsFilePath = `${classroom}/students.csv`
+  let removed: Student[] = []
+  let notFound: Student[] = []
+  let newCommitSha: string | undefined
+
+  await withGitConflictRetry(async () => {
+    const ref = await getBranchRef(client, org)
+    const commit = await getCommit(client, org, ref.object.sha)
+    const currentCsv = await getRawFile(client, {
+      org,
+      path: studentsFilePath,
+      ref: ref.object.sha,
+    })
+    const currentStudents = parseStudentsCsv(currentCsv)
+
+    removed = targets.filter((target) =>
+      currentStudents.some((row) => matchesTarget(row, target)),
+    )
+    notFound = targets.filter((target) => !removed.includes(target))
+
+    if (removed.length === 0) {
+      // Nothing to drop (all already gone) — skip the commit entirely.
+      newCommitSha = undefined
+      return
+    }
+
+    const nextStudents = currentStudents.filter(
+      (row) => !removed.some((target) => matchesTarget(row, target)),
+    )
+    const nextCsv = stringifyStudentsCsv(nextStudents)
+
+    const tree = await createGitTree(client, {
+      org,
+      base_tree: commit.tree.sha,
+      tree: [
+        {
+          path: studentsFilePath,
+          mode: "100644",
+          type: "blob",
+          content: nextCsv,
+        },
+      ],
+    })
+    const newCommit = await createGitCommit(client, {
+      org,
+      message: prefixCommit(
+        `Remove ${removed.length} student${removed.length === 1 ? "" : "s"}: ${classroom}`,
+      ),
+      tree_sha: tree.sha,
+      parents: [ref.object.sha],
+    })
+    await updateRef(client, org, newCommit.sha)
+    newCommitSha = newCommit.sha
+  })
+
+  // Roster commit landed; every org-side step below is a non-fatal warning.
+  const warnings: string[] = []
+  const viewer = await viewerPromise.catch(() => null)
+  let teamSlug: string | undefined
+  try {
+    teamSlug = await teamSlugPromise
+  } catch {
+    teamSlug = undefined
+  }
+
+  for (let i = 0; i < removed.length; i++) {
+    const student = removed[i]
+    const username = student.username?.trim()
+    onProgress?.({
+      processed: i,
+      total: removed.length,
+      message: `Updating team membership for ${username || student.email || "student"}...`,
+    })
+
+    // Drop from the classroom team (idempotent). Skipped for an email-only row
+    // and when the slug couldn't be resolved.
+    if (username && teamSlug) {
+      try {
+        await removeUserFromTeam(client, { org, teamSlug, username })
+      } catch (err) {
+        warnings.push(
+          `${username} was removed from the roster, but removing them from the ` +
+            `classroom team failed (${getErrorMessage(err)}); they may keep read ` +
+            `on private templates until it's retried.`,
+        )
+      }
+    }
+
+    // Cancel a still-pending invite only (never an active member; never self).
+    if (username) {
+      const orgState = await getOrgMembershipState(client, org, username).catch(
+        () => null,
+      )
+      if (orgState === "pending" && !isSameGitHubUser(viewer, student)) {
+        try {
+          await removeOrgMembership(client, { org, username })
+        } catch (err) {
+          warnings.push(
+            `${username} was removed from the roster, but cancelling their ` +
+              `pending org invite failed (${getErrorMessage(err)}); retry from ` +
+              `the organization's people page.`,
+          )
+        }
+      } else if (orgState === "pending" && isSameGitHubUser(viewer, student)) {
+        warnings.push(
+          `${username} was removed from the roster. Their pending organization ` +
+            `invite was kept because they are the signed-in account.`,
+        )
+      }
+    }
+  }
+
+  onProgress?.({
+    processed: removed.length,
+    total: removed.length,
+    message: "Done",
+  })
+
+  return { removed, notFound, warnings, newCommitSha }
 }
 
 // The teacher-editable subset of a roster row. Identity columns (username,

@@ -1,15 +1,13 @@
 import { useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
-import type { TFunction } from "i18next"
-import { Link, useParams } from "@tanstack/react-router"
+import { useParams } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import {
   AlertTriangle,
   ChevronRight,
   ExternalLink,
-  Info,
+  Search,
   UserPlus,
-  X,
 } from "lucide-react"
 
 import Drawer, {
@@ -20,383 +18,44 @@ import Drawer, {
 import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import RequireTeacher from "@/components/RequireTeacher"
 import Avatar from "@/components/avatar"
-import GitHub from "@/assets/github.svg?react"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
-import {
-  useToast,
-  type NotifyInput,
-} from "@/context/notifications/NotificationProvider"
+import { useToast } from "@/context/notifications/NotificationProvider"
 import { useGitHubViewer } from "@/hooks/github/hooks"
 import { githubKeys, invalidateInviteQueries } from "@/hooks/github/queries"
 import useOrgMembersOverview from "@/hooks/useOrgMembersOverview"
 import type { OrgMemberRow } from "@/util/orgMembers"
+import type { StudentCsvRow } from "@/api/mutations/students"
+import type { GitHubUser } from "@/hooks/github/types"
 import { isSameGitHubUser } from "@/util/students"
-import { removeMemberFromOrg } from "@/pages/orgMembers/removeMemberFromOrg"
 import { motion } from "motion/react"
 import { enterExit } from "@/lib/motion"
 import { ClickableRow } from "@/lib/motionComponents"
-import { inviteMemberToOrg } from "@/pages/orgMembers/inviteMemberToOrg"
-import type { GitHubClient } from "@/hooks/github/client"
+import BulkActionsBar from "@/pages/orgMembers/BulkActionsBar"
+import MemberDetailModal from "@/pages/orgMembers/MemberDetailModal"
+import {
+  resolveSelectedRows,
+  selectableRows,
+  selectAllState,
+  toggleRow,
+  toggleSelectAll,
+} from "@/pages/orgMembers/selection"
+import {
+  ClassificationBadge,
+  GitHubIdentity,
+  initialsFor,
+  runInviteMember,
+} from "@/pages/orgMembers/memberPresentation"
+import useGetClasses from "@/hooks/useGetClasses"
 
-// Shared invite flow for the inline button and the detail drawer. Errors are
-// toasted here so both call sites only track their own in-flight flag.
-const runInviteMember = async (
-  client: GitHubClient,
-  org: string,
-  row: OrgMemberRow,
-  notify: (input: NotifyInput) => void,
-  onDone: () => void,
-  t: TFunction,
-) => {
-  const label = row.username || row.email
-  try {
-    const result = await inviteMemberToOrg(client, { org, row })
-    const who = result.currentUsername ? `@${result.currentUsername}` : label
-    notify({
-      tone: "success",
-      durationMs: 6000,
-      message: t("toasts.invited", { who, org }),
-    })
-    onDone()
-  } catch (err) {
-    notify({
-      tone: "error",
-      message: t("orgMembers.inviteFailed", {
-        label,
-        reason:
-          err instanceof Error ? err.message : t("orgMembers.somethingWrong"),
-      }),
-    })
-  }
-}
+// How long to wait before reconciling an optimistically-updated students.csv
+// cache with the authoritative GitHub read. GitHub's contents API lags a fresh
+// commit by a beat, so an immediate refetch would read the pre-commit file and
+// revert the optimistic change; this delay lets it catch up.
+const CSV_RECONCILE_DELAY_MS = 4000
 
-// First initial of a row's best display string, for the avatar fallback.
-const initialsFor = (row: OrgMemberRow) =>
-  (row.name || row.username || row.email || "?")[0]?.toUpperCase() ?? "?"
-
-// GitHub identity line: makes it explicit these are GitHub members by showing
-// the @username and the immutable numeric GitHub id together.
-const GitHubIdentity = ({ row }: { row: OrgMemberRow }) => {
-  const { t } = useTranslation()
-  return (
-    <span className="inline-flex items-center gap-1.5 text-xs text-base-content/70">
-      <GitHub aria-hidden="true" className="size-3.5 opacity-50" />
-      {row.username ? (
-        <span className="font-mono">@{row.username}</span>
-      ) : (
-        <span className="italic">{t("orgMembers.noGitHubUsername")}</span>
-      )}
-      {row.github_id ? (
-        <span className="text-base-content/70">
-          {t("orgMembers.idSuffix", { id: row.github_id })}
-        </span>
-      ) : null}
-    </span>
-  )
-}
-
-const ClassificationBadge = ({ row }: { row: OrgMemberRow }) => {
-  const { t } = useTranslation()
-  if (row.classification === "on-roster-not-member") {
-    return (
-      <span className="badge badge-sm badge-error badge-soft gap-1">
-        <AlertTriangle aria-hidden="true" className="size-3" />{" "}
-        {t("orgMembers.badgeNotMember")}
-      </span>
-    )
-  }
-  if (row.classification === "member-no-roster") {
-    return (
-      <span className="badge badge-sm badge-ghost gap-1">
-        <Info aria-hidden="true" className="size-3" />{" "}
-        {t("orgMembers.badgeNoClassroom")}
-      </span>
-    )
-  }
-  return (
-    <span className="badge badge-sm badge-success badge-soft">
-      {t("orgMembers.badgeMember")}
-    </span>
-  )
-}
-
-const MemberDetail = ({
-  org,
-  row,
-  isSelf,
-  onClose,
-  onRemoved,
-}: {
-  org: string
-  row: OrgMemberRow
-  isSelf: boolean
-  onClose: () => void
-  onRemoved: () => void
-}) => {
-  const { t } = useTranslation()
-  const client = useGitHubClient()
-  const { notify } = useToast()
-  const [confirming, setConfirming] = useState(false)
-  const [working, setWorking] = useState(false)
-  const [inviting, setInviting] = useState(false)
-  const label = row.username || row.email
-  // Only non-archived classrooms are actually unenrolled (archived ones can't
-  // be; removeMemberFromOrg skips them), so the confirm copy counts those.
-  const activeClassrooms = row.classrooms.filter((c) => !c.archived)
-
-  const handleInvite = async () => {
-    if (inviting) return
-    setInviting(true)
-    try {
-      await runInviteMember(client, org, row, notify, onRemoved, t)
-    } finally {
-      setInviting(false)
-    }
-  }
-
-  const handleRemove = async () => {
-    if (working) return
-    setWorking(true)
-    try {
-      const result = await removeMemberFromOrg(client, { org, row }, t)
-      if (result.warnings.length > 0) {
-        notify({
-          tone: "warning",
-          durationMs: 8000,
-          message: result.warnings.join(" "),
-        })
-      } else {
-        notify({
-          tone: "success",
-          durationMs: 6000,
-          message: result.unenrolledClassrooms.length
-            ? t("orgMembers.removedWithUnenroll", {
-                label,
-                org,
-                count: result.unenrolledClassrooms.length,
-              })
-            : t("orgMembers.removed", { label, org }),
-        })
-      }
-      onRemoved()
-    } catch (err) {
-      notify({
-        tone: "error",
-        message: t("orgMembers.removeFailed", {
-          label,
-          reason:
-            err instanceof Error ? err.message : t("orgMembers.somethingWrong"),
-        }),
-      })
-    } finally {
-      setWorking(false)
-      setConfirming(false)
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div
-        className="absolute inset-0 bg-black/30"
-        onClick={onClose}
-        aria-hidden
-      />
-      <div className="relative z-10 flex h-full w-full max-w-md flex-col overflow-y-auto bg-base-100 shadow-xl">
-        <div className="flex items-center justify-between border-b border-base-300 px-6 py-4">
-          <h2 className="text-lg font-semibold">
-            {t("orgMembers.detailTitle")}
-          </h2>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm btn-square"
-            onClick={onClose}
-            aria-label={t("common.close")}
-          >
-            <X aria-hidden="true" className="size-4" />
-          </button>
-        </div>
-
-        <div className="flex flex-col gap-4 px-6 py-5">
-          <Avatar
-            name={row.name || label}
-            github={row.username}
-            initials={initialsFor(row)}
-            subtitle={<GitHubIdentity row={row} />}
-          />
-
-          <div className="flex items-center gap-2">
-            <ClassificationBadge row={row} />
-            {row.email ? (
-              <span className="text-sm text-base-content/70">{row.email}</span>
-            ) : null}
-          </div>
-
-          <a
-            href={`https://github.com/orgs/${org}/people${
-              row.username ? `?query=${encodeURIComponent(row.username)}` : ""
-            }`}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex w-fit items-center gap-1 text-sm text-primary hover:underline"
-          >
-            <ExternalLink aria-hidden="true" className="size-3.5" />
-            {t("orgMembers.manageOnGitHub")}
-          </a>
-
-          <div>
-            <h3 className="mb-2 text-sm font-semibold">
-              {t("orgMembers.classroomAccess")}
-            </h3>
-            {row.classrooms.length === 0 ? (
-              <p className="text-sm text-base-content/70">
-                {t("orgMembers.noRoster")}
-              </p>
-            ) : (
-              <ul className="divide-y divide-base-300 rounded-box border border-base-300">
-                {row.classrooms.map((access) => (
-                  <Link
-                    key={access.classroom}
-                    to="/$org/$classroom"
-                    params={{ org, classroom: access.classroom }}
-                    onClick={onClose}
-                    className="group/cls flex items-center justify-between px-3 py-2 text-sm first:rounded-t-box last:rounded-b-box cursor-pointer transition-[background-color,transform,box-shadow] duration-150 ease-out hover:bg-base-200 hover:-translate-y-px hover:shadow-sm motion-reduce:transition-none motion-reduce:hover:translate-y-0 motion-reduce:hover:shadow-none"
-                  >
-                    <span className="font-medium">
-                      {access.classroom}
-                      {access.archived ? (
-                        <span className="badge badge-xs badge-ghost ml-2">
-                          {t("orgMembers.archived")}
-                        </span>
-                      ) : null}
-                    </span>
-                    <span className="flex items-center gap-2 text-base-content/70">
-                      {access.section ? (
-                        <span className="badge badge-xs badge-ghost">
-                          {access.section}
-                        </span>
-                      ) : null}
-                      <ChevronRight
-                        aria-hidden="true"
-                        className="size-4 text-base-content/30 transition-transform duration-150 group-hover/cls:translate-x-0.5 group-hover/cls:text-base-content/70"
-                      />
-                    </span>
-                  </Link>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          {isSelf ? (
-            <div className="rounded-box border border-base-300 bg-base-200/50 p-4 text-sm text-base-content/70">
-              {t("orgMembers.selfNotice")}
-            </div>
-          ) : !row.isMember ? (
-            row.github_id ? (
-              <div className="rounded-box border border-warning/30 bg-warning/5 p-4 text-sm">
-                <p className="text-base-content/80">
-                  {t("orgMembers.notMemberPrefix", { label })}{" "}
-                  <span className="font-semibold">
-                    {t("orgMembers.notMemberEmphasis")}
-                  </span>
-                  {t("orgMembers.notMemberSuffix")}
-                </p>
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm mt-3"
-                  disabled={inviting}
-                  onClick={() => void handleInvite()}
-                >
-                  {inviting ? (
-                    <>
-                      <span
-                        className="loading loading-spinner loading-xs"
-                        aria-hidden="true"
-                      />
-                      {t("orgMembers.inviting")}
-                    </>
-                  ) : (
-                    <>
-                      <UserPlus aria-hidden="true" className="size-4" />
-                      {t("orgMembers.inviteToOrg")}
-                    </>
-                  )}
-                </button>
-              </div>
-            ) : (
-              <div className="rounded-box border border-base-300 bg-base-200/50 p-4 text-sm text-base-content/70">
-                {t("orgMembers.notMemberNoId")}
-              </div>
-            )
-          ) : confirming ? (
-            <div className="rounded-box border border-error/30 bg-error/5 p-4 text-sm">
-              <p className="text-base-content/80">
-                {activeClassrooms.length > 0 ? (
-                  <>
-                    {t("orgMembers.confirmUnenrollPrefix", { label })}{" "}
-                    <span className="font-semibold">
-                      {t("orgMembers.confirmClassroomCount", {
-                        count: activeClassrooms.length,
-                      })}
-                    </span>{" "}
-                    {t("orgMembers.confirmUnenrollMid", {
-                      classrooms: activeClassrooms
-                        .map((c) => c.classroom)
-                        .join(", "),
-                    })}{" "}
-                    <span className="font-semibold">{org}</span>{" "}
-                    {t("orgMembers.confirmUnenrollSuffix")}
-                  </>
-                ) : (
-                  <>
-                    {t("orgMembers.confirmRemovePrefix", { label })}{" "}
-                    <span className="font-semibold">{org}</span>{" "}
-                    {t("orgMembers.confirmRemoveSuffix")}
-                  </>
-                )}
-              </p>
-              <div className="mt-3 flex justify-end gap-2">
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  disabled={working}
-                  onClick={() => setConfirming(false)}
-                >
-                  {t("common.cancel")}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-error btn-sm"
-                  disabled={working}
-                  onClick={() => void handleRemove()}
-                >
-                  {working ? (
-                    <>
-                      <span
-                        className="loading loading-spinner loading-xs"
-                        aria-hidden="true"
-                      />
-                      {t("orgMembers.removing")}
-                    </>
-                  ) : (
-                    t("orgMembers.removeFromOrg")
-                  )}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              className="btn btn-error btn-outline btn-sm self-start"
-              onClick={() => setConfirming(true)}
-            >
-              {t("orgMembers.removeFromOrg")}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
+// Sentinel classroom-filter value for "members on no classroom roster". A real
+// classroom path can't collide with it (paths don't contain a leading colon).
+const NO_CLASSROOM_FILTER = ":none:"
 
 const OrgMembersPage = () => {
   const { t } = useTranslation()
@@ -406,35 +65,218 @@ const OrgMembersPage = () => {
   const { notify } = useToast()
   const queryClient = useQueryClient()
   const { data: viewer } = useGitHubViewer()
-  const { rows, isLoading, isError, notes } = useOrgMembersOverview(org)
+  const {
+    rows,
+    members,
+    ownerIds,
+    isLoading,
+    isError,
+    teamSlugByClassroom,
+    notes,
+  } = useOrgMembersOverview(org)
+  const { classes } = useGetClasses(org)
   const [query, setQuery] = useState("")
+  // Classroom filter: "" = all, NO_CLASSROOM_FILTER = members on no roster,
+  // else a classroom path. Applied on top of the text search.
+  const [classroomFilter, setClassroomFilter] = useState("")
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [invitingKey, setInvitingKey] = useState<string | null>(null)
+  // Multi-select for bulk classroom actions. Selection is by row key and
+  // persists across search filtering (a hidden-but-selected row is still acted
+  // on); "select all" targets the currently-filtered rows.
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
 
+  // Refresh after an org-level member removal (removeMemberFromOrg unenrolls the
+  // member from every classroom + removes org membership). Optimistically drop
+  // them from each affected classroom's CSV + team caches CONSISTENTLY (so no
+  // false "unprovisioned" flashes while the two reconcile), then reconcile with
+  // the server on a delay.
   const refresh = (affected?: OrgMemberRow) => {
     if (!org) return
     queryClient.invalidateQueries({ queryKey: githubKeys.orgMembersAll(org) })
     invalidateInviteQueries(queryClient, org)
-    // removeMemberFromOrg rewrites each affected classroom's students.csv, which
-    // the aggregation reads via csvFileQuery; invalidate those (and the
-    // classroom.json) so the page doesn't show a just-removed student as still
-    // enrolled until the 5-minute staleTime elapses.
     for (const access of affected?.classrooms ?? []) {
+      optimisticRemove(access.classroom, [affected!])
+      invalidateClassroom(access.classroom, { skipCsv: true })
+      scheduleClassroomReconcile(access.classroom)
+    }
+  }
+
+  // Refresh after an org invite (no classroom membership changed — only the
+  // org-invite state). Just re-read the members + invite lists.
+  const refreshInvite = () => {
+    if (!org) return
+    queryClient.invalidateQueries({ queryKey: githubKeys.orgMembersAll(org) })
+    invalidateInviteQueries(queryClient, org)
+  }
+
+  // The resolved GitHub team slug for a classroom (classroom.json.team.slug,
+  // else the classroom50-<classroom> heuristic). Must match the key
+  // useOrgMembersOverview reads the team cache under, or optimistic team-cache
+  // writes below would target a cache nobody reads (a name-collision classroom's
+  // real slug differs from the heuristic) and reintroduce the false
+  // "unprovisioned" flash the optimistic machinery exists to prevent.
+  const teamSlugFor = (classroom: string) =>
+    teamSlugByClassroom.get(classroom) ?? `classroom50-${classroom}`
+
+  // Invalidate the non-racy caches a roster write touches for one classroom:
+  // classroom.json (rarely changes) and, unless suppressed, the CSV. The
+  // team-members query is deliberately NOT invalidated here — it's handled by
+  // the optimistic seed + delayed reconcile in the bulk/remove paths, because
+  // invalidating the CSV and the team at different beats lets aggregateOrgMembers
+  // momentarily compare a fresh team against a stale CSV (or vice-versa) and
+  // flash a false "unprovisioned" state. `skipCsv` is set right after we've
+  // optimistically seeded the CSV (invalidating it would refetch the pre-commit
+  // file and revert the seed).
+  const invalidateClassroom = (
+    classroom: string,
+    opts?: { skipCsv?: boolean },
+  ) => {
+    if (!org) return
+    if (!opts?.skipCsv) {
       queryClient.invalidateQueries({
         queryKey: githubKeys.csvFile(
           org,
           "classroom50",
-          `${access.classroom}/students.csv`,
-        ),
-      })
-      queryClient.invalidateQueries({
-        queryKey: githubKeys.jsonFile(
-          org,
-          "classroom50",
-          `${access.classroom}/classroom.json`,
+          `${classroom}/students.csv`,
         ),
       })
     }
+    queryClient.invalidateQueries({
+      queryKey: githubKeys.jsonFile(
+        org,
+        "classroom50",
+        `${classroom}/classroom.json`,
+      ),
+    })
+  }
+
+  // Optimistically drop members (by resolved id/login) from BOTH the target
+  // classroom's students.csv cache AND its team-members cache, in the same tick,
+  // so the two never momentarily disagree (which would flash a false
+  // "unprovisioned" state). teamSlug is the resolved slug (matches the cache the
+  // Members overview reads), so a collided-name classroom is updated correctly.
+  const optimisticRemove = (classroom: string, removed: OrgMemberRow[]) => {
+    if (!org || removed.length === 0) return
+    const ids = new Set(removed.map((r) => r.github_id?.trim()).filter(Boolean))
+    const logins = new Set(
+      removed.map((r) => r.username?.trim().toLowerCase()).filter(Boolean),
+    )
+    queryClient.setQueryData<StudentCsvRow[]>(
+      githubKeys.csvFile(org, "classroom50", `${classroom}/students.csv`),
+      (current) =>
+        current?.filter(
+          (s) =>
+            !(s.github_id && ids.has(s.github_id.trim())) &&
+            !(s.username && logins.has(s.username.trim().toLowerCase())),
+        ) ?? current,
+    )
+    queryClient.setQueryData<GitHubUser[]>(
+      githubKeys.teamMembers(org, teamSlugFor(classroom)),
+      (current) =>
+        current?.filter(
+          (m) => !ids.has(String(m.id)) && !logins.has(m.login.toLowerCase()),
+        ) ?? current,
+    )
+  }
+
+  // Reconcile a classroom's CSV + team caches with the authoritative server
+  // once GitHub's APIs have caught up with the commit (both lag a beat). Done on
+  // one delayed tick so they refetch together and can't flash an inconsistent
+  // intermediate state.
+  const scheduleClassroomReconcile = (classroom: string) => {
+    if (!org) return
+    window.setTimeout(() => {
+      queryClient.invalidateQueries({
+        queryKey: githubKeys.csvFile(
+          org,
+          "classroom50",
+          `${classroom}/students.csv`,
+        ),
+      })
+      queryClient.invalidateQueries({
+        queryKey: githubKeys.teamMembers(org, teamSlugFor(classroom)),
+      })
+    }, CSV_RECONCILE_DELAY_MS)
+  }
+
+  // After a bulk add/remove: optimistically reflect the change in the CSV +
+  // team caches the row status derives from (keeping them consistent so no false
+  // "unprovisioned" flashes), then reconcile both with the server on a delay.
+  const handleBulkDone = (input: {
+    classroom: string
+    action: "add" | "remove"
+    addedStudents: StudentCsvRow[]
+    affectedKeys: string[]
+  }) => {
+    if (!org) return
+    const { classroom, action, addedStudents, affectedKeys } = input
+
+    if (action === "add" && addedStudents.length > 0) {
+      const csvKey = githubKeys.csvFile(
+        org,
+        "classroom50",
+        `${classroom}/students.csv`,
+      )
+      queryClient.setQueryData<StudentCsvRow[]>(csvKey, (current) => {
+        const list = current ?? []
+        const seen = new Set(
+          list.flatMap((s) => [
+            s.github_id?.trim(),
+            s.username?.trim().toLowerCase(),
+          ]),
+        )
+        const toAppend = addedStudents.filter(
+          (s) =>
+            !(s.github_id && seen.has(s.github_id.trim())) &&
+            !(s.username && seen.has(s.username.trim().toLowerCase())),
+        )
+        return toAppend.length > 0 ? [...list, ...toAppend] : list
+      })
+      // Seed the team cache too, so the member reads as "enrolled" (not
+      // "unprovisioned") immediately. buildTeamRoster/aggregate read id+login.
+      queryClient.setQueryData<GitHubUser[]>(
+        githubKeys.teamMembers(org, teamSlugFor(classroom)),
+        (current) => {
+          const list = current ?? []
+          const have = new Set(list.map((m) => String(m.id)))
+          const stubs = addedStudents
+            .filter((s) => s.github_id && !have.has(s.github_id.trim()))
+            .map(
+              (s) =>
+                ({
+                  id: Number(s.github_id),
+                  login: s.username,
+                  avatar_url: "",
+                  html_url: "",
+                  name: null,
+                  email: null,
+                  bio: null,
+                  permissions: {
+                    admin: false,
+                    pull: true,
+                    maintain: false,
+                    push: false,
+                  },
+                }) satisfies GitHubUser,
+            )
+          return stubs.length > 0 ? [...list, ...stubs] : list
+        },
+      )
+    }
+
+    if (action === "remove" && affectedKeys.length > 0) {
+      const removedRows = rows.filter((r) => affectedKeys.includes(r.key))
+      optimisticRemove(classroom, removedRows)
+    }
+
+    // Recompute the members list against the (now-consistently-seeded) caches,
+    // leaving the seeded CSV/team alone; reconcile both on a delay.
+    queryClient.invalidateQueries({ queryKey: githubKeys.orgMembersAll(org) })
+    invalidateInviteQueries(queryClient, org)
+    invalidateClassroom(classroom, { skipCsv: true })
+    setSelectedKeys(new Set())
+    scheduleClassroomReconcile(classroom)
   }
 
   // Inline row invite for an on-roster non-member (mirrors the detail-drawer
@@ -443,7 +285,7 @@ const OrgMembersPage = () => {
     if (!org || invitingKey) return
     setInvitingKey(row.key)
     try {
-      await runInviteMember(client, org, row, notify, () => refresh(row), t)
+      await runInviteMember(client, org, row, notify, () => refreshInvite(), t)
     } finally {
       setInvitingKey(null)
     }
@@ -451,13 +293,26 @@ const OrgMembersPage = () => {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return rows
-    return rows.filter((row) =>
-      [row.username, row.name, row.email].some((field) =>
-        field.toLowerCase().includes(q),
-      ),
-    )
-  }, [rows, query])
+    return rows.filter((row) => {
+      // Text search across username / name / email.
+      if (
+        q &&
+        ![row.username, row.name, row.email].some((field) =>
+          field.toLowerCase().includes(q),
+        )
+      ) {
+        return false
+      }
+      // Classroom filter: all / no-classroom / a specific classroom.
+      if (classroomFilter === NO_CLASSROOM_FILTER) {
+        return row.classrooms.length === 0
+      }
+      if (classroomFilter) {
+        return row.classrooms.some((c) => c.classroom === classroomFilter)
+      }
+      return true
+    })
+  }, [rows, query, classroomFilter])
 
   const selected = useMemo(
     () => rows.find((row) => row.key === selectedKey) ?? null,
@@ -475,6 +330,48 @@ const OrgMembersPage = () => {
       github_id: row.github_id,
       username: row.username,
     })
+
+  // An org owner/admin: in the fetched admin-id set, or the signed-in account
+  // (always an owner here — the page is owner-gated — even if the admin list
+  // couldn't be read).
+  const isOwner = (row: OrgMemberRow) =>
+    (Boolean(row.github_id) && ownerIds.has(row.github_id)) || isSelf(row)
+
+  // The signed-in account (an org owner, since this page is owner-gated) can't
+  // be bulk-added/removed — a row is selectable only when it isn't self.
+  const isSelectable = (row: OrgMemberRow) => !isSelf(row)
+
+  // Rows backing the current selection, across the full set (a selected row
+  // hidden by search is still acted on), with self always excluded so even a
+  // stale selection can't target the signed-in owner.
+  const selectedRows = useMemo(
+    () => resolveSelectedRows(rows, selectedKeys, isSelectable),
+    // isSelf/isSelectable depend on viewer; recompute when it changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, selectedKeys, viewer],
+  )
+
+  const handleToggleRow = (key: string) =>
+    setSelectedKeys((prev) => toggleRow(prev, key))
+
+  // Select-all targets the currently-filtered SELECTABLE rows (self excluded),
+  // without disturbing any selected rows outside the current filter.
+  const selectableFiltered = useMemo(
+    () => selectableRows(filtered, isSelectable),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filtered, viewer],
+  )
+  const {
+    allSelected: allFilteredSelected,
+    someSelected: someFilteredSelected,
+  } = selectAllState(selectableFiltered, selectedKeys)
+  const handleToggleSelectAll = () =>
+    setSelectedKeys((prev) => toggleSelectAll(selectableFiltered, prev))
+
+  const classroomOptions = useMemo(
+    () => classes.map((c) => ({ name: c.name, path: c.path })),
+    [classes],
+  )
 
   return (
     <div className="min-h-screen">
@@ -523,15 +420,34 @@ const OrgMembersPage = () => {
               </div>
             ) : null}
 
-            <div className="mt-6">
-              <input
-                type="search"
-                className="input input-bordered w-full max-w-sm"
-                placeholder={t("orgMembers.searchPlaceholder")}
-                aria-label={t("orgMembers.searchLabel")}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
+            <div className="mt-6 flex flex-wrap items-center gap-3">
+              <label className="input input-bordered flex min-w-0 flex-1 items-center gap-2">
+                <Search aria-hidden="true" className="size-4 opacity-50" />
+                <input
+                  type="search"
+                  className="grow"
+                  placeholder={t("orgMembers.searchPlaceholder")}
+                  aria-label={t("orgMembers.searchLabel")}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                />
+              </label>
+              <select
+                className="select select-bordered w-full sm:w-auto sm:min-w-[14rem]"
+                aria-label={t("orgMembers.filterByClassroomLabel")}
+                value={classroomFilter}
+                onChange={(e) => setClassroomFilter(e.target.value)}
+              >
+                <option value="">{t("orgMembers.filterAllClassrooms")}</option>
+                <option value={NO_CLASSROOM_FILTER}>
+                  {t("orgMembers.filterNoClassroom")}
+                </option>
+                {classroomOptions.map((c) => (
+                  <option key={c.path} value={c.path}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="mt-4 card card-border w-full overflow-hidden bg-base-100 shadow-sm">
@@ -549,79 +465,143 @@ const OrgMembersPage = () => {
                 </div>
               ) : filtered.length === 0 ? (
                 <div className="px-6 py-10 text-center text-sm text-base-content/70">
-                  {t("orgMembers.noMatch")}
+                  {classroomFilter === NO_CLASSROOM_FILTER
+                    ? t("orgMembers.noMembersNoClassroom")
+                    : classroomFilter
+                      ? t("orgMembers.noMembersInClassroom", {
+                          classroom:
+                            classroomOptions.find(
+                              (c) => c.path === classroomFilter,
+                            )?.name ?? classroomFilter,
+                        })
+                      : t("orgMembers.noMatch")}
                 </div>
               ) : (
-                <motion.ul
-                  className="divide-y divide-base-300"
-                  variants={enterExit}
-                  initial="initial"
-                  animate="animate"
-                >
-                  {filtered.map((row) => (
-                    <ClickableRow
-                      key={row.key}
-                      className="group/row flex cursor-pointer items-center justify-between gap-4 px-6 py-4 hover:bg-base-200"
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => setSelectedKey(row.key)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault()
-                          setSelectedKey(row.key)
-                        }
-                      }}
-                    >
-                      <div className="min-w-0 flex-1">
-                        <Avatar
-                          name={row.name || row.username || row.email}
-                          github={row.username}
-                          initials={initialsFor(row)}
-                          subtitle={<GitHubIdentity row={row} />}
+                <>
+                  {org ? (
+                    <BulkActionsBar
+                      org={org}
+                      client={client}
+                      selectedRows={selectedRows}
+                      totalCount={filtered.length}
+                      allSelected={allFilteredSelected}
+                      someSelected={someFilteredSelected}
+                      onToggleSelectAll={handleToggleSelectAll}
+                      members={members}
+                      classrooms={classroomOptions}
+                      onClearSelection={() => setSelectedKeys(new Set())}
+                      onDone={handleBulkDone}
+                    />
+                  ) : null}
+                  <motion.ul
+                    className="divide-y divide-base-300"
+                    variants={enterExit}
+                    initial="initial"
+                    animate="animate"
+                  >
+                    {filtered.map((row) => (
+                      <ClickableRow
+                        key={row.key}
+                        className="group/row flex cursor-pointer items-center justify-between gap-4 px-6 py-4 hover:bg-base-200"
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setSelectedKey(row.key)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault()
+                            setSelectedKey(row.key)
+                          }
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          className="checkbox checkbox-sm shrink-0"
+                          aria-label={
+                            isSelf(row)
+                              ? t("orgMembers.bulk.selfNotSelectable")
+                              : t("orgMembers.bulk.selectRow", {
+                                  label: row.username || row.email || row.name,
+                                })
+                          }
+                          disabled={isSelf(row)}
+                          title={
+                            isSelf(row)
+                              ? t("orgMembers.bulk.selfNotSelectable")
+                              : undefined
+                          }
+                          checked={selectedKeys.has(row.key)}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={() => handleToggleRow(row.key)}
                         />
-                      </div>
-                      <div className="flex shrink-0 items-center gap-3">
-                        {row.classification === "on-roster-not-member" &&
-                        row.github_id ? (
-                          <button
-                            type="button"
-                            className="btn btn-xs btn-primary"
-                            disabled={invitingKey === row.key}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              void handleQuickInvite(row)
-                            }}
-                          >
-                            {invitingKey === row.key ? (
-                              <span
-                                className="loading loading-spinner loading-xs"
-                                aria-hidden="true"
-                              />
-                            ) : (
-                              <>
-                                <UserPlus
+                        <div className="min-w-0 flex-1">
+                          <Avatar
+                            name={row.name || row.username || row.email}
+                            github={row.username}
+                            initials={initialsFor(row)}
+                            subtitle={<GitHubIdentity row={row} />}
+                          />
+                        </div>
+                        <div className="flex shrink-0 items-center gap-3">
+                          {row.classification === "on-roster-not-member" &&
+                          row.github_id ? (
+                            <button
+                              type="button"
+                              className="btn btn-xs btn-primary"
+                              disabled={invitingKey === row.key}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                void handleQuickInvite(row)
+                              }}
+                            >
+                              {invitingKey === row.key ? (
+                                <span
+                                  className="loading loading-spinner loading-xs"
                                   aria-hidden="true"
-                                  className="size-3.5"
                                 />
-                                {t("orgMembers.invite")}
-                              </>
-                            )}
-                          </button>
-                        ) : null}
-                        <span className="hidden text-xs text-base-content/70 sm:inline">
-                          {t("orgMembers.classroomCount", {
-                            count: row.classrooms.length,
-                          })}
-                        </span>
-                        <ClassificationBadge row={row} />
-                        <ChevronRight
-                          aria-hidden="true"
-                          className="size-4 text-base-content/30 transition-transform duration-150 group-hover/row:translate-x-0.5 group-hover/row:text-base-content/70"
-                        />
-                      </div>
-                    </ClickableRow>
-                  ))}
-                </motion.ul>
+                              ) : (
+                                <>
+                                  <UserPlus
+                                    aria-hidden="true"
+                                    className="size-3.5"
+                                  />
+                                  {t("orgMembers.invite")}
+                                </>
+                              )}
+                            </button>
+                          ) : null}
+                          <span className="hidden text-xs text-base-content/70 sm:inline">
+                            {t("orgMembers.classroomCount", {
+                              count: row.classrooms.length,
+                            })}
+                          </span>
+                          {row.unprovisionedClassrooms.length > 0 ? (
+                            <span
+                              className="badge badge-sm badge-warning badge-soft gap-1"
+                              title={t("orgMembers.unprovisionedTitle", {
+                                classrooms:
+                                  row.unprovisionedClassrooms.join(", "),
+                              })}
+                            >
+                              <AlertTriangle
+                                aria-hidden="true"
+                                className="size-3"
+                              />
+                              {t("orgMembers.unprovisionedBadge")}
+                            </span>
+                          ) : null}
+                          <ClassificationBadge
+                            row={row}
+                            isOwner={isOwner(row)}
+                          />
+                          <ChevronRight
+                            aria-hidden="true"
+                            className="size-4 text-base-content/30 transition-transform duration-150 group-hover/row:translate-x-0.5 group-hover/row:text-base-content/70"
+                          />
+                        </div>
+                      </ClickableRow>
+                    ))}
+                  </motion.ul>
+                </>
               )}
             </div>
           </RequireTeacher>
@@ -629,15 +609,22 @@ const OrgMembersPage = () => {
         <DrawerSidebar page="classes" selected="members" />
       </Drawer>
 
-      {selected && org ? (
-        <MemberDetail
+      {org ? (
+        <MemberDetailModal
+          open={Boolean(selected)}
           org={org}
           row={selected}
-          isSelf={isSelf(selected)}
+          isSelf={selected ? isSelf(selected) : false}
+          isOwner={selected ? isOwner(selected) : false}
           onClose={() => setSelectedKey(null)}
           onRemoved={() => {
+            const affected = selected
             setSelectedKey(null)
-            refresh(selected)
+            if (affected) refresh(affected)
+          }}
+          onInvited={() => {
+            setSelectedKey(null)
+            refreshInvite()
           }}
         />
       ) : null}
