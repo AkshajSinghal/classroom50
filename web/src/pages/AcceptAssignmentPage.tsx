@@ -3,13 +3,11 @@ import {
   CheckCircle2,
   ChevronDown,
   GraduationCap,
-  Loader2,
+  Languages,
   UserRound,
-  UsersRound,
 } from "lucide-react"
 
 import GitHub from "@/assets/github.svg?react"
-import GitHubWhite from "@/assets/github_white.svg?react"
 import { Spinner } from "@/components/Spinner"
 import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import type { GitHubUser } from "@/hooks/github/types"
@@ -17,7 +15,7 @@ import { Link, useParams, useSearch } from "@tanstack/react-router"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useGithubAuth } from "@/auth/useGithubAuth"
 import { useMutation } from "@tanstack/react-query"
-import { useState } from "react"
+import { useId, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import confetti from "canvas-confetti"
 import {
@@ -37,7 +35,10 @@ import { studentRepoName } from "@/util/studentRepo"
 import useGetRepo from "@/hooks/useGetRepo"
 import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
 import { GroupCollaboratorsModal } from "@/components/modals/GroupCollaboratorsModal"
+import { LanguageDialog } from "@/components/LanguageDialog"
 import { EnterDiv } from "@/lib/motionComponents"
+import { collapseVariants } from "@/lib/motion"
+import { AnimatePresence, motion } from "motion/react"
 
 const initialsFor = (user: GitHubUser | null) => {
   const source = user?.name || user?.login || "?"
@@ -51,25 +52,53 @@ const initialsFor = (user: GitHubUser | null) => {
 
 const AcceptNavbar = () => {
   const { t } = useTranslation()
+  const langDialogRef = useRef<HTMLDialogElement>(null)
+  const langDialogTitleId = useId()
   return (
     <div className="navbar bg-base-100 shadow-sm">
-      <Link to="/">
-        <div className="flex p-6 text-lg font-bold">
-          <GraduationCap
-            aria-hidden="true"
-            className="size-8 text-primary mr-2"
-          />{" "}
-          {t("nav.appName")}
-        </div>
-      </Link>
+      <div className="flex-1">
+        <Link to="/">
+          <div className="flex p-6 text-lg font-bold">
+            <GraduationCap
+              aria-hidden="true"
+              className="size-8 text-primary mr-2"
+            />{" "}
+            {t("nav.appName")}
+          </div>
+        </Link>
+      </div>
+      <div className="flex-none pr-4">
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm gap-2"
+          onClick={() => langDialogRef.current?.showModal()}
+        >
+          <Languages aria-hidden="true" className="size-5" />
+          <span className="hidden sm:inline">{t("nav.language")}</span>
+        </button>
+      </div>
+      <LanguageDialog ref={langDialogRef} titleId={langDialogTitleId} />
     </div>
   )
 }
 
 const AcceptCard = ({ children }: { children: React.ReactNode }) => {
   return (
-    <div className="card w-200 max-w-[calc(100vw-2em)] p-8 m-auto rounded-xl mt-10 border border-base-300">
+    <div className="card w-200 max-w-full p-8 rounded-xl border border-base-300">
       {children}
+    </div>
+  )
+}
+
+// Every accept render branch wraps its content in this so the card stays
+// centered in the viewport regardless of its height.
+const AcceptLayout = ({ children }: { children: React.ReactNode }) => {
+  return (
+    <div className="flex min-h-screen flex-col bg-base-100">
+      <AcceptNavbar />
+      <div className="flex flex-1 items-center justify-center p-4">
+        {children}
+      </div>
     </div>
   )
 }
@@ -117,9 +146,7 @@ const AssignmentNotFound = ({
 }) => {
   const { t } = useTranslation()
   return (
-    <div className="min-h-screen bg-base-100">
-      <AcceptNavbar />
-
+    <AcceptLayout>
       <AcceptCard>
         <div className="card-body gap-8">
           <div>
@@ -182,7 +209,7 @@ const AssignmentNotFound = ({
           </div>
         </div>
       </AcceptCard>
-    </div>
+    </AcceptLayout>
   )
 }
 
@@ -223,9 +250,9 @@ const StatusIcon = ({ status }: { status: AcceptStepStatus }) => {
     )
   if (status === "running")
     return (
-      <Loader2
+      <span
         aria-hidden="true"
-        className="size-5 shrink-0 animate-spin text-primary"
+        className="loading loading-dots loading-sm shrink-0 text-primary"
       />
     )
   if (status === "error")
@@ -269,13 +296,94 @@ const StepRow = ({
   )
 }
 
+// Ring fills proportionally with completed steps. Color tracks the header
+// status so a failed run reads as error, a finished run as success.
+const CircularProgress = ({
+  completed,
+  total,
+  status,
+  label,
+}: {
+  completed: number
+  total: number
+  status: AcceptStepStatus
+  label: string
+}) => {
+  const radius = 8
+  const circumference = 2 * Math.PI * radius
+  const isComplete = status === "complete"
+  // Fill the ring completely once done so the checkmark sits inside a full ring.
+  const ratio = total > 0 ? completed / total : 0
+  const fraction = isComplete ? 1 : ratio
+  const strokeClass =
+    status === "error"
+      ? "text-error"
+      : isComplete
+        ? "text-success"
+        : "text-primary"
+  // Dash length that comfortably exceeds the check mark's path length (~10),
+  // so the mark is fully hidden (no peeking tips) until it strokes in on done.
+  const checkLength = 12
+
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      className="relative inline-flex size-9 items-center justify-center"
+    >
+      <svg viewBox="0 0 20 20" className="size-full">
+        <g transform="rotate(-90 10 10)">
+          <circle
+            cx="10"
+            cy="10"
+            r={radius}
+            fill="none"
+            strokeWidth="2.5"
+            className="stroke-base-300"
+          />
+          <circle
+            cx="10"
+            cy="10"
+            r={radius}
+            fill="none"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={circumference * (1 - fraction)}
+            className={`${strokeClass} transition-[stroke-dashoffset] duration-500`}
+            stroke="currentColor"
+          />
+        </g>
+        <path
+          d="M6.5 10.2l2.2 2.3 4.8-4.8"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="text-success transition-[stroke-dashoffset] delay-300 duration-300"
+          strokeDasharray={checkLength}
+          strokeDashoffset={isComplete ? 0 : checkLength}
+        />
+      </svg>
+    </span>
+  )
+}
+
 const AcceptProgress = ({ steps }: { steps: StepState }) => {
   const { t } = useTranslation()
   const stepStates = ACCEPT_STEP_ORDER.map((step) => steps[step.id])
   const completed = stepStates.filter((s) => s.status === "complete").length
   const hasError = stepStates.some((s) => s.status === "error")
-  const isRunning = stepStates.some((s) => s.status === "running")
   const allDone = completed === ACCEPT_STEP_ORDER.length
+  // Between steps, the finishing step is already "complete" while the next
+  // hasn't emitted "running" yet — a momentary gap where no step is running.
+  // Treat that gap as running so the header doesn't flicker back to pending on
+  // every step boundary. Excludes the all-done case so "in flight" stays true
+  // to its name rather than relying on the consuming ternary's ordering.
+  const inFlight =
+    stepStates.some((s) => s.status === "running") ||
+    (completed > 0 && !allDone)
 
   // Start collapsed (header summary + count is enough); let the student expand
   // detail on demand. Force open on error so a failure is never hidden; an
@@ -287,7 +395,7 @@ const AcceptProgress = ({ steps }: { steps: StepState }) => {
     ? "error"
     : allDone
       ? "complete"
-      : isRunning
+      : inFlight
         ? "running"
         : "pending"
 
@@ -307,21 +415,24 @@ const AcceptProgress = ({ steps }: { steps: StepState }) => {
         className="flex w-full items-center justify-between gap-3 p-4 text-left"
       >
         <span className="flex items-center gap-3">
-          <StatusIcon status={headerStatus} />
+          <CircularProgress
+            completed={completed}
+            total={ACCEPT_STEP_ORDER.length}
+            status={headerStatus}
+            label={t("accept.progress.count", {
+              completed,
+              total: ACCEPT_STEP_ORDER.length,
+            })}
+          />
           <span className="font-medium">{summary}</span>
         </span>
 
-        <span className="flex items-center gap-2 text-sm text-base-content/70">
-          <span>
-            {completed}/{ACCEPT_STEP_ORDER.length}
-          </span>
-          <ChevronDown
-            aria-hidden="true"
-            className={`size-4 transition-transform ${
-              expanded ? "rotate-180" : ""
-            }`}
-          />
-        </span>
+        <ChevronDown
+          aria-hidden="true"
+          className={`size-4 shrink-0 text-base-content/70 transition-transform ${
+            expanded ? "rotate-180" : ""
+          }`}
+        />
       </button>
 
       {expanded && (
@@ -353,39 +464,51 @@ const fireConfetti = () => {
 
 // Collapsed-by-default repair section for an already-accepted repo. Tucks the
 // "Re-run setup" affordance behind a toggle so it doesn't compete with the
-// primary "Open Repository" action.
+// primary "Open Repository" action. Controlled so the parent can hide the
+// primary actions while it's open.
 const RepairToggle = ({
   disabled,
   onRerun,
+  open,
+  onToggle,
 }: {
   disabled: boolean
   onRerun: () => void
+  open: boolean
+  onToggle: (open: boolean) => void
 }) => {
   const { t } = useTranslation()
   return (
-    <details className="group rounded-xl border border-base-300 bg-base-200/40">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 text-sm font-medium">
+    <div className="rounded-xl border border-base-300 bg-base-200/40">
+      <button
+        type="button"
+        onClick={() => onToggle(!open)}
+        aria-expanded={open}
+        className="flex w-full cursor-pointer list-none items-center justify-between gap-3 p-4 text-sm font-medium"
+      >
         <span>{t("accept.repair.havingTrouble")}</span>
         <ChevronDown
           aria-hidden="true"
-          className="size-4 transition-transform group-open:rotate-180"
+          className={`size-4 transition-transform ${open ? "rotate-180" : ""}`}
         />
-      </summary>
+      </button>
 
-      <div className="border-t border-base-300 p-4">
-        <p className="text-sm text-base-content/70">
-          {t("accept.repair.hint")}
-        </p>
-        <button
-          type="button"
-          className="btn btn-outline btn-sm mt-3 w-full"
-          disabled={disabled}
-          onClick={onRerun}
-        >
-          {t("accept.repair.rerun")}
-        </button>
-      </div>
-    </details>
+      {open && (
+        <div className="border-t border-base-300 p-4">
+          <p className="text-sm text-base-content/70">
+            {t("accept.repair.hint")}
+          </p>
+          <button
+            type="button"
+            className="btn btn-warning btn-sm mt-3 w-full"
+            disabled={disabled}
+            onClick={onRerun}
+          >
+            {t("accept.repair.rerun")}
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -432,6 +555,7 @@ const AcceptAssignmentPage = () => {
 
   const [steps, setSteps] = useState<StepState>(initialStepState)
   const [collaboratorsOpen, setCollaboratorsOpen] = useState(false)
+  const [repairOpen, setRepairOpen] = useState(false)
   const runAccept = useSafeSubmit()
 
   // A pending invitee opened the accept link before becoming an active member.
@@ -474,14 +598,9 @@ const AcceptAssignmentPage = () => {
 
   if (loadingAssignments || isLoadingRepo || loadingOrgMembership) {
     return (
-      <div className="min-h-screen bg-base-100">
-        <AcceptNavbar />
-        <AcceptCard>
-          <div className="flex justify-center">
-            <Spinner size="xl" label={t("accept.loadingAssignment")} />
-          </div>
-        </AcceptCard>
-      </div>
+      <AcceptLayout>
+        <Spinner size="xl" label={t("accept.loadingAssignment")} />
+      </AcceptLayout>
     )
   }
 
@@ -496,8 +615,7 @@ const AcceptAssignmentPage = () => {
       username,
     })
     return (
-      <div className="min-h-screen bg-base-100">
-        <AcceptNavbar />
+      <AcceptLayout>
         <AcceptCard>
           <MembershipError
             info={info}
@@ -505,15 +623,14 @@ const AcceptAssignmentPage = () => {
             onRetry={() => void refetchMembership()}
           />
         </AcceptCard>
-      </div>
+      </AcceptLayout>
     )
   }
 
   if (!orgInvite) {
     const info = classifyMembershipError(null, { org, username })
     return (
-      <div className="min-h-screen bg-base-100">
-        <AcceptNavbar />
+      <AcceptLayout>
         <AcceptCard>
           <MembershipError
             info={info}
@@ -521,7 +638,7 @@ const AcceptAssignmentPage = () => {
             onRetry={() => void refetchMembership()}
           />
         </AcceptCard>
-      </div>
+      </AcceptLayout>
     )
   }
 
@@ -536,8 +653,7 @@ const AcceptAssignmentPage = () => {
         membershipState: orgInvite.state,
       })
       return (
-        <div className="min-h-screen bg-base-100">
-          <AcceptNavbar />
+        <AcceptLayout>
           <AcceptCard>
             <MembershipError
               info={info}
@@ -545,18 +661,13 @@ const AcceptAssignmentPage = () => {
               onRetry={membershipAccept.retry}
             />
           </AcceptCard>
-        </div>
+        </AcceptLayout>
       )
     }
     return (
-      <div className="min-h-screen bg-base-100">
-        <AcceptNavbar />
-        <AcceptCard>
-          <div className="flex justify-center">
-            <Spinner size="xl" label={t("accept.loadingAssignment")} />
-          </div>
-        </AcceptCard>
-      </div>
+      <AcceptLayout>
+        <Spinner size="xl" label={t("accept.loadingAssignment")} />
+      </AcceptLayout>
     )
   }
 
@@ -565,8 +676,7 @@ const AcceptAssignmentPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-base-100">
-      <AcceptNavbar />
+    <AcceptLayout>
       <AcceptCard>
         <EnterDiv className="card-body gap-4">
           <div className="flex justify-between">
@@ -580,7 +690,7 @@ const AcceptAssignmentPage = () => {
               className={`badge ${pastDue ? "badge-error badge-soft" : ""}`}
             >
               {assignmentData?.due
-                ? t("accept.due", {
+                ? t(pastDue ? "accept.pastDue" : "accept.due", {
                     date: formatDueDateTime(assignmentData.due),
                   })
                 : t("accept.noDueDate")}
@@ -594,13 +704,6 @@ const AcceptAssignmentPage = () => {
               ? t("accept.alreadyAcceptedHeading")
               : t("accept.acceptHeading")}
           </h2>
-
-          {pastDue && (
-            <div className="alert alert-warning items-start">
-              <AlertTriangle aria-hidden="true" className="size-5 shrink-0" />
-              <div className="text-sm">{t("accept.pastDueWarning")}</div>
-            </div>
-          )}
 
           <div className="divider my-0" />
 
@@ -617,9 +720,8 @@ const AcceptAssignmentPage = () => {
               </label>
 
               <div className="flex gap-4 min-w-0">
-                <GitHub aria-hidden="true" className="size-6 shrink-0" />
                 <pre className="text-lg overflow-x-auto">
-                  {org}/{expectedRepoName}
+                  <span className="font-bold">{org}</span>/{expectedRepoName}
                 </pre>
               </div>
             </div>
@@ -645,82 +747,79 @@ const AcceptAssignmentPage = () => {
               </div>
             )}
 
-            {acceptMutation.data && (
-              <div className="alert alert-success items-start">
-                <CheckCircle2 aria-hidden="true" className="size-5 shrink-0" />
-                <div className="min-w-0">
-                  <div className="font-bold">
-                    {acceptMutation.data.status === "already-accepted"
-                      ? t("accept.alreadyAcceptedTitle")
-                      : t("accept.acceptedTitle")}
-                  </div>
-
-                  <div className="mt-1">
-                    {t("accept.repositoryLabel")}{" "}
+            <AnimatePresence initial={false}>
+              {(acceptMutation.data || repoExistsAlready) &&
+                !acceptMutation.isPending &&
+                !repairOpen && (
+                  <motion.div
+                    key="post-accept-actions"
+                    variants={collapseVariants}
+                    initial="initial"
+                    animate="animate"
+                    exit="exit"
+                    className="flex flex-col gap-4 overflow-hidden"
+                  >
                     <a
-                      className="link font-mono"
-                      href={acceptMutation.data.repo.html_url}
+                      className="btn btn-primary w-full text-lg p-5"
+                      href={
+                        acceptMutation?.data?.repo.html_url ||
+                        `https://www.github.com/${org}/${checkedRepo?.name}`
+                      }
                       target="_blank"
                       rel="noreferrer"
                     >
-                      {acceptMutation.data.repo.full_name}
+                      {t("accept.openRepository")}
                     </a>
-                  </div>
-                </div>
-              </div>
-            )}
 
-            {(acceptMutation.data || repoExistsAlready) && (
-              <a
-                className="btn btn-primary w-full text-xl p-6"
-                href={
-                  acceptMutation?.data?.repo.html_url ||
-                  `https://www.github.com/${org}/${checkedRepo?.name}`
-                }
-                target="_blank"
-                rel="noreferrer"
-              >
-                <GitHubWhite aria-hidden="true" className="size-6" />
-                {t("accept.openRepository")}
-              </a>
-            )}
+                    {assignmentData?.mode === "group" && (
+                      <button
+                        type="button"
+                        className="btn btn-outline w-full text-lg p-5"
+                        onClick={() => setCollaboratorsOpen(true)}
+                      >
+                        {t("accept.editCollaborators")}
+                      </button>
+                    )}
 
-            {assignmentData?.mode === "group" &&
-              (acceptMutation.data || repoExistsAlready) && (
-                <button
-                  type="button"
-                  className="btn btn-outline w-full text-lg p-5"
-                  onClick={() => setCollaboratorsOpen(true)}
-                >
-                  <UsersRound aria-hidden="true" className="size-5" />
-                  {t("accept.editCollaborators")}
-                </button>
-              )}
+                    {org && classroom && (
+                      <Link
+                        to="/$org/$classroom"
+                        params={{ org, classroom }}
+                        className="btn btn-outline w-full text-lg p-5"
+                      >
+                        {t("accept.goToClassroom")}
+                      </Link>
+                    )}
+                  </motion.div>
+                )}
+            </AnimatePresence>
 
             {!acceptMutation.data &&
               !repoExistsAlready &&
               !acceptMutation.isPending && (
                 <button
                   type="button"
-                  className="btn btn-primary w-full text-xl p-6"
+                  className="btn btn-primary w-full text-lg p-5"
                   disabled={!username || acceptMutation.isPending}
                   onClick={() =>
                     void runAccept(() => acceptMutation.mutateAsync())
                   }
                 >
-                  <GitHubWhite aria-hidden="true" className="size-6" />
                   {t("accept.acceptButton")}
                 </button>
               )}
 
-            {repoExistsAlready &&
+            {(repoExistsAlready || acceptMutation.isError) &&
               !acceptMutation.data &&
               !acceptMutation.isPending && (
                 <RepairToggle
                   disabled={!username || acceptMutation.isPending}
-                  onRerun={() =>
+                  onRerun={() => {
+                    setRepairOpen(false)
                     void runAccept(() => acceptMutation.mutateAsync())
-                  }
+                  }}
+                  open={repairOpen}
+                  onToggle={setRepairOpen}
                 />
               )}
           </div>
@@ -743,7 +842,7 @@ const AcceptAssignmentPage = () => {
             maxGroupSize={assignmentData?.max_group_size}
           />
         )}
-    </div>
+    </AcceptLayout>
   )
 }
 
