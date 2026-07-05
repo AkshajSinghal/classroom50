@@ -1,24 +1,16 @@
 import { useEffect, useId, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
-import {
-  AlertTriangle,
-  ChevronRight,
-  ExternalLink,
-  UserPlus,
-  X,
-} from "lucide-react"
+import { AlertTriangle, ChevronRight, UserPlus, X } from "lucide-react"
 
-import Avatar from "@/components/avatar"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useToast } from "@/context/notifications/NotificationProvider"
 import { removeMemberFromOrg } from "@/pages/orgMembers/removeMemberFromOrg"
 import {
   ClassificationBadge,
-  GitHubIdentity,
-  initialsFor,
   runInviteMember,
 } from "@/pages/orgMembers/memberPresentation"
+import MemberDetailHeader from "@/components/memberList/MemberDetailHeader"
 import type { OrgMemberRow } from "@/util/orgMembers"
 
 // Centered modal showing one org member's details: identity, classification,
@@ -56,6 +48,7 @@ const MemberDetailModal = ({
   const dialogRef = useRef<HTMLDialogElement | null>(null)
   const titleId = useId()
   const [confirming, setConfirming] = useState(false)
+  const [confirmingInvite, setConfirmingInvite] = useState(false)
   const [working, setWorking] = useState(false)
   const [inviting, setInviting] = useState(false)
 
@@ -72,6 +65,7 @@ const MemberDetailModal = ({
   const handleClose = () => {
     if (working) return
     setConfirming(false)
+    setConfirmingInvite(false)
     setInviting(false)
     onClose()
   }
@@ -94,6 +88,7 @@ const MemberDetailModal = ({
       await runInviteMember(client, org, row, notify, onInvited, t)
     } finally {
       setInviting(false)
+      setConfirmingInvite(false)
     }
   }
 
@@ -168,12 +163,7 @@ const MemberDetailModal = ({
         </div>
 
         <div className="flex flex-col gap-4 px-6 py-5">
-          <Avatar
-            name={row.name || label}
-            github={row.username}
-            initials={initialsFor(row)}
-            subtitle={<GitHubIdentity row={row} />}
-          />
+          <MemberDetailHeader row={row} org={org} />
 
           <div className="flex flex-wrap items-center gap-2">
             <ClassificationBadge row={row} isOwner={isOwner} />
@@ -181,18 +171,6 @@ const MemberDetailModal = ({
               <span className="text-sm text-base-content/70">{row.email}</span>
             ) : null}
           </div>
-
-          <a
-            href={`https://github.com/orgs/${org}/people${
-              row.username ? `?query=${encodeURIComponent(row.username)}` : ""
-            }`}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex w-fit items-center gap-1 text-sm text-primary hover:underline"
-          >
-            <ExternalLink aria-hidden="true" className="size-3.5" />
-            {t("orgMembers.manageOnGitHub")}
-          </a>
 
           <div>
             <h3 className="mb-2 text-sm font-semibold">
@@ -267,23 +245,50 @@ const MemberDetailModal = ({
                   type="button"
                   className="btn btn-primary btn-sm mt-3"
                   disabled={inviting}
-                  onClick={() => void handleInvite()}
+                  hidden={confirmingInvite}
+                  onClick={() => setConfirmingInvite(true)}
                 >
-                  {inviting ? (
-                    <>
-                      <span
-                        className="loading loading-spinner loading-xs"
-                        aria-hidden="true"
-                      />
-                      {t("orgMembers.inviting")}
-                    </>
-                  ) : (
-                    <>
-                      <UserPlus aria-hidden="true" className="size-4" />
-                      {t("orgMembers.inviteToOrg")}
-                    </>
-                  )}
+                  <UserPlus aria-hidden="true" className="size-4" />
+                  {t("orgMembers.inviteToOrg")}
                 </button>
+                {confirmingInvite ? (
+                  <div className="mt-3 flex flex-col gap-3 border-t border-warning/30 pt-3">
+                    <p className="text-base-content/80">
+                      {t("orgMembers.confirmInviteBody", { label, org })}
+                    </p>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        disabled={inviting}
+                        onClick={() => setConfirmingInvite(false)}
+                      >
+                        {t("common.cancel")}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        disabled={inviting}
+                        onClick={() => void handleInvite()}
+                      >
+                        {inviting ? (
+                          <>
+                            <span
+                              className="loading loading-spinner loading-xs"
+                              aria-hidden="true"
+                            />
+                            {t("orgMembers.inviting")}
+                          </>
+                        ) : (
+                          <>
+                            <UserPlus aria-hidden="true" className="size-4" />
+                            {t("orgMembers.inviteToOrg")}
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <div className="rounded-box border border-base-300 bg-base-200/50 p-4 text-sm text-base-content/70">

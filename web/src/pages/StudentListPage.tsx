@@ -1,3 +1,5 @@
+import { useState } from "react"
+
 import AddStudent from "@/pages/students/AddStudent"
 import Breadcrumb from "@/components/breadcrumb"
 import Drawer, {
@@ -8,14 +10,16 @@ import Drawer, {
 import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import EnrolledStudents from "@/pages/students/EnrolledStudents"
 import UploadRoster from "@/pages/students/UploadRoster"
+import InviteLinksModal from "@/pages/students/InviteLinksModal"
+import { GitHubLink } from "@/components/GitHubLink"
 import { useParams } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import useGetStudents, { useUpdateRosterCache } from "@/hooks/useGetStudents"
-import useGetClassroom from "@/hooks/useGetClassroom"
 import { useTeamRoster } from "@/hooks/useTeamRoster"
 import { invalidateInviteQueries } from "@/hooks/github/queries"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import RequireTeacher from "@/components/RequireTeacher"
+import { CONFIG_REPO } from "@/hooks/github/orgChecks"
 import { toStudent } from "@/util/roster"
 import { useTranslation } from "react-i18next"
 
@@ -28,60 +32,84 @@ const StudentListContent = ({
 }) => {
   const { t } = useTranslation()
   const { students } = useGetStudents(org, classroom)
-  const { data: classData } = useGetClassroom(org, classroom)
   const client = useGitHubClient()
   const queryClient = useQueryClient()
   const updateRosterCache = useUpdateRosterCache(org, classroom)
+
+  // Which add-students affordance is open (all mutually exclusive modals).
+  const [addOpen, setAddOpen] = useState(false)
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [inviteOpen, setInviteOpen] = useState(false)
+
   // Count enrolled from the team roster (same source as EnrolledStudents), so
-  // header and section agree. Enrollment is team membership, not the CSV.
+  // header and list agree. Enrollment is team membership, not the CSV.
   const {
     counts,
     isLoading: rosterLoading,
     isError: rosterError,
   } = useTeamRoster(org, classroom, students)
-  // Suppress the count while the enrolled source of truth is loading/errored
-  // (counts.enrolled reads 0 in both), so the header can't assert "0 enrolled"
-  // next to the error/retry banner EnrolledStudents shows.
   const countReady = !rosterLoading && !rosterError
   const enrolledCount = counts.enrolled
-  const className =
-    classData?.name || classData?.short_name || t("students.untitledClass")
 
   return (
     <>
-      <h1 className="text-lg pt-8 pb-2 font-bold">{t("nav.students")}</h1>
-      <h3 className="pb-10">
-        {countReady
-          ? t("students.enrolledIn", { count: enrolledCount, className })
-          : t("students.enrolledInLoading", { className })}
-      </h3>
-      <div className="grid grid-cols-12 gap-2">
-        <div className="col-span-5 px-4">
-          <AddStudent org={org} classroom={classroom} className="mb-8" />
-          <UploadRoster
-            org={org}
-            classroom={classroom}
-            client={client}
-            onSuccess={(result) => {
-              // Show imported rows immediately (see useUpdateRosterCache).
-              if (result.addedStudents.length > 0) {
-                updateRosterCache((current) => [
-                  ...current,
-                  ...result.addedStudents.map(toStudent),
-                ])
-              }
-              invalidateInviteQueries(queryClient, org)
-            }}
-          />
-        </div>
-        <div className="col-span-7 px-4">
-          <EnrolledStudents
-            students={students}
-            org={org}
-            classroom={classroom}
-          />
-        </div>
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 pt-8 pb-10">
+        <h1 className="text-lg font-bold">{t("nav.students")}</h1>
+        <span className="text-sm text-base-content/70">
+          {countReady
+            ? t("students.enrolledCount", { count: enrolledCount })
+            : t("students.enrolledCountLoading")}
+        </span>
+        <span aria-hidden="true" className="text-base-content/30">
+          ·
+        </span>
+        <GitHubLink
+          href={`https://github.com/${org}/${CONFIG_REPO}/blob/main/${classroom}/students.csv`}
+          label={t("students.viewCsvOnGitHub")}
+          title={t("students.viewCsvOnGitHub")}
+        />
       </div>
+
+      <EnrolledStudents
+        students={students}
+        org={org}
+        classroom={classroom}
+        addActions={{
+          onAddStudent: () => setAddOpen(true),
+          onUploadRoster: () => setUploadOpen(true),
+          onInviteLinks: () => setInviteOpen(true),
+        }}
+      />
+
+      <AddStudent
+        org={org}
+        classroom={classroom}
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+      />
+      <UploadRoster
+        org={org}
+        classroom={classroom}
+        client={client}
+        open={uploadOpen}
+        onOpenChange={setUploadOpen}
+        onSuccess={(result) => {
+          // Show imported rows immediately (see useUpdateRosterCache).
+          if (result.addedStudents.length > 0) {
+            updateRosterCache((current) => [
+              ...current,
+              ...result.addedStudents.map(toStudent),
+            ])
+          }
+          invalidateInviteQueries(queryClient, org)
+        }}
+      />
+      <InviteLinksModal
+        org={org}
+        classroom={classroom}
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+      />
     </>
   )
 }

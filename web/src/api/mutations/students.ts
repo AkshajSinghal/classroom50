@@ -28,7 +28,7 @@ import {
 import { getAuthenticatedUser } from "@/api/queries/users"
 import { getBranchRef, getClassroomJson, getCommit } from "../github/queries"
 import { GitHubAPIError, isDefinitiveGitHubStatus } from "@/hooks/github/errors"
-import { isSameGitHubUser } from "@/util/students"
+import { isSameGitHubUser, parseGitHubId } from "@/util/students"
 import { studentKey, rosterClaimSet } from "@/util/identity"
 import { mapWithConcurrency } from "@/util/concurrency"
 import { prefixCommit } from "@/util/commit"
@@ -152,7 +152,7 @@ export function splitName(name: string | null): {
   return { first_name: parts.at(0) ?? "", last_name: parts.slice(1).join(" ") }
 }
 
-function parseStudentsCsv(csv: string): StudentCsvRow[] {
+export function parseStudentsCsv(csv: string): StudentCsvRow[] {
   const parsed = Papa.parse<Record<string, string>>(csv, {
     header: true,
     delimiter: ",",
@@ -160,13 +160,37 @@ function parseStudentsCsv(csv: string): StudentCsvRow[] {
     transformHeader: (header) => header.trim(),
   })
 
+  // A `TooFewFields` row is tolerated ONLY when it is short by exactly one
+  // column — the ambiguous-but-benign "trailing `github_id` omitted" case:
+  // `octocat,Grace,Hopper,,Section A` (5 fields) maps cleanly under
+  // `header: true` (the missing trailing field is `undefined`, coerced to "" by
+  // normalizeStudentRow), so a sync/read shouldn't abort on a roster merely
+  // missing trailing commas. A row short by TWO or more can't be explained by a
+  // single dropped trailing field, and since Papa maps values POSITIONALLY it
+  // would silently shift every value into the wrong column (corrupting the
+  // identity/email join with no error) — exactly as untrustworthy as a
+  // `TooManyFields` row, so it stays fatal. (A row short by exactly one where a
+  // MIDDLE cell was dropped is positionally indistinguishable from a dropped
+  // trailing field, so it is unavoidably read as the latter; nothing in the row
+  // data can disambiguate the two.)
+  // Only re-parse (tooFewFieldsAreTrailingOnly runs a second full parse) when a
+  // TooFewFields error is actually present — the flag is never read otherwise.
+  const shortRowsWithinTolerance =
+    parsed.errors.some((error) => error.code === "TooFewFields") &&
+    tooFewFieldsAreTrailingOnly(
+      csv,
+      parsed.meta.fields?.length ?? STUDENT_CSV_FIELDS.length,
+    )
+
   const fatalErrors = parsed.errors.filter(
-    (error) => error.type !== "Delimiter",
+    (error) =>
+      error.type !== "Delimiter" &&
+      !(error.code === "TooFewFields" && shortRowsWithinTolerance),
   )
 
   if (fatalErrors.length > 0) {
     throw new Error(
-      `Could not parse students.csv: ${parsed.errors
+      `Could not parse students.csv: ${fatalErrors
         .map((error) => error.message)
         .join("; ")}`,
     )
@@ -175,6 +199,28 @@ function parseStudentsCsv(csv: string): StudentCsvRow[] {
   return parsed.data
     .map((row) => normalizeStudentRow(row))
     .filter((row) => row.username || row.github_id || row.email)
+}
+
+// True when EVERY short data row is short by exactly one column, i.e. only the
+// trailing field was dropped. Re-parses without `header` to read raw row widths
+// (the header-keyed `data` hides which physical column is missing), so a row
+// dropping a middle cell — which Papa would silently left-shift — is NOT treated
+// as benign. A row that's short by 2+ (or a header we couldn't count) is fatal.
+function tooFewFieldsAreTrailingOnly(
+  csv: string,
+  headerWidth: number,
+): boolean {
+  if (headerWidth <= 0) return false
+  const raw = Papa.parse<string[]>(csv, {
+    delimiter: ",",
+    skipEmptyLines: "greedy",
+  })
+  // rows[0] is the header; a short DATA row is benign only at width-1.
+  return raw.data
+    .slice(1)
+    .every(
+      (row) => row.length === headerWidth || row.length === headerWidth - 1,
+    )
 }
 
 // Neutralize spreadsheet formula injection (OWASP CSV injection) in free-text
@@ -946,6 +992,119 @@ export async function reconcileTeamFromOrgMembers(
   }
 
   return { added, skipped, failed }
+}
+
+export type InviteRosterStudentsInput = {
+  org: string
+  classroom: string
+  // Rows to invite. Each carries at least a username (a `not_in_org` roster row
+  // always has one); github_id is used when present, else derived from the
+  // username. `pending` rows are handled by resendOrgInvitation, not here.
+  students: { username: string; github_id?: string }[]
+  onProgress?: (progress: {
+    processed: number
+    total: number
+    message: string
+  }) => void
+}
+
+export type InviteRosterStudentsResult = {
+  // A fresh org invite was created (carrying the classroom team).
+  invited: string[]
+  // Already an active member or already had a pending invite — no new invite.
+  skipped: { username: string; reason: "already-member" | "already-pending" }[]
+  // Couldn't invite (username didn't resolve to a GitHub account, or the invite
+  // call failed).
+  failed: { username: string; message: string }[]
+  // Not attempted because a GitHub rate limit was hit mid-batch — the teacher
+  // can retry these later once the limit clears (see the short-circuit below).
+  deferred: string[]
+}
+
+// Bulk-invite roster students who are on students.csv (by username) but not yet
+// in the organization — the `not_in_org` rows. Resolves each username to its
+// immutable GitHub id (using the stored github_id when present, else
+// GET /users/{username}) and sends a fresh org invitation carrying the
+// classroom team, so accepting it activates team membership atomically. This is
+// the roster-side counterpart to the Org Members "Invite" action; it does NOT
+// write students.csv (identity backfill is syncRosterFromTeam's job) and never
+// touches an existing active/pending state (ensureOrgMembership no-ops those).
+export async function inviteRosterStudents(
+  client: GitHubClient,
+  input: InviteRosterStudentsInput,
+): Promise<InviteRosterStudentsResult> {
+  const { org, classroom, students, onProgress } = input
+  await assertClassroomNotArchived(client, org, classroom)
+
+  const invited: string[] = []
+  const skipped: InviteRosterStudentsResult["skipped"] = []
+  const failed: InviteRosterStudentsResult["failed"] = []
+  const deferred: string[] = []
+
+  const targets = students
+    .map((s) => ({ username: s.username.trim(), github_id: s.github_id }))
+    .filter((s) => s.username)
+  if (targets.length === 0) return { invited, skipped, failed, deferred }
+
+  // Resolve the classroom team once so every fresh invite carries it (accepting
+  // the single org invite then activates team membership). A missing team id is
+  // tolerated — the invite still sends, just without the team attached.
+  let teamIds: number[] | undefined
+  try {
+    const teamId = (await resolveClassroomTeam(client, org, classroom)).id
+    teamIds = teamId ? [teamId] : undefined
+  } catch {
+    teamIds = undefined
+  }
+
+  let processed = 0
+  const bump = (username: string) => {
+    processed += 1
+    onProgress?.({ processed, total: targets.length, message: username })
+  }
+
+  // Once GitHub returns a (secondary) rate limit, stop issuing new invites:
+  // hammering a throttled endpoint for every remaining target only extends the
+  // throttle window and floods the results with spurious failures. Remaining
+  // targets are reported as `deferred` for a later retry — mirroring the
+  // pending-resend loop in RosterBulkActionsBar, which breaks on isRateLimited.
+  let rateLimited = false
+
+  await mapWithConcurrency(targets, REPO_READ_CONCURRENCY, async (target) => {
+    const { username } = target
+    if (rateLimited) {
+      deferred.push(username)
+      bump(username)
+      return
+    }
+    try {
+      // Prefer the stored id; otherwise resolve the current account by login.
+      const inviteeId =
+        parseGitHubId(target.github_id ?? "") ??
+        (await getUser(client, username)).id
+      const result = await ensureOrgMembership(client, {
+        org,
+        username,
+        inviteeId,
+        teamIds,
+      })
+      if (result.state === "invited") invited.push(username)
+      else if (result.state === "active")
+        skipped.push({ username, reason: "already-member" })
+      else skipped.push({ username, reason: "already-pending" })
+    } catch (err) {
+      if (err instanceof GitHubAPIError && err.isRateLimited) {
+        rateLimited = true
+        deferred.push(username)
+      } else {
+        failed.push({ username, message: getErrorMessage(err) })
+      }
+    } finally {
+      bump(username)
+    }
+  })
+
+  return { invited, skipped, failed, deferred }
 }
 
 export type BulkEnrollStudentsResult = AddStudentsToClassroomResult & {
