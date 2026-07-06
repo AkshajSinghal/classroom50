@@ -36,9 +36,9 @@ import {
   resolveSelectedRows,
   selectableRows,
   selectAllState,
-  toggleRow,
   toggleSelectAll,
 } from "@/pages/orgMembers/selection"
+import { useRangeSelection } from "@/pages/orgMembers/useRangeSelection"
 import {
   ClassificationBadge,
   GitHubIdentity,
@@ -342,8 +342,13 @@ const OrgMembersPage = () => {
     [rows, selectedKeys, viewer],
   )
 
-  const handleToggleRow = (key: string) =>
-    setSelectedKeys((prev) => toggleRow(prev, key))
+  // Shift-click range selection over the rendered order. OrgMembersPage renders
+  // `filtered` flat (no grouping), so the filtered list IS the rendered order.
+  const { handleToggleRow, handleRowCheckboxClick } = useRangeSelection(
+    filtered,
+    isSelectable,
+    setSelectedKeys,
+  )
 
   // Select-all targets the currently-filtered SELECTABLE rows (self excluded),
   // without disturbing selected rows outside the current filter.
@@ -521,7 +526,10 @@ const OrgMembersPage = () => {
                               : undefined
                           }
                           checked={selectedKeys.has(row.key)}
-                          onClick={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleRowCheckboxClick(e, row.key)
+                          }}
                           onChange={() => handleToggleRow(row.key)}
                         />
                         <div className="min-w-0 flex-1">

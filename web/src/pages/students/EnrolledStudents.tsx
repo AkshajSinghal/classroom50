@@ -35,9 +35,9 @@ import {
   resolveSelectedRows,
   selectableRows,
   selectAllState,
-  toggleRow,
   toggleSelectAll,
 } from "@/pages/orgMembers/selection"
+import { useRangeSelection } from "@/pages/orgMembers/useRangeSelection"
 import { rosterRowToMemberRow, rosterRowInitials } from "@/util/memberRow"
 import RosterMemberModal from "@/pages/students/RosterMemberModal"
 import RosterBulkActionsBar, {
@@ -217,10 +217,26 @@ const EnrolledStudents = ({
     selectableFiltered,
     selectedKeys,
   )
-  const handleToggleRow = (key: string) =>
-    setSelectedKeys((prev) => toggleRow(prev, key))
   const handleToggleSelectAll = () =>
     setSelectedKeys((prev) => toggleSelectAll(selectableFiltered, prev))
+
+  // group-by-section reorders rows into buckets, so a shift-range must span
+  // that rendered order, not the flat filtered list.
+  const renderedOrder = useMemo(
+    () =>
+      groupBySection && hasSectionsInFiltered
+        ? filteredBySection.flatMap((g) => g.students)
+        : filtered,
+    [groupBySection, hasSectionsInFiltered, filteredBySection, filtered],
+  )
+
+  // Shift-click range selection over the rendered order (group-by-section
+  // aware), so a shift-range fills the span the user actually sees.
+  const { handleToggleRow, handleRowCheckboxClick } = useRangeSelection(
+    renderedOrder,
+    isSelectable,
+    setSelectedKeys,
+  )
 
   // Status-filter options; hide "Pending" when invites are owner-only and this
   // viewer can't read them (avoids a dead, always-empty filter).
@@ -412,7 +428,10 @@ const EnrolledStudents = ({
           disabled={selfRow}
           title={selfRow ? t("students.bulk.selfNotSelectable") : undefined}
           checked={selectedKeys.has(row.key)}
-          onClick={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation()
+            handleRowCheckboxClick(e, row.key)
+          }}
           onChange={() => handleToggleRow(row.key)}
         />
         <div className="min-w-0 flex-1">
