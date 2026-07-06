@@ -11,8 +11,14 @@ import {
   useInvalidateTeamRoster,
   useSeedTeamMember,
 } from "@/hooks/useTeamRoster"
-import { enrollStudentInClassroom } from "@/hooks/github/mutations"
-import { inviteByEmail } from "@/api/mutations/students"
+import {
+  enrollStudentInClassroom,
+  getErrorMessage,
+} from "@/hooks/github/mutations"
+import {
+  inviteByEmail,
+  StudentAlreadyEnrolledError,
+} from "@/api/mutations/students"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { isValidEmail } from "@/util/orgMembership"
 import { splitName, toStudent } from "@/util/roster"
@@ -126,6 +132,19 @@ const AddStudent = ({ org, classroom, open, onClose }: AddStudentProps) => {
         invalidateTeamRoster()
       }
     },
+    onError: (err, value) => {
+      // Surface every failure as a non-blocking warning, keeping the modal and
+      // form intact so the teacher can fix the entry or add someone else.
+      setSuccess("")
+      const label = value.username.trim() || value.email.trim()
+      if (err instanceof StudentAlreadyEnrolledError) {
+        setWarning(t("students.alreadyEnrolled", { label: err.login }))
+        return
+      }
+      setWarning(
+        t("students.addFailed", { label, message: getErrorMessage(err) }),
+      )
+    },
   })
 
   const form = useForm({
@@ -158,7 +177,9 @@ const AddStudent = ({ org, classroom, open, onClose }: AddStudentProps) => {
     onSubmit: async ({ value }) => {
       setWarning("")
       setSuccess("")
-      await addMutation.mutateAsync(value)
+      // onError already surfaces failures; swallow the rejection so it isn't
+      // also recorded as a form-level error.
+      await addMutation.mutateAsync(value).catch(() => {})
     },
   })
 
