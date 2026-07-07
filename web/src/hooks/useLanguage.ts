@@ -6,8 +6,10 @@ import {
   availableBuiltInLangs,
   availableLangs as readAvailableLangs,
   commitPack,
+  commitPreview,
   installedCodes as readInstalledCodes,
   packCoverages,
+  packSources,
   prepareFromBuiltIn,
   prepareFromFile,
   prepareFromUrl,
@@ -49,8 +51,10 @@ export function useLanguage() {
     prepareFromBuiltIn,
     availableBuiltInLangs,
     commitPack,
+    commitPreview,
     removePack,
     packCoverages,
+    packSources,
   }
 }
 

@@ -3,7 +3,6 @@ import {
   Check,
   ChevronRight,
   Copy,
-  Download,
   Loader2,
   Trash2,
   Upload,
@@ -12,18 +11,18 @@ import {
 import { useTranslation } from "react-i18next"
 
 import { useLanguage } from "@/hooks/useLanguage"
+import { useLanguageRegistry } from "@/hooks/useLanguageRegistry"
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
 import {
   BASE_LANG,
   LanguagePackError,
   type PackPreview,
-  type RegistryLanguage,
   UndetectableCodeError,
   languageLabel,
   shareUrlForLang,
 } from "@/i18n/customLocale"
 
-type AccordionSectionId = "share" | "installed" | "add" | "install"
+type AccordionSectionId = "share" | "installed" | "install"
 
 // Settings UI for language packs. Uploading/fetching only *prepares* a pack
 // (parse + preview); nothing applies until the user confirms.
@@ -40,12 +39,16 @@ export const LanguageSwitcher = ({
     setLang,
     prepareFromFile,
     prepareFromUrl,
-    prepareFromBuiltIn,
-    availableBuiltInLangs,
-    commitPack,
+    commitPreview,
     removePack,
     packCoverages,
+    packSources,
   } = useLanguage()
+  const {
+    offered,
+    error: registryError,
+    installAndActivate,
+  } = useLanguageRegistry()
 
   const [code, setCode] = useState("")
   const [url, setUrl] = useState("")
@@ -57,13 +60,12 @@ export const LanguageSwitcher = ({
   const [openSection, setOpenSection] = useState<AccordionSectionId | null>(
     null,
   )
-  const [registry, setRegistry] = useState<RegistryLanguage[] | null>(null)
-  const [registryBusy, setRegistryBusy] = useState(false)
-  const [registryError, setRegistryError] = useState<string | null>(null)
-  const [preparingCode, setPreparingCode] = useState<string | null>(null)
   const [shareCodeOverride, setShareCodeOverride] = useState<string | null>(
     null,
   )
+  // Set while the active-language dropdown installs a not-yet-installed
+  // registry pack, so the select can show it's working and stay disabled.
+  const [installingSelected, setInstallingSelected] = useState(false)
   // Synchronous re-entry lock owned by runPrepare (see there for why).
   const preparingRef = useRef(false)
 
@@ -78,18 +80,12 @@ export const LanguageSwitcher = ({
     }
   }
 
-  const runPrepare = async (
-    prepare: () => Promise<PackPreview>,
-    // Accordion section this prepare belongs to; kept open on preview/error so
-    // the resulting card stays tied to its origin (cards render below all
-    // sections, and a detached preview is confusing).
-    section: "add" | "install",
-  ) => {
-    // Synchronous re-entry lock shared by all prepare entry points (file, URL,
-    // built-in). `busy` is async React state, so a fast second click or an
-    // overlapping prepare would race two fetches over the shared preview and let
-    // the last to resolve win — installing a pack the user didn't last choose.
-    // The ref flips immediately.
+  const runPrepare = async (prepare: () => Promise<PackPreview>) => {
+    // Synchronous re-entry lock shared by the file and URL prepare entry points.
+    // `busy` is async React state, so a fast second click or an overlapping
+    // prepare would race two fetches over the shared preview and let the last to
+    // resolve win — installing a pack the user didn't last choose. The ref flips
+    // immediately.
     if (preparingRef.current) return
     preparingRef.current = true
     setError(null)
@@ -97,10 +93,12 @@ export const LanguageSwitcher = ({
     setBusy(true)
     try {
       setPreview(await prepare())
-      setOpenSection(section)
+      // Keep the install section open so its preview card (rendered below all
+      // sections) stays tied to its origin.
+      setOpenSection("install")
     } catch (err) {
       showError(err)
-      setOpenSection(section)
+      setOpenSection("install")
     } finally {
       setBusy(false)
       preparingRef.current = false
@@ -111,10 +109,7 @@ export const LanguageSwitcher = ({
     const file = event.target.files?.[0]
     event.target.value = "" // allow re-selecting the same file
     if (!file) return
-    await runPrepare(
-      () => prepareFromFile(file, code.trim() || undefined),
-      "install",
-    )
+    await runPrepare(() => prepareFromFile(file, code.trim() || undefined))
   }
 
   const handleUrl = async () => {
@@ -122,29 +117,7 @@ export const LanguageSwitcher = ({
       setError(t("language.errorUrlRequired"))
       return
     }
-    await runPrepare(
-      () => prepareFromUrl(url.trim(), code.trim() || undefined),
-      "install",
-    )
-  }
-
-  // Lazily load the registry when Browse first opens; every language the
-  // manifest lists is offered (publish only lists deployed packs).
-  const loadRegistry = async () => {
-    if (registry || registryBusy) return
-    setRegistryBusy(true)
-    setRegistryError(null)
-    try {
-      setRegistry(await availableBuiltInLangs())
-    } catch (err) {
-      setRegistryError(
-        err instanceof LanguagePackError
-          ? err.message
-          : t("language.errorRegistry"),
-      )
-    } finally {
-      setRegistryBusy(false)
-    }
+    await runPrepare(() => prepareFromUrl(url.trim(), code.trim() || undefined))
   }
 
   // Controlled accordion: driving native <details> via its toggle event fights
@@ -155,19 +128,28 @@ export const LanguageSwitcher = ({
     section: AccordionSectionId,
   ) => {
     event.preventDefault()
-    const next = openSection === section ? null : section
-    setOpenSection(next)
-    if (next === "add") void loadRegistry()
+    setOpenSection(openSection === section ? null : section)
   }
 
-  const handleBuiltIn = async (builtInCode: string) => {
-    // runPrepare owns the re-entry lock; set preparingCode for the per-row spinner.
+  // Selecting a language in the active dropdown: installed packs switch
+  // instantly; a registry code that isn't installed yet is downloaded,
+  // installed as a "registry" pack (so it auto-updates), then activated.
+  const handleSelectLang = async (code: string) => {
+    if (availableLangs.includes(code)) {
+      await setLang(code)
+      return
+    }
     if (preparingRef.current) return
-    setPreparingCode(builtInCode)
+    preparingRef.current = true
+    setInstallingSelected(true)
+    setError(null)
     try {
-      await runPrepare(() => prepareFromBuiltIn(builtInCode), "add")
+      await installAndActivate(code)
+    } catch (err) {
+      showError(err)
     } finally {
-      setPreparingCode(null)
+      setInstallingSelected(false)
+      preparingRef.current = false
     }
   }
 
@@ -175,11 +157,7 @@ export const LanguageSwitcher = ({
     if (!preview) return
     setBusy(true)
     try {
-      await commitPack(preview.code, preview.bundle, {
-        source: preview.source,
-        version: preview.version,
-        hash: preview.hash,
-      })
+      await commitPreview(preview)
       setPreview(null)
       setCode("")
       setUrl("")
@@ -216,11 +194,22 @@ export const LanguageSwitcher = ({
     [installedLangs, packCoverages],
   )
 
-  // Registry languages not already installed — the ones worth offering.
-  const offered = useMemo(() => {
-    const installedSet = new Set(installedLangs)
-    return (registry ?? []).filter((l) => !installedSet.has(l.code))
-  }, [installedLangs, registry])
+  const sources = useMemo(
+    () => (installedLangs.length > 0 ? packSources() : {}),
+    [installedLangs, packSources],
+  )
+
+  // Options for the active-language dropdown: everything already available
+  // (base + installed packs) plus registry languages not yet installed
+  // (`offered`). The latter carry `install: true` so selecting one downloads
+  // before switching.
+  const langOptions = useMemo(
+    () => [
+      ...availableLangs.map((code) => ({ code, install: false })),
+      ...offered.map((l) => ({ code: l.code, install: true })),
+    ],
+    [availableLangs, offered],
+  )
 
   return (
     <div className="flex flex-col gap-5">
@@ -234,16 +223,34 @@ export const LanguageSwitcher = ({
           id="lang-select"
           className="select select-bordered w-full"
           value={lang}
-          onChange={(e) => void setLang(e.target.value)}
+          onChange={(e) => void handleSelectLang(e.target.value)}
+          disabled={installingSelected}
         >
-          {availableLangs.map((c) => (
+          {langOptions.map(({ code: c, install }) => (
             <option key={c} value={c}>
               {c === BASE_LANG
                 ? t("language.baseName")
-                : languageLabel(c, lang)}
+                : install
+                  ? t("language.optionDownload", {
+                      language: languageLabel(c, lang),
+                    })
+                  : languageLabel(c, lang)}
             </option>
           ))}
         </select>
+        {installingSelected ? (
+          <p className="flex items-center gap-2 text-xs text-base-content/70">
+            <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+            {t("language.browseLoading")}
+          </p>
+        ) : (
+          <p className="text-xs text-base-content/70">
+            {t("language.activeHint")}
+          </p>
+        )}
+        {registryError && (
+          <p className="text-xs text-error">{t("language.errorRegistry")}</p>
+        )}
       </div>
 
       <AccordionSection
@@ -272,7 +279,7 @@ export const LanguageSwitcher = ({
                 resetShareCopied()
               }}
             >
-              {availableLangs.map((c) => (
+              {langOptions.map(({ code: c }) => (
                 <option key={c} value={c}>
                   {c === BASE_LANG
                     ? t("language.baseName")
@@ -307,103 +314,6 @@ export const LanguageSwitcher = ({
                 : t("language.shareCopy")}
             </button>
           </div>
-        </div>
-      </AccordionSection>
-
-      {installedLangs.length > 0 && (
-        <AccordionSection
-          section="installed"
-          title={t("language.installedTitle")}
-          open={openSection === "installed"}
-          onToggle={toggleSection}
-        >
-          <ul className="menu bg-base-200 rounded-box max-h-56 w-full flex-nowrap gap-1 overflow-y-auto">
-            {installedLangs.map((c) => {
-              const cov = coverages[c]
-              return (
-                <li key={c}>
-                  <div className="flex flex-row items-center justify-between">
-                    <span className="flex items-center gap-2">
-                      {languageLabel(c, lang)}
-                      {cov !== undefined && cov < 1 && (
-                        <span className="badge badge-ghost badge-sm">
-                          {Math.round(cov * 100)}%
-                        </span>
-                      )}
-                    </span>
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-xs"
-                      aria-label={t("language.removePack", { code: c })}
-                      onClick={() => removePack(c)}
-                    >
-                      <Trash2 className="size-4" aria-hidden="true" />
-                    </button>
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
-        </AccordionSection>
-      )}
-
-      <AccordionSection
-        section="add"
-        title={t("language.browseTitle")}
-        open={openSection === "add"}
-        onToggle={toggleSection}
-      >
-        <div className="flex flex-col gap-3">
-          <p className="text-xs text-base-content/70">
-            {t("language.browseHint")}
-          </p>
-
-          {registryBusy && (
-            <div className="flex items-center gap-2 text-sm text-base-content/70">
-              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-              {t("language.browseLoading")}
-            </div>
-          )}
-
-          {registryError && (
-            <div className="alert alert-error" role="alert">
-              <span className="text-sm">{registryError}</span>
-            </div>
-          )}
-
-          {!registryBusy &&
-            !registryError &&
-            registry !== null &&
-            offered.length === 0 && (
-              <p className="text-sm text-base-content/70">
-                {t("language.browseEmpty")}
-              </p>
-            )}
-
-          {offered.length > 0 && (
-            <ul className="menu bg-base-200 rounded-box max-h-56 w-full flex-nowrap gap-1 overflow-y-auto">
-              {offered.map((l) => (
-                <li key={l.code}>
-                  <button
-                    type="button"
-                    className="flex flex-row items-center justify-between"
-                    onClick={() => void handleBuiltIn(l.code)}
-                    disabled={busy}
-                  >
-                    <span>{languageLabel(l.code, lang)}</span>
-                    {busy && preparingCode === l.code ? (
-                      <Loader2
-                        className="size-4 animate-spin"
-                        aria-hidden="true"
-                      />
-                    ) : (
-                      <Download className="size-4" aria-hidden="true" />
-                    )}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
         </div>
       </AccordionSection>
 
@@ -473,6 +383,57 @@ export const LanguageSwitcher = ({
           </div>
         </div>
       </AccordionSection>
+
+      {installedLangs.length > 0 && (
+        <AccordionSection
+          section="installed"
+          title={t("language.installedTitle")}
+          open={openSection === "installed"}
+          onToggle={toggleSection}
+        >
+          <ul className="menu bg-base-200 rounded-box max-h-56 w-full flex-nowrap gap-1 overflow-y-auto">
+            {installedLangs.map((c) => {
+              const cov = coverages[c]
+              const source = sources[c]
+              return (
+                <li key={c}>
+                  <div className="flex flex-row items-center justify-between">
+                    <span className="flex items-center gap-2">
+                      {languageLabel(c, lang)}
+                      {source && (
+                        <span
+                          className={`badge badge-sm ${
+                            source === "registry"
+                              ? "badge-ghost"
+                              : "badge-outline"
+                          }`}
+                        >
+                          {source === "registry"
+                            ? t("language.sourceRegistry")
+                            : t("language.sourceUser")}
+                        </span>
+                      )}
+                      {cov !== undefined && cov < 1 && (
+                        <span className="badge badge-ghost badge-sm">
+                          {Math.round(cov * 100)}%
+                        </span>
+                      )}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-xs"
+                      aria-label={t("language.removePack", { code: c })}
+                      onClick={() => removePack(c)}
+                    >
+                      <Trash2 className="size-4" aria-hidden="true" />
+                    </button>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        </AccordionSection>
+      )}
 
       {preview && (
         <div className="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 p-4">
