@@ -18,6 +18,7 @@ import Breadcrumb from "@/components/breadcrumb"
 import PageHeader from "@/components/PageHeader"
 import PageShell from "@/components/PageShell"
 import MissingParams from "@/components/MissingParams"
+import { Button, Card, Spinner } from "@/components/ui"
 import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import SubmissionsTable from "@/pages/submissions/SubmissionsTable"
 import SubmissionsControls from "@/pages/submissions/SubmissionsControls"
@@ -87,9 +88,10 @@ const CopyIconButton = ({
   onCopy: (e: React.MouseEvent<HTMLButtonElement>) => void
   label: string
 }) => (
-  <button
-    type="button"
-    className={`btn ${copied ? "btn-success" : "btn-primary"} btn-sm btn-outline mr-2`}
+  <Button
+    variant={copied ? "success" : "outline"}
+    size="sm"
+    className={copied ? "btn-outline mr-2" : "mr-2"}
     onClick={onCopy}
     aria-label={label}
     title={label}
@@ -99,7 +101,7 @@ const CopyIconButton = ({
     ) : (
       <Copy aria-hidden="true" className="size-4" />
     )}
-  </button>
+  </Button>
 )
 
 // Bordered stat card with an uppercase label; body varies per stat.
@@ -110,14 +112,14 @@ const StatCard = ({
   label: string
   children: React.ReactNode
 }) => (
-  <div className="card bg-base-100 rounded-xl border border-base-300">
-    <div className="card-body gap-1 p-4">
+  <Card radius="xl" shadow={false}>
+    <Card.Body className="gap-1 p-4">
       <label className="text-xs uppercase tracking-wide text-base-content/70">
         {label}
       </label>
       {children}
-    </div>
-  </div>
+    </Card.Body>
+  </Card>
 )
 
 const SubmissionsPageContent = () => {
@@ -460,7 +462,6 @@ const SubmissionsPageContent = () => {
           org={org}
           classroom={classroom}
           hasRosterRows={emptyRoster.hasRosterRows}
-          className="mt-4"
         />
       )}
       {rosterError && (
@@ -489,50 +490,47 @@ const SubmissionsPageContent = () => {
           onRetry={() => refetchScores()}
         />
       )}
-      <div className="mb-8">
-        <PageHeader
-          title={assignmentInfo?.name}
-          subtitle={
-            <div className="flex flex-wrap items-center gap-2">
-              <span>
-                {assignmentInfo?.due
-                  ? t("submissions.dueDate", {
-                      date: formatDueDateTime(assignmentInfo.due),
-                    })
-                  : t("submissions.noDueDate")}
+      <PageHeader
+        title={assignmentInfo?.name}
+        subtitle={
+          <div className="flex flex-wrap items-center gap-2">
+            <span>
+              {assignmentInfo?.due
+                ? t("submissions.dueDate", {
+                    date: formatDueDateTime(assignmentInfo.due),
+                  })
+                : t("submissions.noDueDate")}
+            </span>
+            {lateCount > 0 && (
+              <span className="badge badge-sm badge-error badge-soft">
+                {t("submissions.lateBadge", { count: lateCount })}
               </span>
-              {lateCount > 0 && (
-                <span className="badge badge-sm badge-error badge-soft">
-                  {t("submissions.lateBadge", { count: lateCount })}
-                </span>
-              )}
-              {assignmentInfo?.template && (
-                <GitHubLink
-                  href={githubTemplateRepoUrl(
-                    assignmentInfo.template.owner,
-                    assignmentInfo.template.repo,
-                    assignmentInfo.template.branch,
-                  )}
-                  label={t("submissions.viewSourceRepo")}
-                  title={`${assignmentInfo.template.owner}/${assignmentInfo.template.repo}`}
-                />
-              )}
-            </div>
-          }
-          action={
-            <button
-              type="button"
-              className="btn btn-outline"
-              onClick={downloadScoresCsv}
-              disabled={!scoresInfo.length && !nonSubmitters.length}
-            >
-              <HardDriveDownload aria-hidden="true" />{" "}
-              {t("submissions.downloadCsv")}
-            </button>
-          }
-        />
-      </div>
-      <div className="mb-4 rounded-box border border-info/20 bg-info/5">
+            )}
+            {assignmentInfo?.template && (
+              <GitHubLink
+                href={githubTemplateRepoUrl(
+                  assignmentInfo.template.owner,
+                  assignmentInfo.template.repo,
+                  assignmentInfo.template.branch,
+                )}
+                label={t("submissions.viewSourceRepo")}
+                title={`${assignmentInfo.template.owner}/${assignmentInfo.template.repo}`}
+              />
+            )}
+          </div>
+        }
+        action={
+          <Button
+            variant="outline"
+            onClick={downloadScoresCsv}
+            disabled={!scoresInfo.length && !nonSubmitters.length}
+          >
+            <HardDriveDownload aria-hidden="true" />{" "}
+            {t("submissions.downloadCsv")}
+          </Button>
+        }
+      />
+      <div className="rounded-box border border-info/20 bg-info/5">
         {/* Action bar: standing note left, the two actions + a single
                 contextual View link right. */}
         <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -556,9 +554,9 @@ const SubmissionsPageContent = () => {
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              className="btn btn-sm btn-outline"
+            <Button
+              variant="outline"
+              size="sm"
               disabled={regrading || collecting || emptyRoster.show}
               title={
                 emptyRoster.show
@@ -569,24 +567,20 @@ const SubmissionsPageContent = () => {
                       ? t("submissions.regradeAll.titleRegrading")
                       : t("submissions.regradeAll.title")
               }
+              loading={regradeAllActive}
+              loadingLabel={t("submissions.regradeAll.active")}
               onClick={() => {
                 if (regrading || collecting || emptyRoster.show) return
                 setRegradeConfirmOpen(true)
               }}
             >
-              {regradeAllActive && (
-                <span
-                  className="loading loading-spinner loading-xs"
-                  aria-hidden="true"
-                />
-              )}
               {regradeAllActive
                 ? t("submissions.regradeAll.active")
                 : t("submissions.regradeAll.label")}
-            </button>
-            <button
-              type="button"
-              className="btn btn-sm btn-primary"
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
               disabled={collecting || regrading || emptyRoster.show}
               title={
                 emptyRoster.show
@@ -595,21 +589,17 @@ const SubmissionsPageContent = () => {
                     ? t("submissions.collect.titleRegrading")
                     : t("submissions.collect.title")
               }
+              loading={collecting}
+              loadingLabel={t("submissions.collect.active")}
               onClick={() => {
                 if (collecting || regrading || emptyRoster.show) return
                 collectScores.collect()
               }}
             >
-              {collecting && (
-                <span
-                  className="loading loading-spinner loading-xs"
-                  aria-hidden="true"
-                />
-              )}
               {collecting
                 ? t("submissions.collect.active")
                 : t("submissions.collect.label")}
-            </button>
+            </Button>
             <a
               className="btn btn-sm btn-ghost"
               href={viewRun?.html_url || viewWorkflowUrl}
@@ -636,11 +626,8 @@ const SubmissionsPageContent = () => {
               </span>
             )}
             {collectScores.phase === "running" && (
-              <span className="flex items-center gap-1.5 text-base-content/70">
-                <span
-                  className="loading loading-spinner loading-xs"
-                  aria-hidden="true"
-                />
+              <span className="flex items-center gap-1.5 text-info">
+                <Spinner size="xs" />
                 {t("submissions.collect.statusRunning")}
               </span>
             )}
@@ -673,7 +660,7 @@ const SubmissionsPageContent = () => {
                 ? "border-error/20 text-error"
                 : regradeAll.phase === "completed"
                   ? "border-success/20 text-success"
-                  : "border-warning/20 text-base-content/70"
+                  : "border-info/20 text-info"
             }`}
             role="status"
             aria-live="polite"
@@ -683,10 +670,7 @@ const SubmissionsPageContent = () => {
             )}
             {regradeAll.phase === "running" && (
               <span className="flex items-center gap-1.5">
-                <span
-                  className="loading loading-spinner loading-xs"
-                  aria-hidden="true"
-                />
+                <Spinner size="xs" />
                 {t("submissions.regradeAll.statusRunning")}
               </span>
             )}
@@ -717,7 +701,7 @@ const SubmissionsPageContent = () => {
       </div>
       <details
         open
-        className="card bg-base-100 rounded-xl border border-base-300 mb-4 group"
+        className="card bg-base-100 rounded-xl border border-base-300 group"
       >
         <summary className="card-body flex-row items-center gap-3 cursor-pointer list-none py-4">
           <div className="rounded-xl bg-primary/10 p-2.5 text-primary">
@@ -773,7 +757,7 @@ const SubmissionsPageContent = () => {
           </details>
         </div>
       </details>{" "}
-      <div className="grid grid-cols-2 gap-4 mb-6 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard
           label={
             isGroupAssignment
@@ -872,12 +856,13 @@ const SubmissionsPageContent = () => {
           </StatCard>
         ) : null}
       </div>
-      <div className="mb-2 flex items-center justify-end gap-1 text-sm text-base-content/70">
+      <div className="flex items-center justify-end gap-1 text-sm text-base-content/70">
         <span>{t("submissions.updated", { when: scoresLastUpdated })}</span>
 
-        <button
-          type="button"
-          className="btn btn-ghost btn-xs btn-circle"
+        <Button
+          variant="ghost"
+          size="xs"
+          shape="circle"
           disabled={scoresFetching}
           onClick={() => refetchScores()}
           aria-label={t("submissions.refresh")}
@@ -888,7 +873,7 @@ const SubmissionsPageContent = () => {
             size={14}
             className={scoresFetching ? "animate-spin" : ""}
           />
-        </button>
+        </Button>
       </div>
       <SubmissionsControls
         query={query}

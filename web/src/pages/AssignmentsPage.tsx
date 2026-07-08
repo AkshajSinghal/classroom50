@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import AssignmentsTable from "@/pages/assignments/AssignmentsTable"
+import { Button } from "@/components/ui"
 import Breadcrumb from "@/components/breadcrumb"
 import PageHeader from "@/components/PageHeader"
 import PageShell from "@/components/PageShell"
@@ -45,13 +46,14 @@ const NewAssignmentButton = ({
           {t("assignments.newButton.assignment")}
         </Link>
         <div className="dropdown dropdown-end join-item">
-          <button
+          <Button
+            variant="primary"
             tabIndex={0}
-            className="btn btn-primary join-item h-full border-l border-primary-content/20 px-2"
+            className="join-item h-full border-l border-primary-content/20 px-2"
             aria-label={t("assignments.newButton.moreOptions")}
           >
             <ChevronDown aria-hidden="true" className="size-4" />
-          </button>
+          </Button>
           <ul
             tabIndex={0}
             className="dropdown-content menu z-10 mt-1 w-max rounded-box border border-base-content/5 bg-base-100 p-1 shadow"
@@ -111,39 +113,37 @@ const TeacherAssignmentsView = ({
   const emptyRoster = useEmptyRosterWarning(org, classroom)
 
   return (
-    <div>
-      <div className="mb-8">
-        <PageHeader
-          loading={classroomLoading}
-          title={
-            <span className="flex items-center gap-2">
-              {classroomData?.name || classroomData?.short_name || classroom}
-              {myRoleLabel ? (
-                <span className="badge badge-soft badge-primary badge-sm align-middle">
-                  {myRoleLabel}
-                </span>
-              ) : null}
-            </span>
-          }
-          subtitle={
-            <>
-              {classroomData?.term ? `${classroomData?.term} • ` : ""}
-              {studentsLoading
-                ? "…"
-                : t("assignments.studentCount", { count: students.length })}
-            </>
-          }
-          action={
-            archived ? (
-              <span className="badge badge-soft badge-neutral">
-                {t("assignments.archived")}
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        loading={classroomLoading}
+        title={
+          <span className="flex items-center gap-2">
+            {classroomData?.name || classroomData?.short_name || classroom}
+            {myRoleLabel ? (
+              <span className="badge badge-soft badge-primary badge-sm align-middle">
+                {myRoleLabel}
               </span>
-            ) : (
-              <NewAssignmentButton org={org} classroom={classroom} />
-            )
-          }
-        />
-      </div>
+            ) : null}
+          </span>
+        }
+        subtitle={
+          <>
+            {classroomData?.term ? `${classroomData?.term} • ` : ""}
+            {studentsLoading
+              ? "…"
+              : t("assignments.studentCount", { count: students.length })}
+          </>
+        }
+        action={
+          archived ? (
+            <span className="badge badge-soft badge-neutral">
+              {t("assignments.archived")}
+            </span>
+          ) : (
+            <NewAssignmentButton org={org} classroom={classroom} />
+          )
+        }
+      />
       {archived ? (
         <ArchivedClassroomNotice>
           {t("assignments.archivedNotice_prefix")}{" "}
@@ -161,7 +161,6 @@ const TeacherAssignmentsView = ({
           org={org}
           classroom={classroom}
           hasRosterRows={emptyRoster.hasRosterRows}
-          className="mb-4"
         />
       ) : null}
       <AssignmentsTable
@@ -185,19 +184,17 @@ const StudentAssignmentsView = ({
 }) => {
   const { t } = useTranslation()
   return (
-    <div>
-      <div className="mb-8">
-        <PageHeader
-          title={t("assignments.studentHeading")}
-          subtitle={
-            <>
-              {t("assignments.studentViewAll_prefix")}{" "}
-              <span className="font-bold">{classroom}</span>{" "}
-              {t("assignments.studentViewAll_suffix")}
-            </>
-          }
-        />
-      </div>
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title={t("assignments.studentHeading")}
+        subtitle={
+          <>
+            {t("assignments.studentViewAll_prefix")}{" "}
+            <span className="font-bold">{classroom}</span>{" "}
+            {t("assignments.studentViewAll_suffix")}
+          </>
+        }
+      />
       <OrgRepos org={org} classroom={classroom} />
     </div>
   )
@@ -217,7 +214,7 @@ const AssignmentsPage = () => {
     <PageShell selected="assignments">
       <Breadcrumb endpoint={t("nav.assignments")} />
       {roleLoading && (
-        <div className="mt-8 space-y-4">
+        <div className="space-y-4">
           <div className="skeleton skeleton-shimmer h-6 w-48" />
           <div className="skeleton skeleton-shimmer h-4 w-32" />
           <div className="skeleton skeleton-shimmer h-64 w-full rounded-box" />
