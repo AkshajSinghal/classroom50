@@ -92,6 +92,9 @@ export type ButtonProps = CommonProps &
     rel?: string
     download?: AnchorHTMLAttributes<HTMLAnchorElement>["download"]
     ref?: Ref<HTMLButtonElement | HTMLAnchorElement>
+    // Defaults to "button" (a bare <button> defaults to "submit" inside a
+    // form); a submit button must pass type="submit" explicitly.
+    type?: ButtonHTMLAttributes<HTMLButtonElement>["type"]
   }
 
 export function Button({

@@ -92,6 +92,19 @@ export default defineConfig([
           message:
             'Prefer the accessible <Spinner> component over a bare `loading loading-spinner` span (it adds role="status" + an sr-only label). In-button spinners may stay inline if the button already has an accessible name.',
         },
+        {
+          // Warn when a <Button> sits in a form without an explicit `type`: a
+          // bare <button> defaults to submit, our <Button> defaults to "button",
+          // so an unmarked one is a likely silent no-op submit. Advisory only —
+          // the Button default + form-submit tests are the real enforcement.
+          // Two deliberate limits: matches <form> AND `<Card as="form">` (the
+          // app uses the latter); same-file lexical only, so a <Button> in a
+          // child component rendered inside a form isn't reachable here.
+          selector:
+            ":matches(JSXElement[openingElement.name.name='form'], JSXElement:has(JSXAttribute[name.name='as'][value.value='form'])) JSXOpeningElement[name.name='Button']:not(:has(JSXAttribute[name.name=/^(type|as|href)$/]))",
+          message:
+            'A <Button> inside a <form> needs an explicit `type`: add type="submit" for the submit action or type="button" for a click handler. The <Button> default is "button", which silently disables implicit form submit.',
+        },
       ],
     },
   },
