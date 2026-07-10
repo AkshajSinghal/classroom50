@@ -18,6 +18,8 @@ import { useGitHubClient } from "@/context/github/GitHubProvider"
 import RequireTeacher from "@/components/RequireTeacher"
 import { CONFIG_REPO } from "@/hooks/github/orgChecks"
 import { toStudent } from "@/util/roster"
+import { Badge } from "@/components/ui"
+import { ROLE_BADGE_TONE } from "@/util/rosterRoles"
 import { useTranslation } from "react-i18next"
 
 const StudentListContent = ({
@@ -38,27 +40,64 @@ const StudentListContent = ({
   const [uploadOpen, setUploadOpen] = useState(false)
   const [inviteOpen, setInviteOpen] = useState(false)
 
-  // Count enrolled from the team roster (same source as EnrolledStudents), so
-  // header and list agree. Enrollment is team membership, not the CSV.
+  // Counts from the team roster (same source as EnrolledStudents), so header
+  // and list agree. Enrollment is team membership, not the CSV. The header shows
+  // one union total (distinct enrolled people across the student + staff teams —
+  // counts.enrolled, already de-duplicated per person) followed by a per-role
+  // breakdown (roleCounts tallies each role a person holds).
   const {
     counts,
+    roleCounts,
     isLoading: rosterLoading,
     isError: rosterError,
   } = useTeamRoster(org, classroom, students)
   const countReady = !rosterLoading && !rosterError
-  const enrolledCount = counts.enrolled
+  // Per-role breakdown badges after the member total; each shown only when the
+  // class has at least one enrolled member in that role.
+  const showStudentCount = roleCounts.student > 0
+  const showInstructorCount = roleCounts.instructor > 0
+  const showTaCount = roleCounts.ta > 0
 
   return (
     <>
       <PageHeader
-        title={t("nav.students")}
+        title={t("nav.roster")}
         subtitle={
-          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span>
-              {countReady
-                ? t("students.enrolledCount", { count: enrolledCount })
-                : t("students.enrolledCountLoading")}
-            </span>
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {countReady ? (
+              <>
+                <Badge tone="neutral" ghost className="shrink-0">
+                  {t("students.membersEnrolledCount", {
+                    count: counts.enrolled,
+                  })}
+                </Badge>
+                {showStudentCount ? (
+                  <Badge
+                    tone={ROLE_BADGE_TONE.student}
+                    ghost
+                    className="shrink-0"
+                  >
+                    {t("students.roleStudentCount", {
+                      count: roleCounts.student,
+                    })}
+                  </Badge>
+                ) : null}
+                {showInstructorCount ? (
+                  <Badge tone={ROLE_BADGE_TONE.instructor} className="shrink-0">
+                    {t("students.instructorCount", {
+                      count: roleCounts.instructor,
+                    })}
+                  </Badge>
+                ) : null}
+                {showTaCount ? (
+                  <Badge tone={ROLE_BADGE_TONE.ta} className="shrink-0">
+                    {t("students.taCount", { count: roleCounts.ta })}
+                  </Badge>
+                ) : null}
+              </>
+            ) : (
+              <span>{t("students.enrolledCountLoading")}</span>
+            )}
             <span aria-hidden="true" className="text-base-content/30">
               ·
             </span>
@@ -117,12 +156,12 @@ const StudentListContent = ({
 
 const StudentListPage = () => {
   const { t } = useTranslation()
-  useDocumentTitle(t("documentTitle.students"))
+  useDocumentTitle(t("documentTitle.roster"))
   const { org = "", classroom = "" } = useParams({ strict: false })
 
   return (
-    <PageShell selected="students">
-      <Breadcrumb endpoint={t("nav.students")} />
+    <PageShell selected="roster">
+      <Breadcrumb endpoint={t("nav.roster")} />
       <RequireTeacher>
         <StudentListContent org={org} classroom={classroom} />
       </RequireTeacher>

@@ -7,6 +7,7 @@ import {
   teamMembersMissingFromCsv,
 } from "./teamRoster"
 import type { Student } from "@/types/classroom"
+import { STAFF_ROLES } from "@/types/classroom"
 import type { GitHubUser, GitHubOrgInvitation } from "@/hooks/github/types"
 
 const member = (id: number, login: string, over: Partial<GitHubUser> = {}) =>
@@ -256,6 +257,152 @@ describe("buildTeamRoster", () => {
       section: "A",
       github_id: "101",
     })
+  })
+})
+
+describe("buildTeamRoster — roles (union across student + staff teams)", () => {
+  it("tags a student-team member as student", () => {
+    const rows = buildTeamRoster({
+      members: [member(1, "stu")],
+      students: [],
+    })
+    expect(rows[0].roles).toEqual(["student"])
+  })
+
+  it("tags a staff-team member with their role", () => {
+    const rows = buildTeamRoster({
+      members: [],
+      staffMembers: { ta: [member(2, "tessa")] },
+      students: [],
+    })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ state: "enrolled", username: "tessa" })
+    expect(rows[0].roles).toEqual(["ta"])
+  })
+
+  it("unions roles for a person on both the student and instructor teams (one row)", () => {
+    const rows = buildTeamRoster({
+      members: [member(3, "prof")],
+      staffMembers: { instructor: [member(3, "prof")] },
+      students: [],
+    })
+    expect(rows).toHaveLength(1)
+    // Sorted by ROLE_RANK: instructor before student.
+    expect(rows[0].roles).toEqual(["instructor", "student"])
+  })
+
+  it("credits a staff member who is also pending elsewhere as enrolled (no dup)", () => {
+    const rows = buildTeamRoster({
+      members: [member(4, "ada")],
+      staffInvitations: { instructor: [invite({ id: 5, login: "ada" })] },
+      students: [],
+    })
+    expect(rows).toHaveLength(1)
+    expect(rows[0].state).toBe("enrolled")
+    // The stale login-invite for an active member is skipped, so no instructor
+    // role is added from it.
+    expect(rows[0].roles).toEqual(["student"])
+  })
+
+  it("tags a pending staff invite with the team's role", () => {
+    const rows = buildTeamRoster({
+      members: [],
+      staffInvitations: { ta: [invite({ id: 6, login: "newta" })] },
+      students: [],
+    })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ state: "pending", username: "newta" })
+    expect(rows[0].roles).toEqual(["ta"])
+    expect(rows[0].invitation_id).toBe(6)
+  })
+
+  it("tags an email-only pending staff invite by email", () => {
+    const rows = buildTeamRoster({
+      members: [],
+      staffInvitations: {
+        instructor: [invite({ id: 7, email: "prof@uni.edu" })],
+      },
+      students: [csvRow({ email: "prof@uni.edu", first_name: "Prof" })],
+    })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ state: "pending", first_name: "Prof" })
+    expect(rows[0].roles).toEqual(["instructor"])
+  })
+
+  it("tags a TA-team invite as TA only, not student, when GitHub also echoes it into the org-level invitations", () => {
+    // Adding a not-yet-org-member to the TA team lists them in BOTH the
+    // team-scoped invitations AND the org-level invitations (same invite id).
+    // The org-level list can only be blanket-tagged "student", so the row must
+    // resolve to ["ta"] — not ["ta","student"] and never just ["student"].
+    const rows = buildTeamRoster({
+      members: [],
+      invitations: [invite({ id: 42, login: "newta" })],
+      staffInvitations: { ta: [invite({ id: 42, login: "newta" })] },
+      students: [],
+    })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ state: "pending", username: "newta" })
+    expect(rows[0].roles).toEqual(["ta"])
+  })
+
+  it("tags an email-only staff invite echoed into org-level invitations as staff only", () => {
+    const rows = buildTeamRoster({
+      members: [],
+      invitations: [invite({ id: 43, email: "ta@uni.edu" })],
+      staffInvitations: { ta: [invite({ id: 43, email: "ta@uni.edu" })] },
+      students: [],
+    })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ state: "pending", email: "ta@uni.edu" })
+    expect(rows[0].roles).toEqual(["ta"])
+  })
+
+  it("keeps a genuine student-only pending invite as student", () => {
+    // No staff-team echo: a plain org invite is a student.
+    const rows = buildTeamRoster({
+      members: [],
+      invitations: [invite({ id: 44, login: "stu" })],
+      students: [],
+    })
+    expect(rows).toHaveLength(1)
+    expect(rows[0].roles).toEqual(["student"])
+  })
+
+  it("unions a person pending on both staff teams (instructor + ta)", () => {
+    const rows = buildTeamRoster({
+      members: [],
+      invitations: [invite({ id: 45, login: "both" })],
+      staffInvitations: {
+        instructor: [invite({ id: 45, login: "both" })],
+        ta: [invite({ id: 45, login: "both" })],
+      },
+      students: [],
+    })
+    expect(rows).toHaveLength(1)
+    // Sorted by ROLE_RANK; no spurious "student".
+    expect(rows[0].roles).toEqual(["instructor", "ta"])
+  })
+
+  it("keeps not_in_org CSV rows as student", () => {
+    const rows = buildTeamRoster({
+      members: [],
+      students: [csvRow({ username: "ghost" })],
+    })
+    expect(rows[0]).toMatchObject({ state: "not_in_org", username: "ghost" })
+    expect(rows[0].roles).toEqual(["student"])
+  })
+
+  it("includes every STAFF_ROLES role (guards STAFF_ROLES drift)", () => {
+    // One staff member per role; the roster must surface all of them. If a new
+    // staff role were added to STAFF_ROLES but the builder's fanout drifted,
+    // that role's member would be dropped and this fails.
+    const staffMembers = Object.fromEntries(
+      STAFF_ROLES.map((role, i) => [role, [member(100 + i, `staff-${role}`)]]),
+    )
+    const rows = buildTeamRoster({ members: [], staffMembers, students: [] })
+    const seen = new Set(rows.flatMap((r) => r.roles))
+    for (const role of STAFF_ROLES) expect(seen.has(role)).toBe(true)
+    expect(rows).toHaveLength(STAFF_ROLES.length)
   })
 })
 

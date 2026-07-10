@@ -8,10 +8,10 @@ import {
   X,
 } from "lucide-react"
 
-import { nameFromParts } from "@/util/students"
 import {
   Alert,
   AnimatedAlert,
+  Badge,
   Button,
   Card,
   Spinner,
@@ -34,7 +34,20 @@ import {
 } from "@/hooks/github/queries"
 import { useUpdateRosterCache } from "@/hooks/useGetStudents"
 import { useTeamRoster, useInvalidateTeamRoster } from "@/hooks/useTeamRoster"
-import type { TeamRosterRow, TeamRosterRowState } from "@/util/teamRoster"
+import type { TeamRosterRow, RosterRole } from "@/util/teamRoster"
+import { STAFF_ROLES } from "@/types/classroom"
+import {
+  ROLE_LABEL_KEY,
+  ROLE_BADGE_TONE,
+  hasStudentEnrollment,
+  primaryRole,
+} from "@/util/rosterRoles"
+import {
+  filterRosterRows,
+  NO_SECTION,
+  type RoleFilter,
+  type StatusFilter,
+} from "@/pages/students/rosterFilter"
 import { studentKey, toStudent } from "@/util/roster"
 import { isSameGitHubUser } from "@/util/students"
 import { GitHubIdentity } from "@/pages/orgMembers/memberPresentation"
@@ -42,6 +55,7 @@ import {
   resolveSelectedRows,
   selectableRows,
   selectAllState,
+  shouldWarnNoneSelectable,
   toggleSelectAll,
 } from "@/pages/orgMembers/selection"
 import { useRangeSelection } from "@/pages/orgMembers/useRangeSelection"
@@ -59,7 +73,6 @@ import { useTranslation } from "react-i18next"
 
 // Group rows by `section`, sorted by name with the unlabeled ("No section")
 // bucket last. Generic over any row with a `section` field.
-const NO_SECTION = "No section"
 export function groupStudentsBySection<T extends { section?: string }>(
   students: T[],
 ): Array<{ section: string; students: T[] }> {
@@ -78,9 +91,6 @@ export function groupStudentsBySection<T extends { section?: string }>(
     })
     .map(([section, group]) => ({ section, students: group }))
 }
-
-// Status filter values for the unified list.
-type StatusFilter = "all" | TeamRosterRowState
 
 const EnrolledStudents = ({
   students = [],
@@ -106,6 +116,7 @@ const EnrolledStudents = ({
   const [groupBySection, setGroupBySection] = useState(false)
   const [query, setQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>("all")
   const [sectionFilter, setSectionFilter] = useState<string>("all")
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
@@ -124,6 +135,7 @@ const EnrolledStudents = ({
     teamSlug,
     csvMissingCount,
     notInOrgUsernames,
+    refetch: refetchRoster,
   } = useTeamRoster(org, classroom, students)
 
   const notInOrg = useMemo(
@@ -144,13 +156,21 @@ const EnrolledStudents = ({
     invalidateInviteQueriesForOrg(queryClient, org)
 
   // A row is selectable unless it's the signed-in teacher (can't bulk-unenroll
-  // yourself), mirroring Org Members' self-exclusion.
+  // yourself), mirroring Org Members' self-exclusion. A pure staff row (no
+  // student enrollment) isn't selectable either: bulk-unenroll drops the CSV row
+  // + student-team membership, so it only applies to rows with a student
+  // enrollment. A student who is ALSO staff IS selectable — unenroll drops only
+  // their student side and leaves the staff role intact — matching the row
+  // modal's unenroll gate (both use hasStudentEnrollment) so the two never
+  // diverge (previously a student+instructor was removable in the modal but
+  // silently skipped by select-all).
   const isSelf = (row: TeamRosterRow) =>
     isSameGitHubUser(viewer ?? null, {
       github_id: row.github_id,
       username: row.username,
     })
-  const isSelectable = (row: TeamRosterRow) => !isSelf(row)
+  const isSelectable = (row: TeamRosterRow) =>
+    !isSelf(row) && hasStudentEnrollment(row)
 
   // Distinct sections present across all rows (status-independent so switching
   // status never empties the section dropdown), sorted with "No section" last.
@@ -178,22 +198,36 @@ const EnrolledStudents = ({
       ? sectionFilter
       : "all"
 
-  // Text search over username/name/email + the status and section filters.
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return rows.filter((row) => {
-      if (statusFilter !== "all" && row.state !== statusFilter) return false
-      if (effectiveSection !== "all") {
-        const section = row.section.trim() || NO_SECTION
-        if (section !== effectiveSection) return false
-      }
-      if (!q) return true
-      const name = nameFromParts(row.first_name, row.last_name)
-      return [row.username, name, row.email].some((field) =>
-        field.toLowerCase().includes(q),
-      )
-    })
-  }, [rows, query, statusFilter, effectiveSection])
+  // Role filter options: student is always offered; a staff role appears only
+  // when at least one row holds it (so a class with no TAs has no dead "TA"
+  // filter). Ordered student-first, then staff roles per the STAFF_ROLES source.
+  const roleFilterOptions = useMemo(() => {
+    const present = new Set<RosterRole>()
+    for (const row of rows) for (const role of row.roles) present.add(role)
+    return (["student", ...STAFF_ROLES] as RosterRole[]).filter((role) =>
+      present.has(role),
+    )
+  }, [rows])
+
+  // A stale role selection (the last instructor/TA was removed) falls back to
+  // "all" so the list never filters on a role no row carries.
+  const effectiveRole =
+    roleFilter !== "all" && roleFilterOptions.includes(roleFilter)
+      ? roleFilter
+      : "all"
+
+  // Text search over username/name/email + the status, role, and section
+  // filters (see filterRosterRows — extracted so the facets are unit-tested).
+  const filtered = useMemo(
+    () =>
+      filterRosterRows(rows, {
+        query,
+        statusFilter,
+        roleFilter: effectiveRole,
+        sectionFilter: effectiveSection,
+      }),
+    [rows, query, statusFilter, effectiveRole, effectiveSection],
+  )
 
   const hasSectionsInFiltered = useMemo(
     () => filtered.some((r) => r.section.trim()),
@@ -224,8 +258,21 @@ const EnrolledStudents = ({
     selectableFiltered,
     selectedKeys,
   )
-  const handleToggleSelectAll = () =>
+  const handleToggleSelectAll = () => {
+    // Select-all only ever targets selectable (student-only) rows. When the
+    // current view has rows but none are selectable — e.g. filtered to staff —
+    // the click would silently no-op, so explain why instead.
+    if (shouldWarnNoneSelectable(filtered.length, selectableFiltered.length)) {
+      notify({
+        tone: "info",
+        durationMs: 6000,
+        message: t("students.bulk.noneSelectable"),
+      })
+      return
+    }
+    if (selectableFiltered.length === 0) return
     setSelectedKeys((prev) => toggleSelectAll(selectableFiltered, prev))
+  }
 
   // group-by-section reorders rows into buckets, so a shift-range must span
   // that rendered order, not the flat filtered list.
@@ -450,6 +497,23 @@ const EnrolledStudents = ({
           />
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {(() => {
+            // Show only the person's highest-precedence role (instructor > ta >
+            // student), so a member on multiple teams reads as one primary role
+            // rather than a stack of chips. The student chip uses the neutral
+            // ghost style; staff roles use their tone.
+            const role = primaryRole(row)
+            return (
+              <Badge
+                size="sm"
+                tone={ROLE_BADGE_TONE[role]}
+                ghost={role === "student"}
+                className="shrink-0"
+              >
+                {t(ROLE_LABEL_KEY[role])}
+              </Badge>
+            )
+          })()}
           {row.section.trim() ? (
             <span className="badge badge-sm badge-info badge-soft shrink-0">
               {row.section.trim()}
@@ -613,6 +677,22 @@ const EnrolledStudents = ({
               </option>
             ))}
           </Toolbar.FilterSelect>
+          {roleFilterOptions.some((r) => r !== "student") ? (
+            <Toolbar.FilterSelect
+              selectSize="md"
+              className="w-full sm:w-auto"
+              aria-label={t("students.filterByRoleLabel")}
+              value={effectiveRole}
+              onChange={(e) => setRoleFilter(e.target.value as RoleFilter)}
+            >
+              <option value="all">{t("students.filterAllRoles")}</option>
+              {roleFilterOptions.map((role) => (
+                <option key={role} value={role}>
+                  {t(ROLE_LABEL_KEY[role])}
+                </option>
+              ))}
+            </Toolbar.FilterSelect>
+          ) : null}
           {sectionOptions.length > 0 ? (
             <Toolbar.FilterSelect
               selectSize="md"
@@ -669,15 +749,7 @@ const EnrolledStudents = ({
               <AlertTriangle aria-hidden="true" className="size-4 shrink-0" />
               {t("students.rosterLoadError")}
             </span>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() =>
-                void queryClient.invalidateQueries({
-                  queryKey: githubKeys.teamMembers(org, teamSlug),
-                })
-              }
-            >
+            <Button variant="ghost" size="sm" onClick={() => refetchRoster()}>
               <RefreshCw aria-hidden="true" className="size-4" />
               {t("students.rosterRetry")}
             </Button>

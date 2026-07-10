@@ -18,7 +18,7 @@ import type {
 } from "./types"
 import type { Assignment } from "@/types/classroom"
 import { CONFIG_REPO_MARKER_REL, ORG_GITHUB_DIR } from "@/skeleton/skeleton"
-import { GitHubAPIError } from "./errors"
+import { GitHubAPIError, retryTransientGitHubError } from "./errors"
 import {
   COLLECT_SCORES_WORKFLOW,
   REGRADE_WORKFLOW,
@@ -64,6 +64,9 @@ export const githubKeys = {
 
   teamMembers: (org: string, teamSlug: string) =>
     [...githubKeys.all, "team-members", org, teamSlug] as const,
+
+  teamInvitations: (org: string, teamSlug: string) =>
+    [...githubKeys.all, "team-invitations", org, teamSlug] as const,
 
   orgTeams: (org: string) => [...githubKeys.all, "org-teams", org] as const,
 
@@ -1069,6 +1072,48 @@ export function teamMembersQuery(
     queryFn: () => listTeamMembers(client, org, teamSlug),
     enabled: Boolean(org && teamSlug),
     staleTime: 60 * 1000,
+  })
+}
+
+// List a team's pending invitations across all pages (GET
+// /orgs/{org}/teams/{slug}/invitations). Unlike org-level invitations, these are
+// team-scoped, so a pending invite can be attributed to the classroom role whose
+// team lists it. 404 (team not created yet) -> [] like listTeamMembers; 403
+// (owner-only) propagates so callers can hide pending. `login` is null for an
+// email-only invitee (tag by email then).
+export async function listTeamInvitations(
+  client: GitHubClient,
+  org: string,
+  teamSlug: string,
+): Promise<GitHubOrgInvitation[]> {
+  try {
+    return await paginateAll<GitHubOrgInvitation>(
+      client,
+      (page) =>
+        `/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(
+          teamSlug,
+        )}/invitations?per_page=100&page=${page}`,
+    )
+  } catch (error) {
+    if (error instanceof GitHubAPIError && error.status === 404) return []
+    throw error
+  }
+}
+
+export function teamInvitationsQuery(
+  client: GitHubClient,
+  org: string,
+  teamSlug: string,
+) {
+  return queryOptions({
+    queryKey: githubKeys.teamInvitations(org, teamSlug),
+    queryFn: () => listTeamInvitations(client, org, teamSlug),
+    enabled: Boolean(org && teamSlug),
+    staleTime: 60 * 1000,
+    // 403 (owner-only) / 404 stay definitive so pendingHidden / [] resolve at
+    // once; a transient 5xx/429 self-heals rather than silently rendering zero
+    // pending for the role with no retry (the query error isn't in isError).
+    retry: retryTransientGitHubError,
   })
 }
 

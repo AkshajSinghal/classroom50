@@ -24,6 +24,7 @@ import { resendOrgInvitation, getErrorMessage } from "@/hooks/github/mutations"
 import { nameFromParts, parseGitHubId } from "@/util/students"
 import { rosterRowInitials } from "@/util/memberRow"
 import { rowToStudent, type TeamRosterRow } from "@/util/teamRoster"
+import { hasStudentEnrollment } from "@/util/rosterRoles"
 import { Button, Modal } from "@/components/ui"
 
 // Roster-owned detail modal (single native <dialog>), opened by clicking a
@@ -100,7 +101,14 @@ const RosterMemberModal = ({
   }
 
   const student = rowToStudent(row)
-  const canEdit = row.state !== "pending"
+  // A staff-only row (instructor/TA with no student enrollment) has no
+  // students.csv row and isn't on the student team — the student-roster actions
+  // (edit CSV metadata, unenroll) don't apply. Staff are managed in Settings. A
+  // person who is BOTH staff and a student keeps the student actions (they do
+  // have a student enrollment), so gate on the student enrollment, not
+  // "student is the sole role" (hasStudentEnrollment — shared with the bulk gate).
+  const staffOnly = !hasStudentEnrollment(row)
+  const canEdit = !staffOnly && row.state !== "pending"
   const displayName =
     nameFromParts(row.first_name, row.last_name) || row.username || row.email
   const displayInitials = rosterRowInitials(row)
@@ -108,6 +116,9 @@ const RosterMemberModal = ({
   // A not_in_org row is on the roster (by username) but not in the org — offer a
   // fresh org invite (id derived from username when the CSV has no github_id).
   const canInvite = row.state === "not_in_org" && Boolean(row.username)
+  // Unenroll drops a students.csv row + student-team membership — a student-only
+  // action. Hidden for a staff-only row (nothing to unenroll from the roster).
+  const canUnenroll = !staffOnly
 
   const handleInvite = async () => {
     if (resending) return
@@ -288,7 +299,7 @@ const RosterMemberModal = ({
               </Button>
             ) : null}
 
-            {!confirmingUnenroll ? (
+            {canUnenroll && !confirmingUnenroll ? (
               <Button
                 variant="ghost"
                 size="sm"
@@ -489,7 +500,11 @@ const RosterMemberModal = ({
             ) : null}
           </div>
 
-          {!canEdit ? (
+          {staffOnly ? (
+            <p className="text-sm text-base-content/70">
+              {t("students.staffManagedInSettings")}
+            </p>
+          ) : !canEdit ? (
             <p className="text-sm text-base-content/70">
               {t("students.pendingNoEdit")}
             </p>
