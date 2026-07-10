@@ -32,7 +32,7 @@ export const normalizeOnBlur = (
 }
 
 // Format a Date as a `datetime-local` input value (local wall-clock, no zone).
-export const toDatetimeLocalValue = (date: Date) => {
+const toDatetimeLocalValue = (date: Date) => {
   const pad = (value: number) => String(value).padStart(2, "0")
 
   const year = date.getFullYear()
@@ -42,14 +42,6 @@ export const toDatetimeLocalValue = (date: Date) => {
   const minutes = pad(date.getMinutes())
 
   return `${year}-${month}-${day}T${hours}:${minutes}`
-}
-
-// Create-mode default: a week out gives students a sensible runway and avoids
-// the form defaulting to an already-overdue "now".
-export const sevenDaysFromNow = () => {
-  const date = new Date()
-  date.setDate(date.getDate() + 7)
-  return date
 }
 
 // Parse a stored UTC ISO instant into a `datetime-local` value; "" when absent

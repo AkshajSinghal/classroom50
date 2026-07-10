@@ -23,6 +23,7 @@ import {
   type StringField,
 } from "./formFieldHelpers"
 import { InlineNote, InlineCode as Code } from "@/components/InlineNote"
+import { HelpTooltip } from "@/components/ui"
 import {
   templateForkNoteView,
   templateRestrictedNoteView,
@@ -120,6 +121,10 @@ export const TemplateField = ({
           className="size-4 text-base-content/30 opacity-70"
         />
         {t("assignments.template.label")}
+        <span className="font-normal text-base-content/60">
+          ({t("assignments.form.optional")})
+        </span>
+        <HelpTooltip help={t("assignments.template.help")} />
       </label>
       <input
         id={field.name}
@@ -140,8 +145,6 @@ export const TemplateField = ({
         org={org}
         teamHasAccess={teamHasAccess}
       />
-
-      <p className="label pt-2">{t("assignments.template.help")}</p>
     </>
   )
 }
