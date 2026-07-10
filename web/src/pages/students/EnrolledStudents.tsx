@@ -34,6 +34,10 @@ import {
 } from "@/hooks/github/queries"
 import { useUpdateRosterCache } from "@/hooks/useGetStudents"
 import { useTeamRoster, useInvalidateTeamRoster } from "@/hooks/useTeamRoster"
+import {
+  dropSuppressed,
+  type SuppressedLogins,
+} from "@/hooks/useSuppressedLogins"
 import type { TeamRosterRow, RosterRole } from "@/util/teamRoster"
 import { STAFF_ROLES } from "@/types/classroom"
 import {
@@ -97,11 +101,16 @@ const EnrolledStudents = ({
   org,
   classroom,
   addActions,
+  suppressedLogins,
 }: {
   students: Student[]
   org: string
   classroom: string
   addActions?: AddStudentActions
+  // Session-unenrolled logins, owned by the parent so a re-enroll from the Add
+  // modal can clear a login this view suppressed. Shared, not local, so the two
+  // surfaces can't disagree on who's suppressed.
+  suppressedLogins: SuppressedLogins
 }) => {
   const client = useGitHubClient()
   const queryClient = useQueryClient()
@@ -134,6 +143,7 @@ const EnrolledStudents = ({
     pendingHidden,
     teamSlug,
     csvMissingCount,
+    csvMissingLogins,
     notInOrgUsernames,
     refetch: refetchRoster,
   } = useTeamRoster(org, classroom, students)
@@ -331,37 +341,24 @@ const EnrolledStudents = ({
   })
 
   // Auto-sync on open: append team members lacking a CSV row (fire once per
-  // drift episode; re-arm when count returns to 0).
-  //
-  // suppressAutoSyncRef blocks the NEXT drift episode after a teacher-initiated
-  // unenroll: bulkUnenrollStudents/unenrollStudent drop the CSV row first and
-  // then best-effort remove team membership, so a transient team-drop failure
-  // leaves a live team member with no CSV row (csvMissingCount > 0). Without
-  // this guard, auto-sync would immediately re-append that just-removed student,
-  // silently reversing the unenroll behind a soft warning toast. We only defer
-  // the AUTOMATIC backfill — the explicit Sync button (and a fresh page open)
-  // still runs it — so a real drift the teacher wants backfilled is one click
-  // away, but an unenroll no longer undoes itself on its own.
+  // drift episode; re-arm when count returns to 0). dropSuppressed skips any
+  // csv-missing member the teacher just unenrolled whose best-effort team-drop
+  // failed — otherwise auto-sync would re-append the student it just removed.
+  // (suppressedLogins is read in the effect, not during render;
+  // syncRosterFromTeam re-derives the authoritative set server-side.)
   const autoSyncedRef = useRef(false)
-  const suppressAutoSyncRef = useRef(false)
+  const csvMissingKey = csvMissingLogins.join(",")
   useEffect(() => {
     if (isLoading || isError) return
-    if (csvMissingCount === 0) {
+    if (dropSuppressed(csvMissingLogins, suppressedLogins).length === 0) {
       autoSyncedRef.current = false
-      return
-    }
-    if (suppressAutoSyncRef.current) {
-      // Consume the one-episode suppression: latch as if we synced so this
-      // drift episode is skipped, and let the next fresh episode auto-sync.
-      suppressAutoSyncRef.current = false
-      autoSyncedRef.current = true
       return
     }
     if (autoSyncedRef.current || syncMutation.isPending) return
     autoSyncedRef.current = true
     syncMutation.mutate()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [csvMissingCount, isLoading, isError])
+  }, [csvMissingKey, isLoading, isError])
 
   // Auto-reconcile on open: team-add rostered not_in_org usernames that are in
   // fact active org members (native invite / SSO).
@@ -396,18 +393,22 @@ const EnrolledStudents = ({
   })
 
   const autoReconciledRef = useRef(false)
-  const notInOrgCount = notInOrgUsernames.length
+  // dropSuppressed runs in the effect (read after render) so a teacher's
+  // leftover active org membership isn't silently promoted back onto the team —
+  // the root of the "unenrolled student keeps coming back" loop.
+  const notInOrgKey = notInOrgUsernames.join(",")
   useEffect(() => {
     if (isLoading || isError) return
-    if (notInOrgCount === 0) {
+    const targets = dropSuppressed(notInOrgUsernames, suppressedLogins)
+    if (targets.length === 0) {
       autoReconciledRef.current = false
       return
     }
     if (autoReconciledRef.current || reconcileMutation.isPending) return
     autoReconciledRef.current = true
-    reconcileMutation.mutate(notInOrgUsernames)
+    reconcileMutation.mutate(targets)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [notInOrgCount, isLoading, isError])
+  }, [notInOrgKey, isLoading, isError])
 
   const onRowMetadataSaved = (rowKey: string, updated: StudentCsvRow) => {
     updateRosterCache((current) => {
@@ -422,9 +423,12 @@ const EnrolledStudents = ({
 
   const onRowUnenrolled = (rowKey: string, teamWarning?: string) => {
     if (teamWarning) setWarning(rowKey, teamWarning)
-    // A failed team-drop would leave an orphaned team member; don't let the next
-    // auto-sync re-append the student the teacher just removed (see the effect).
-    suppressAutoSyncRef.current = true
+    // Remember this login so the automatic backfills (auto-sync, auto-reconcile)
+    // don't re-add the student the teacher just removed — e.g. when a
+    // best-effort team-drop failed, or the CSV delete hasn't propagated and they
+    // resurface as not_in_org while still an active org member.
+    const removed = rows.find((r) => r.key === rowKey)
+    if (removed?.username) suppressedLogins.remember([removed.username])
     updateRosterCache((current) =>
       current.filter((s) => studentKey(s) !== rowKey),
     )
@@ -439,15 +443,21 @@ const EnrolledStudents = ({
 
   // After a bulk run, clear the selection and refresh the caches the run
   // touched (roster team membership + pending invites).
-  const onBulkDone = (action: "unenroll" | "invite") => {
+  const onBulkDone = (
+    action: "unenroll" | "invite",
+    removed?: Array<Pick<TeamRosterRow, "username">>,
+  ) => {
     setSelectedKeys(new Set())
     invalidateInviteQueries()
     // Unenroll changes team membership; invite changes org-invite state and may
     // team-add an already-active member — refresh the enrolled roster for both.
     invalidateTeamRoster()
-    // After a bulk unenroll, defer the next auto-sync: a per-row team-drop that
-    // failed would otherwise make auto-sync re-append the just-removed student.
-    if (action === "unenroll") suppressAutoSyncRef.current = true
+    // After a bulk unenroll, remember the removed logins so the automatic
+    // backfills don't re-add them (see the effects). Only confirmed-removed rows
+    // are passed (not selection misses), so a still-enrolled row isn't
+    // suppressed by mistake.
+    if (action === "unenroll" && removed)
+      suppressedLogins.remember(removed.map((r) => r.username))
   }
 
   const renderRow = (row: TeamRosterRow) => {
@@ -716,9 +726,10 @@ const EnrolledStudents = ({
               shape="square"
               disabled={syncMutation.isPending}
               onClick={() => {
-                // Explicit backfill: clear any post-unenroll suppression so the
-                // teacher's deliberate Sync always runs.
-                suppressAutoSyncRef.current = false
+                // Explicit backfill: clear the post-unenroll suppression so the
+                // teacher's deliberate Sync always runs (re-adding any drifted
+                // team members, even ones removed earlier this session).
+                suppressedLogins.clear()
                 syncMutation.mutate()
               }}
               aria-label={t("students.syncRosterTitle")}
