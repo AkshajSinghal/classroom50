@@ -553,19 +553,35 @@ export function csvFileQuery<T>(
   repo: string,
   path: string,
   ref?: string,
+  // Legacy path tried only when `path` 404s (roster.csv -> students.csv). The
+  // query key stays on `path`, so a post-migration read converges on roster.csv
+  // and optimistic writes never have to know which name served the bytes.
+  fallbackPath?: string,
 ) {
   return queryOptions({
     queryKey: githubKeys.csvFile(owner, repo, path, ref),
     queryFn: async ({ signal }) => {
-      const raw = await client.requestRaw(
-        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
-          repo,
-        )}/contents/${path
-          .split("/")
-          .map(encodeURIComponent)
-          .join("/")}${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`,
-        { method: "GET", signal },
-      )
+      let raw: string
+      try {
+        raw = await readContents(client, owner, repo, path, ref, signal)
+      } catch (err) {
+        if (
+          fallbackPath &&
+          err instanceof GitHubAPIError &&
+          err.status === 404
+        ) {
+          raw = await readContents(
+            client,
+            owner,
+            repo,
+            fallbackPath,
+            ref,
+            signal,
+          )
+        } else {
+          throw err
+        }
+      }
 
       const csvParse = Papa.parse<T>(raw, {
         header: true,
@@ -580,6 +596,25 @@ export function csvFileQuery<T>(
     staleTime: 10 * 60 * 1000,
     retry: false,
   })
+}
+
+function readContents(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+  path: string,
+  ref: string | undefined,
+  signal: AbortSignal | undefined,
+) {
+  return client.requestRaw(
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+      repo,
+    )}/contents/${path
+      .split("/")
+      .map(encodeURIComponent)
+      .join("/")}${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`,
+    { method: "GET", signal },
+  )
 }
 
 export async function getRawFile(
@@ -601,6 +636,37 @@ export async function getRawFile(
   }
 
   return decodeBase64Utf8(file.content)
+}
+
+// Read a config file, falling back to `fallbackPath` only on a 404. The roster
+// read-modify-write mutations use this so a classroom bootstrapped before the
+// students.csv -> roster.csv rename (only students.csv on disk) is still
+// editable: the write itself always targets roster.csv, converging the legacy
+// file on the next commit. A non-404 error propagates — a real API failure must
+// not be masked as "missing, use legacy".
+//
+// Not retried: the Contents API is eventually consistent per path, so right
+// after a roster.csv write it can briefly 404 while the pre-rename students.csv
+// still reads, and this would fall back to slightly-stale legacy bytes. We
+// accept that window rather than retry, because a 404 here is far more often a
+// stable "un-migrated classroom, only students.csv exists" than a lag blip —
+// retrying would slow every legacy-classroom read (the common case) to cover a
+// rare, self-healing one. The acting tab is masked by the optimistic cache
+// (useUpdateRosterCache), and the classroom TEAM, not this CSV, is the
+// authority for enrollment, so a transient stale read is display-only.
+export async function getRawFileWithFallback(
+  client: GitHubClient,
+  input: GetAssignmentsFileInput & { fallbackPath: string },
+): Promise<string> {
+  const { fallbackPath, ...primary } = input
+  try {
+    return await getRawFile(client, primary)
+  } catch (err) {
+    if (err instanceof GitHubAPIError && err.status === 404) {
+      return getRawFile(client, { ...primary, path: fallbackPath })
+    }
+    throw err
+  }
 }
 
 export async function getClassroom50Yaml(
