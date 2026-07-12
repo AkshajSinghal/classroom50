@@ -1,10 +1,9 @@
 import { useQuery } from "@tanstack/react-query"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { orgMembershipQuery } from "./github/queries"
-import { useGitHubRepo } from "./github/hooks"
 import { GitHubAPIError, retryTransientGitHubError } from "./github/errors"
-import { resolveTeacherVerdict } from "./useCourseTeacherAccess"
 import { staffTeamName } from "./github/mutations"
+import { classroomTeamSlugHeuristic } from "@/util/orgMembership"
 import { useRoleView } from "@/context/roleView/RoleViewProvider"
 import type { GitHubClient } from "./github/client"
 import type { StaffRole } from "@/types/classroom"
@@ -16,74 +15,72 @@ import type { StaffRole } from "@/types/classroom"
 // so callers treat it as "don't redirect; let the page load" rather than
 // demoting a real staff member on a blip.
 export type EffectiveRole =
-  "owner" | "instructor" | "ta" | "student" | "unresolved"
+  "owner" | "instructor" | "ta" | "student" | "blocked" | "unresolved"
 
 // A tri-state membership signal: definitively in / definitively out / couldn't
 // tell (transient). Mirrors the fail-closed posture of resolveTeacherVerdict.
 export type Membership = "member" | "non-member" | "unresolved"
 
 // Structural inputs so the verdict is a pure, unit-testable function (no React
-// Query). Each signal is pre-reduced to its tri-state.
+// Query). Each signal is pre-reduced to its tri-state. Classroom role is decided
+// by TEAM MEMBERSHIP alone — org-wide config-repo access no longer decides it.
 export type ClassroomRoleInput = {
   org: string | undefined
   classroom: string | undefined
   // org admin? (true => owner). undefined when not yet known.
   isOwner: boolean | undefined
-  // Can the viewer read the classroom50 config repo at all? (staff gate)
-  staffRoleResolved: boolean
-  isStaff: boolean
-  // Team memberships.
+  // Per-classroom team memberships (the single source of truth for access).
   instructor: Membership
   ta: Membership
+  student: Membership
 }
 
-// Pure role resolution. Owner short-circuits (org admin outranks everything).
-// Otherwise the viewer must be staff (config-repo access) AND in a staff team
-// to be instructor/ta; a definitive "not staff" makes them a student. Anything
-// still in flight yields `unresolved`.
+// Pure role resolution from GitHub team membership. Owner (org admin)
+// short-circuits. Otherwise a positive staff-team match wins; before trusting a
+// student match or declaring `blocked`, the higher-priority staff signals must
+// be settled (a student-team member who might also be staff must not render as a
+// plain student while instructor/ta are still in flight). A non-owner on none of
+// the classroom's teams is `blocked` — team membership, not config-repo access,
+// grants classroom access. Anything still in flight yields `unresolved`.
 export function resolveClassroomRole(input: ClassroomRoleInput): EffectiveRole {
-  const { org, classroom, isOwner, staffRoleResolved, isStaff } = input
+  const { org, classroom, isOwner, instructor, ta, student } = input
 
   if (!org) return "student"
 
   // Owner (org admin) outranks all and isn't classroom-scoped: resolve before
   // the classroom check so an owner on an org-level route isn't misclassified.
-  // While in flight (undefined) fall through.
   if (isOwner === true) return "owner"
 
-  // Refine the CLASSROOM role (instructor/ta), which needs a classroom. A
-  // non-owner on an org-level route has no finer role; hold `unresolved` while
-  // ownership is still resolving so we don't flash NotFound.
+  // Non-owner roles need a classroom. On an org-level route, hold `unresolved`
+  // while ownership resolves so we don't flash a wrong verdict.
   if (!classroom) return isOwner === undefined ? "unresolved" : "student"
 
-  // Need the staff (config-repo) verdict before deciding non-owner roles.
-  if (!staffRoleResolved) return "unresolved"
+  // A confirmed staff-team membership is definitive and outranks the (slower)
+  // owner read, so resolve a confirmed instructor/ta immediately.
+  if (instructor === "member") return "instructor"
+  if (ta === "member") return "ta"
 
-  // Staff team membership is definitive and outranks the (slower) owner read, so
-  // resolve a confirmed instructor/ta before waiting on ownership. Only positive
-  // matches are safe while isOwner is unknown — a demotion below must wait.
-  if (isStaff) {
-    if (input.instructor === "member") return "instructor"
-    if (input.ta === "member") return "ta"
-    if (input.instructor === "unresolved" || input.ta === "unresolved") {
-      return "unresolved"
-    }
-  }
+  // Before trusting a student match or declaring blocked, the higher-priority
+  // signals must be settled — a student-team member who might also be staff must
+  // not resolve to `student` (or `blocked`) while instructor/ta are in flight.
+  if (instructor === "unresolved" || ta === "unresolved") return "unresolved"
 
-  // Ownership not yet known: don't demote. An owner needs no staff/team signal,
-  // so hold `unresolved` rather than falling through to `student`.
+  // Ownership not yet known: don't decide a non-owner role yet. An owner needs
+  // no team signal, so hold `unresolved` rather than mis-blocking a pending owner.
   if (isOwner === undefined) return "unresolved"
 
-  // A non-staff non-owner is a student, regardless of any stale team signal.
-  if (!isStaff) return "student"
+  // Staff teams are definitively non-member. Decide from the student team.
+  if (student === "member") return "student"
+  if (student === "unresolved") return "unresolved"
 
-  // Staff (reads the config repo) but in neither staff team — treat as student;
-  // owners are handled above.
-  return "student"
+  // On none of the classroom's teams (and not owner): no access to this
+  // classroom. Config-repo access does not grant classroom access.
+  return "blocked"
 }
 
 // Whether a role may see/do instructor-or-TA classroom content. `unresolved` is
-// permissive on purpose: the guard treats it as "let the page load".
+// permissive on purpose: the guard treats it as "let the page load". `blocked`
+// is never staff (fail-closed: no team in this classroom => no access).
 export function isStaffRole(role: EffectiveRole): boolean {
   return (
     role === "owner" ||
@@ -112,30 +109,34 @@ export function isResolvedInstructorOrOwner(role: EffectiveRole): boolean {
 // verifying what each role sees — never escalates.
 export type ViewAsRole = "ta" | "student"
 
-// Rank for the downgrade-only clamp. `unresolved` is intentionally absent — we
-// never clamp an in-flight role (the guard is still showing a spinner).
-const ROLE_RANK: Record<Exclude<EffectiveRole, "unresolved">, number> = {
-  owner: 3,
-  instructor: 2,
-  ta: 1,
-  student: 0,
-}
+// Rank for the downgrade-only clamp. `unresolved` and `blocked` are
+// intentionally absent — we never clamp an in-flight role (still showing a
+// spinner) nor a blocked one (the classroom is hidden; there's nothing to
+// preview).
+const ROLE_RANK: Record<Exclude<EffectiveRole, "unresolved" | "blocked">, number> =
+  {
+    owner: 3,
+    instructor: 2,
+    ta: 1,
+    student: 0,
+  }
 
 // Apply a "view as" preview to an actual role. DOWNGRADE-ONLY: the preview can
 // only lower the effective role, never raise it, so it can't be abused to gain
-// access. `unresolved`/no-preview pass through unchanged.
+// access. `unresolved`/`blocked`/no-preview pass through unchanged (a blocked
+// viewer has no classroom to preview).
 export function applyViewAs(
   actual: EffectiveRole,
   viewAs: ViewAsRole | null,
 ): EffectiveRole {
-  if (!viewAs || actual === "unresolved") return actual
+  if (!viewAs || actual === "unresolved" || actual === "blocked") return actual
   // Applies only when it ranks strictly below the actual role; else a no-op.
   return ROLE_RANK[viewAs] < ROLE_RANK[actual] ? viewAs : actual
 }
 
 // Translation key for the human role label: owner + instructor =>
 // "nav.roleInstructor", ta => "nav.roleTa", student => "nav.roleStudent",
-// unresolved => null (so callers show a skeleton mid-load). Pass through t().
+// unresolved/blocked => null (mid-load skeleton, or no classroom access). t().
 export function roleLabelKey(role: EffectiveRole): string | null {
   switch (role) {
     case "owner":
@@ -146,6 +147,7 @@ export function roleLabelKey(role: EffectiveRole): string | null {
     case "student":
       return "nav.roleStudent"
     case "unresolved":
+    case "blocked":
       return null
   }
 }
@@ -226,18 +228,13 @@ export function useClassroomRole(
     retry: retryTransientGitHubError,
   })
 
-  const staffRepoQuery = useGitHubRepo(org, "classroom50", {
-    retry: retryTransientGitHubError,
-  })
-  const staff = resolveTeacherVerdict({
-    org,
-    isSuccess: staffRepoQuery.isSuccess,
-    permissions: staffRepoQuery.data?.permissions,
-    error: staffRepoQuery.error,
-  })
-
   const teamRole = (role: StaffRole) =>
     org && classroom ? staffTeamName(classroom, role) : ""
+  // Student team slug: the heuristic the student themselves can derive (the
+  // authoritative slug lives in the private classroom.json they can't read).
+  // Classroom creation rejects names that GitHub would re-slugify, so the
+  // heuristic is authoritative; a miss safe-degrades to a 404 => non-member.
+  const studentSlug = org && classroom ? classroomTeamSlugHeuristic(classroom) : ""
 
   const instructorQuery = useQuery({
     ...teamMembershipQuery(
@@ -250,6 +247,10 @@ export function useClassroomRole(
   })
   const taQuery = useQuery({
     ...teamMembershipQuery(client, org ?? "", teamRole("ta"), username ?? ""),
+    enabled: Boolean(org && classroom && username),
+  })
+  const studentQuery = useQuery({
+    ...teamMembershipQuery(client, org ?? "", studentSlug, username ?? ""),
     enabled: Boolean(org && classroom && username),
   })
 
@@ -266,17 +267,18 @@ export function useClassroomRole(
         ? false
         : undefined
 
+  // Classroom role is decided by team membership alone (config-repo access no
+  // longer gates it — that repo is org-wide and can't tell classrooms apart).
   const actualRole = resolveClassroomRole({
     org,
     classroom,
     isOwner,
-    staffRoleResolved: staff.roleResolved,
-    isStaff: staff.isTeacher,
     instructor: membershipFromQuery(
       instructorQuery.isSuccess,
       instructorQuery.error,
     ),
     ta: membershipFromQuery(taQuery.isSuccess, taQuery.error),
+    student: membershipFromQuery(studentQuery.isSuccess, studentQuery.error),
   })
 
   // Apply the "view as" preview (downgrade-only; never escalates).
@@ -287,9 +289,9 @@ export function useClassroomRole(
   // pin the guard's spinner.
   const isLoading =
     ownerQuery.fetchStatus === "fetching" ||
-    staffRepoQuery.fetchStatus === "fetching" ||
     instructorQuery.fetchStatus === "fetching" ||
-    taQuery.fetchStatus === "fetching"
+    taQuery.fetchStatus === "fetching" ||
+    studentQuery.fetchStatus === "fetching"
 
   return { role, actualRole, isLoading }
 }

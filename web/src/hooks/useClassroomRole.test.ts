@@ -13,22 +13,21 @@ const base: ClassroomRoleInput = {
   org: "acme",
   classroom: "cs101",
   isOwner: false,
-  staffRoleResolved: true,
-  isStaff: true,
   instructor: "non-member",
   ta: "non-member",
+  student: "member",
 }
 
 describe("resolveClassroomRole", () => {
-  it("owner outranks everything and needs no staff/team read", () => {
+  it("owner outranks everything and needs no team read", () => {
     expect(
       resolveClassroomRole({
         ...base,
         isOwner: true,
-        // even with unresolved staff/team signals, owner short-circuits
-        staffRoleResolved: false,
+        // even with unresolved team signals, owner short-circuits
         instructor: "unresolved",
         ta: "unresolved",
+        student: "unresolved",
       }),
     ).toBe("owner")
   })
@@ -49,32 +48,24 @@ describe("resolveClassroomRole", () => {
     expect(resolveClassroomRole({ ...base, ta: "member" })).toBe("ta")
   })
 
-  it("student when staff (repo access) but in neither staff team", () => {
+  it("student when on the student team and neither staff team", () => {
     expect(resolveClassroomRole(base)).toBe("student")
   })
 
-  it("student when not staff (no config-repo access), ignoring stale team signal", () => {
-    expect(
-      resolveClassroomRole({
-        ...base,
-        isStaff: false,
-        instructor: "member",
-      }),
-    ).toBe("student")
+  it("blocked when on none of the classroom's teams (not owner)", () => {
+    expect(resolveClassroomRole({ ...base, student: "non-member" })).toBe(
+      "blocked",
+    )
+  })
+
+  it("config-repo access is no longer an input — student-team membership decides", () => {
+    // A former "staff repo access but no team" case now hinges on team
+    // membership alone: student team => student.
+    expect(resolveClassroomRole({ ...base, student: "member" })).toBe("student")
   })
 
   describe("fail-closed (unresolved) on transient signals we depend on", () => {
-    it("unresolved when the staff (repo) verdict isn't resolved and not an owner", () => {
-      expect(
-        resolveClassroomRole({
-          ...base,
-          isOwner: undefined,
-          staffRoleResolved: false,
-        }),
-      ).toBe("unresolved")
-    })
-
-    it("unresolved when staff but a team read is in flight", () => {
+    it("unresolved when a staff team read is in flight (might be staff)", () => {
       expect(resolveClassroomRole({ ...base, instructor: "unresolved" })).toBe(
         "unresolved",
       )
@@ -83,23 +74,41 @@ describe("resolveClassroomRole", () => {
       )
     })
 
-    it("does NOT go unresolved on a team read when a higher role already matched", () => {
-      // instructor member resolves before the ta-unresolved is considered
+    it("does NOT trust a student match while a staff signal is still in flight", () => {
+      // student member but instructor unresolved => hold, don't render student
+      expect(
+        resolveClassroomRole({
+          ...base,
+          instructor: "unresolved",
+          student: "member",
+        }),
+      ).toBe("unresolved")
+    })
+
+    it("does NOT go unresolved when a higher role already matched", () => {
       expect(
         resolveClassroomRole({
           ...base,
           instructor: "member",
           ta: "unresolved",
+          student: "unresolved",
         }),
       ).toBe("instructor")
     })
 
-    it("holds unresolved on a CLASSROOM route while ownership is still loading (don't flash a real owner as student)", () => {
-      // isOwner undefined + no team match => hold rather than demote.
+    it("unresolved when the student read is in flight (staff definitively out)", () => {
+      expect(resolveClassroomRole({ ...base, student: "unresolved" })).toBe(
+        "unresolved",
+      )
+    })
+
+    it("holds unresolved on a classroom route while ownership is still loading", () => {
+      // isOwner undefined + no staff match yet => hold rather than decide.
       expect(
         resolveClassroomRole({
           ...base,
           isOwner: undefined,
+          student: "non-member",
         }),
       ).toBe("unresolved")
     })
@@ -113,17 +122,19 @@ describe("resolveClassroomRole", () => {
         }),
       ).toBe("instructor")
       expect(
-        resolveClassroomRole({
-          ...base,
-          isOwner: undefined,
-          ta: "member",
-        }),
+        resolveClassroomRole({ ...base, isOwner: undefined, ta: "member" }),
       ).toBe("ta")
     })
 
-    it("demotes to student on a classroom route only once ownership is known (isOwner false)", () => {
-      // staff (repo access) but in neither team AND a definitive non-owner.
+    it("resolves student/blocked only once ownership is known (isOwner false)", () => {
       expect(resolveClassroomRole({ ...base, isOwner: false })).toBe("student")
+      expect(
+        resolveClassroomRole({
+          ...base,
+          isOwner: false,
+          student: "non-member",
+        }),
+      ).toBe("blocked")
     })
   })
 
@@ -162,23 +173,25 @@ describe("resolveClassroomRole", () => {
 })
 
 describe("role predicates", () => {
-  it("isStaffRole: owner/instructor/ta/unresolved true; student false", () => {
+  it("isStaffRole: owner/instructor/ta/unresolved true; student/blocked false", () => {
     expect(isStaffRole("owner")).toBe(true)
     expect(isStaffRole("instructor")).toBe(true)
     expect(isStaffRole("ta")).toBe(true)
     expect(isStaffRole("unresolved")).toBe(true) // permissive: let page load
     expect(isStaffRole("student")).toBe(false)
+    expect(isStaffRole("blocked")).toBe(false)
   })
 
-  it("isInstructorRole: owner/instructor/unresolved true; ta/student false", () => {
+  it("isInstructorRole: owner/instructor/unresolved true; ta/student/blocked false", () => {
     expect(isInstructorRole("owner")).toBe(true)
     expect(isInstructorRole("instructor")).toBe(true)
     expect(isInstructorRole("unresolved")).toBe(true)
     expect(isInstructorRole("ta")).toBe(false)
     expect(isInstructorRole("student")).toBe(false)
+    expect(isInstructorRole("blocked")).toBe(false)
   })
 
-  it("isResolvedInstructorOrOwner: owner/instructor true; unresolved/ta/student false", () => {
+  it("isResolvedInstructorOrOwner: owner/instructor true; unresolved/ta/student/blocked false", () => {
     expect(isResolvedInstructorOrOwner("owner")).toBe(true)
     expect(isResolvedInstructorOrOwner("instructor")).toBe(true)
     // The distinction from isInstructorRole: unresolved is NOT permissive here,
@@ -186,14 +199,16 @@ describe("role predicates", () => {
     expect(isResolvedInstructorOrOwner("unresolved")).toBe(false)
     expect(isResolvedInstructorOrOwner("ta")).toBe(false)
     expect(isResolvedInstructorOrOwner("student")).toBe(false)
+    expect(isResolvedInstructorOrOwner("blocked")).toBe(false)
   })
 
-  it("roleLabelKey: owner+instructor => nav.roleInstructor, ta => nav.roleTa, student => nav.roleStudent, unresolved => null", () => {
+  it("roleLabelKey: owner+instructor => nav.roleInstructor, ta => nav.roleTa, student => nav.roleStudent, unresolved/blocked => null", () => {
     expect(roleLabelKey("owner")).toBe("nav.roleInstructor")
     expect(roleLabelKey("instructor")).toBe("nav.roleInstructor")
     expect(roleLabelKey("ta")).toBe("nav.roleTa")
     expect(roleLabelKey("student")).toBe("nav.roleStudent")
     expect(roleLabelKey("unresolved")).toBeNull()
+    expect(roleLabelKey("blocked")).toBeNull()
   })
 })
 
@@ -225,6 +240,11 @@ describe("applyViewAs (#221 downgrade-only preview)", () => {
 
   it("does not clamp an unresolved role (guard still resolving)", () => {
     expect(applyViewAs("unresolved", "student")).toBe("unresolved")
+  })
+
+  it("does not clamp a blocked role (no classroom to preview)", () => {
+    expect(applyViewAs("blocked", "student")).toBe("blocked")
+    expect(applyViewAs("blocked", "ta")).toBe("blocked")
   })
 
   it("a preview equal to or above the actual role is a no-op", () => {
