@@ -139,6 +139,12 @@ const SubmissionsPageContent = () => {
   const { user } = useGithubAuth()
   const { role } = useClassroomRole(org, classroom, user?.login)
   const isTaView = role === "ta"
+  // Gate the owner-only team roster on a RESOLVED non-TA role. Enabling on
+  // `!isTaView` alone also fires during the `unresolved` window (role starts
+  // unresolved, so isTaView is briefly false), launching owner-only requests
+  // that then 403 for a TA — disabling after the role resolves can't cancel an
+  // already-dispatched fetch. Hold the queries until the role is known.
+  const teamRosterEnabled = role === "owner" || role === "instructor"
   const csvEnrollment = useMemo(
     () => csvStudentEnrollment(csvStudents),
     [csvStudents],
@@ -152,10 +158,9 @@ const SubmissionsPageContent = () => {
     isError: teamRosterError,
     refetch: refetchRoster,
   } = useTeamRoster(org ?? "", classroom ?? "", csvStudents, {
-    // A TA sources enrollment from roster.csv and discards this roster; skip its
-    // owner-only reads (org members/invitations) so they don't 403 in the
-    // console for a non-owner.
-    enabled: !isTaView,
+    // Only for a resolved owner/instructor — never while the role is still
+    // unresolved (that window would 403 for a TA). See teamRosterEnabled.
+    enabled: teamRosterEnabled,
   })
   // For a TA, enrollment (and its ready/error state) comes from roster.csv, not
   // the team roster; owner/instructor keep the team-driven source unchanged. A
@@ -179,7 +184,7 @@ const SubmissionsPageContent = () => {
   // students is wasted effort. `show` is loading-aware (won't flash before the
   // roster resolves).
   const teamEmptyRoster = useEmptyRosterWarning(org, classroom, {
-    enabled: !isTaView,
+    enabled: teamRosterEnabled,
   })
   // useEmptyRosterWarning is team-driven, so for a TA (whose enrollment comes
   // from roster.csv) it would always report empty and falsely block collect /
@@ -293,10 +298,11 @@ const SubmissionsPageContent = () => {
   }
 
   // Deterministic acceptance from the org repo list (see acceptedUsernames);
-  // individual assignments only, so gated on acceptedAvailable. Skipped for a
-  // TA — the org repo list can 403 for a non-owner and only feeds the
+  // individual assignments only, so gated on acceptedAvailable. Skipped unless
+  // the viewer is a resolved owner/instructor — the org repo list can 403 for a
+  // non-owner (and during the unresolved window) and only feeds the
   // owner-facing acceptance count.
-  const { data: orgRepos } = useGetOrgRepos(org ?? "", !isTaView)
+  const { data: orgRepos } = useGetOrgRepos(org ?? "", teamRosterEnabled)
   const acceptedSet = useMemo(
     () =>
       acceptedUsernames(orgRepos, classroom ?? "", assignment ?? "", students),

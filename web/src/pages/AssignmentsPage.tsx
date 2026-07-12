@@ -119,7 +119,13 @@ const TeacherAssignmentsView = ({
   const myRoleLabelKey = roleLabelKey(myRole)
   const myRoleLabel = myRoleLabelKey ? t(myRoleLabelKey) : null
   const archived = isClassroomArchived(classroomData ?? {})
-  const emptyRoster = useEmptyRosterWarning(org, classroom)
+  // Gate the owner-only team roster on a resolved owner/instructor. Enabling it
+  // for a TA (or during the unresolved window) fires org members/invitations
+  // reads that 403 for a non-owner. The empty-roster warning is an owner/
+  // instructor affordance, so a TA simply doesn't get it.
+  const emptyRoster = useEmptyRosterWarning(org, classroom, {
+    enabled: myRole === "owner" || myRole === "instructor",
+  })
 
   const [query, setQuery] = useState("")
   const [filters, setFilters] = useState<AssignmentFilters>(DEFAULT_FILTERS)
