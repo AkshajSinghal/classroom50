@@ -151,7 +151,12 @@ const SubmissionsPageContent = () => {
     isLoading: teamRosterLoading,
     isError: teamRosterError,
     refetch: refetchRoster,
-  } = useTeamRoster(org ?? "", classroom ?? "", csvStudents)
+  } = useTeamRoster(org ?? "", classroom ?? "", csvStudents, {
+    // A TA sources enrollment from roster.csv and discards this roster; skip its
+    // owner-only reads (org members/invitations) so they don't 403 in the
+    // console for a non-owner.
+    enabled: !isTaView,
+  })
   // For a TA, enrollment (and its ready/error state) comes from roster.csv, not
   // the team roster; owner/instructor keep the team-driven source unchanged. A
   // still-loading or failed roster.csv read must surface as loading/error —
@@ -173,7 +178,9 @@ const SubmissionsPageContent = () => {
   // Gate Regrade all / Collect now on an empty roster: dispatching with no
   // students is wasted effort. `show` is loading-aware (won't flash before the
   // roster resolves).
-  const teamEmptyRoster = useEmptyRosterWarning(org, classroom)
+  const teamEmptyRoster = useEmptyRosterWarning(org, classroom, {
+    enabled: !isTaView,
+  })
   // useEmptyRosterWarning is team-driven, so for a TA (whose enrollment comes
   // from roster.csv) it would always report empty and falsely block collect /
   // regrade. Derive the TA gate from the roster.csv student set instead, and
@@ -186,6 +193,7 @@ const SubmissionsPageContent = () => {
           !csvStudentsError &&
           csvEnrollment.length === 0,
         hasRosterRows: csvStudents.length > 0,
+        isLoading: csvStudentsLoading,
       }
     : teamEmptyRoster
   // Teacher-only page, so reading the classroom's capability-URL secret from
@@ -285,8 +293,10 @@ const SubmissionsPageContent = () => {
   }
 
   // Deterministic acceptance from the org repo list (see acceptedUsernames);
-  // individual assignments only, so gated on acceptedAvailable.
-  const { data: orgRepos } = useGetOrgRepos(org ?? "")
+  // individual assignments only, so gated on acceptedAvailable. Skipped for a
+  // TA — the org repo list can 403 for a non-owner and only feeds the
+  // owner-facing acceptance count.
+  const { data: orgRepos } = useGetOrgRepos(org ?? "", !isTaView)
   const acceptedSet = useMemo(
     () =>
       acceptedUsernames(orgRepos, classroom ?? "", assignment ?? "", students),

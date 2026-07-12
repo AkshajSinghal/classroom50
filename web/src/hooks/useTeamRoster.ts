@@ -99,8 +99,14 @@ export function useTeamRoster(
   org: string,
   classroom: string,
   students: Student[],
+  options?: { enabled?: boolean },
 ): UseTeamRosterResult {
   const client = useGitHubClient()
+  // Owner-facing roster: its reads (org members/invitations, team invitations)
+  // are owner-only and 403 for a non-owner. A caller with a non-owner (TA) view
+  // that doesn't consume this roster passes `enabled: false` to suppress those
+  // requests entirely rather than firing them just to discard the result.
+  const enabled = options?.enabled ?? true
 
   const { data: classroomJson } = useGetClassroom(org, classroom)
   const teamSlug =
@@ -120,16 +126,21 @@ export function useTeamRoster(
     refetch: refetchMembers,
   } = useQuery({
     ...teamMembersQuery(client, org, teamSlug),
+    enabled: enabled && Boolean(org && teamSlug),
   })
 
   // Staff-team members. A missing team 404s -> [] (listTeamMembers), so an
   // uncreated staff team reads as "no staff". A non-404 failure (transient 5xx,
   // 403) is a real error and is folded into isError below — staff data gets the
   // same failure semantics as the student roster, never a silent "no staff".
-  const instructorMembersQuery = useQuery(
-    teamMembersQuery(client, org, instructorSlug),
-  )
-  const taMembersQuery = useQuery(teamMembersQuery(client, org, taSlug))
+  const instructorMembersQuery = useQuery({
+    ...teamMembersQuery(client, org, instructorSlug),
+    enabled: enabled && Boolean(org && instructorSlug),
+  })
+  const taMembersQuery = useQuery({
+    ...teamMembersQuery(client, org, taSlug),
+    enabled: enabled && Boolean(org && taSlug),
+  })
   const instructorMembers = instructorMembersQuery.data
   const taMembers = taMembersQuery.data
 
@@ -138,21 +149,28 @@ export function useTeamRoster(
     failedInvitations,
     isLoading: invitesLoading,
     isForbidden: invitesForbidden,
-  } = useGetOrgInvitations(org)
+  } = useGetOrgInvitations(enabled ? org : "")
 
   // Team-scoped pending invitations for the staff teams (owner-only, like org
   // invitations). 403 marks pending hidden; 404 (uncreated team) -> [].
-  const instructorInvitesQuery = useQuery(
-    teamInvitationsQuery(client, org, instructorSlug),
-  )
-  const taInvitesQuery = useQuery(teamInvitationsQuery(client, org, taSlug))
+  const instructorInvitesQuery = useQuery({
+    ...teamInvitationsQuery(client, org, instructorSlug),
+    enabled: enabled && Boolean(org && instructorSlug),
+  })
+  const taInvitesQuery = useQuery({
+    ...teamInvitationsQuery(client, org, taSlug),
+    enabled: enabled && Boolean(org && taSlug),
+  })
 
   // All active org members (shared cache with the Org Members page). Used only
   // to classify a roster.csv row on no team as in-org (assign a role) vs
   // not-in-org (invite). A failed/forbidden read leaves orgMembersKnown false,
   // so buildTeamRoster suppresses those needs-attention rows rather than
   // guessing — the roster degrades to the pure team-driven view, never errors.
-  const orgMembersQuery = useQuery(orgMembersAllQuery(client, org))
+  const orgMembersQuery = useQuery({
+    ...orgMembersAllQuery(client, org),
+    enabled: enabled && Boolean(org),
+  })
   const orgMembersKnown = orgMembersQuery.isSuccess
   const { orgMemberIds, orgMemberLogins } = useMemo(() => {
     const { ids, logins } = memberIdentitySets(orgMembersQuery.data ?? [])
