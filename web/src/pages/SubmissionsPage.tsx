@@ -44,7 +44,10 @@ import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import useGetStudents from "@/hooks/useGetStudents"
 import { useTeamRoster } from "@/hooks/useTeamRoster"
-import { useClassroomRole } from "@/hooks/useClassroomRole"
+import {
+  useClassroomRole,
+  isResolvedInstructorOrOwner,
+} from "@/hooks/useClassroomRole"
 import { useGithubAuth } from "@/auth/useGithubAuth"
 import { rowToStudent } from "@/util/teamRoster"
 import { hasStudentEnrollment } from "@/util/rosterRoles"
@@ -144,7 +147,7 @@ const SubmissionsPageContent = () => {
   // unresolved, so isTaView is briefly false), launching owner-only requests
   // that then 403 for a TA — disabling after the role resolves can't cancel an
   // already-dispatched fetch. Hold the queries until the role is known.
-  const teamRosterEnabled = role === "owner" || role === "instructor"
+  const teamRosterEnabled = isResolvedInstructorOrOwner(role)
   const csvEnrollment = useMemo(
     () => csvStudentEnrollment(csvStudents),
     [csvStudents],
@@ -166,7 +169,12 @@ const SubmissionsPageContent = () => {
   // the team roster; owner/instructor keep the team-driven source unchanged. A
   // still-loading or failed roster.csv read must surface as loading/error —
   // never an authoritative empty roster that would blank a populated gradebook.
-  const rosterLoading = isTaView ? csvStudentsLoading : teamRosterLoading
+  // The classroom-role-unresolved window counts as loading too: a disabled
+  // team-roster query reports isLoading:false, so without this a TA (isTaView
+  // still false while unresolved) would read rosterReady=true against an empty
+  // team roster and rosterScopedRows would drop every submission.
+  const rosterLoading =
+    role === "unresolved" || (isTaView ? csvStudentsLoading : teamRosterLoading)
   const rosterError = isTaView ? csvStudentsError : teamRosterError
   // The retry on the roster error alert must re-run whichever source backs the
   // current view: roster.csv for a TA, the team roster otherwise.

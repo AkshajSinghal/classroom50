@@ -3,6 +3,7 @@ import {
   resolveClassroomRole,
   isStaffRole,
   isInstructorRole,
+  isResolvedInstructorOrOwner,
   applyViewAs,
   roleLabelKey,
   type ClassroomRoleInput,
@@ -175,6 +176,16 @@ describe("role predicates", () => {
     expect(isInstructorRole("unresolved")).toBe(true)
     expect(isInstructorRole("ta")).toBe(false)
     expect(isInstructorRole("student")).toBe(false)
+  })
+
+  it("isResolvedInstructorOrOwner: owner/instructor true; unresolved/ta/student false", () => {
+    expect(isResolvedInstructorOrOwner("owner")).toBe(true)
+    expect(isResolvedInstructorOrOwner("instructor")).toBe(true)
+    // The distinction from isInstructorRole: unresolved is NOT permissive here,
+    // so owner-only reads gated on this never fire during role resolution.
+    expect(isResolvedInstructorOrOwner("unresolved")).toBe(false)
+    expect(isResolvedInstructorOrOwner("ta")).toBe(false)
+    expect(isResolvedInstructorOrOwner("student")).toBe(false)
   })
 
   it("roleLabelKey: owner+instructor => nav.roleInstructor, ta => nav.roleTa, student => nav.roleStudent, unresolved => null", () => {

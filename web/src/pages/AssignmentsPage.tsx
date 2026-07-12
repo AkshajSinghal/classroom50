@@ -26,7 +26,11 @@ import useGetStudents from "@/hooks/useGetStudents"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import useEmptyRosterWarning from "@/hooks/useEmptyRosterWarning"
 import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
-import { useClassroomRole, roleLabelKey } from "@/hooks/useClassroomRole"
+import {
+  useClassroomRole,
+  roleLabelKey,
+  isResolvedInstructorOrOwner,
+} from "@/hooks/useClassroomRole"
 import { useGithubAuth } from "@/auth/useGithubAuth"
 import { isClassroomArchived } from "@/types/classroom"
 import { OrgRepos } from "./ClassesPage"
@@ -124,7 +128,7 @@ const TeacherAssignmentsView = ({
   // reads that 403 for a non-owner. The empty-roster warning is an owner/
   // instructor affordance, so a TA simply doesn't get it.
   const emptyRoster = useEmptyRosterWarning(org, classroom, {
-    enabled: myRole === "owner" || myRole === "instructor",
+    enabled: isResolvedInstructorOrOwner(myRole),
   })
 
   const [query, setQuery] = useState("")

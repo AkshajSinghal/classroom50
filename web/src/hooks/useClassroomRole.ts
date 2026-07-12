@@ -99,6 +99,15 @@ export function isInstructorRole(role: EffectiveRole): boolean {
   return role === "owner" || role === "instructor" || role === "unresolved"
 }
 
+// Whether the role is a RESOLVED owner or instructor. Unlike isInstructorRole,
+// `unresolved` is NOT permissive here: use this to gate owner-only reads so they
+// never fire during the role-resolution window (a non-owner would 403). The
+// exclusion of `unresolved` is the whole point — see the SubmissionsPage /
+// AssignmentsPage owner-only-read gates.
+export function isResolvedInstructorOrOwner(role: EffectiveRole): boolean {
+  return role === "owner" || role === "instructor"
+}
+
 // The roles an instructor/owner can preview the app AS. A client-side lens for
 // verifying what each role sees — never escalates.
 export type ViewAsRole = "ta" | "student"
