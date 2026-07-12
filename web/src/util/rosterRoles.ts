@@ -37,7 +37,9 @@ export const ROLE_BADGE_TONE: Record<RosterRole, BadgeTone> = {
 // for anything outside the closed instructor/ta/student union.
 export function knownRosterRole(role: string): RosterRole | null {
   const value = role.trim()
-  return value in ROLE_BADGE_TONE ? (value as RosterRole) : null
+  return Object.prototype.hasOwnProperty.call(ROLE_BADGE_TONE, value)
+    ? (value as RosterRole)
+    : null
 }
 
 // Enrollment-state badge tone + i18n label, single-sourced so the roster row

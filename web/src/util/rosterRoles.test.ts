@@ -107,4 +107,9 @@ describe("knownRosterRole", () => {
     expect(knownRosterRole("   ")).toBeNull()
     expect(knownRosterRole("grader")).toBeNull()
   })
+  it("returns null for inherited Object.prototype members", () => {
+    expect(knownRosterRole("toString")).toBeNull()
+    expect(knownRosterRole("constructor")).toBeNull()
+    expect(knownRosterRole("hasOwnProperty")).toBeNull()
+  })
 })
