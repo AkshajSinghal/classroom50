@@ -44,6 +44,23 @@ export const ROLE_RANK: Record<RosterRole, number> = {
   student: 0,
 }
 
+// The GitHub org membership role an invite/role-change carries for a classroom
+// role: an instructor becomes an org OWNER ("admin"); student/ta are plain
+// members. One source for this security-sensitive mapping (who gets org owner)
+// so a missed hand-copy can't silently mis-scope admin access.
+export function orgRoleForRole(role: RosterRole): "admin" | "direct_member" {
+  return role === "instructor" ? "admin" : "direct_member"
+}
+
+// Inverse of orgRoleForRole: the classroom role implied by a GitHub org
+// membership role on an existing invitation. "admin" means the invite grants
+// org OWNER, i.e. an instructor; anything else re-invites as a plain student
+// (org role alone can't distinguish TA from student, and student is the safe
+// default a re-invite lands on — a TA re-invite would just be re-assigned).
+export function roleForOrgRole(orgRole: string): RosterRole {
+  return orgRole === "admin" ? "instructor" : "student"
+}
+
 export type TeamRosterRow = {
   // Stable identity for React keys and joins: github_id || login || email.
   // Mirrors studentKey.
@@ -146,6 +163,13 @@ export type BuildTeamRosterInput = {
   // needs-attention rows are SUPPRESSED — the classifier has no basis, so the
   // roster degrades to the pure team-driven view rather than guessing.
   orgMembersKnown?: boolean
+  // True when pending invitations are hidden (a non-owner can't read them, so
+  // the caller passed invitations: [] / staffInvitations: {}). Without the
+  // pending list the needs-attention classifier can't tell a genuinely
+  // not-in-org CSV row from one whose only signal is a now-hidden pending
+  // invite, so the whole needs-attention pass is suppressed to avoid mislabeling
+  // a pending person as needs_attention_not_in_org.
+  pendingHidden?: boolean
 }
 
 // Compute the team-driven roster. Members -> enrolled; pending invitations not
@@ -163,6 +187,7 @@ export function buildTeamRoster(input: BuildTeamRosterInput): TeamRosterRow[] {
     orgMemberIds,
     orgMemberLogins,
     orgMembersKnown = false,
+    pendingHidden = false,
   } = input
   const csv = indexCsv(students)
 
@@ -296,7 +321,7 @@ export function buildTeamRoster(input: BuildTeamRosterInput): TeamRosterRow[] {
   // a non-member is needs_attention_not_in_org (invite). No role is asserted —
   // the team is the authority — so roles carries the ["student"] placeholder for
   // the non-empty invariant and the view renders no role badge for these states.
-  if (orgMembersKnown) {
+  if (orgMembersKnown && !pendingHidden) {
     const pendingLogins = new Set<string>()
     const pendingEmails = new Set<string>()
     for (const row of pendingByKey.values()) {

@@ -21,11 +21,16 @@ import Avatar from "@/components/avatar"
 import type { Student } from "@/types/classroom"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { syncRosterFromTeam, migrateRosterFile } from "@/api/mutations/students"
+import {
+  inviteRosterStudents,
+  bulkInviteByEmail,
+} from "@/api/mutations/students"
 import type { RosterCsvProblem } from "@/api/mutations/students"
-import { getErrorMessage } from "@/hooks/github/mutations"
+import { getErrorMessage, cancelOrgInvitation } from "@/hooks/github/mutations"
 import { useToast } from "@/context/notifications/NotificationProvider"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useGitHubViewer } from "@/hooks/github/hooks"
+import type { GitHubOrgInvitation } from "@/hooks/github/types"
 import {
   githubKeys,
   invalidateInviteQueries as invalidateInviteQueriesForOrg,
@@ -37,6 +42,7 @@ import {
   type SuppressedLogins,
 } from "@/hooks/useSuppressedLogins"
 import type { TeamRosterRow, RosterRole } from "@/util/teamRoster"
+import { roleForOrgRole } from "@/util/teamRoster"
 import { STAFF_ROLES } from "@/types/classroom"
 import {
   ROLE_LABEL_KEY,
@@ -112,6 +118,28 @@ export function nextSelectedKeyAfterSave(
   return prev === savedRowKey ? nextRowKey : prev
 }
 
+// The invite mutations bucket a rate-limited/failed target rather than throwing,
+// so a caller that ignores the result would report success on a send that never
+// happened. Throw a specific error unless exactly one invite actually landed
+// (fresh invite or an already-active/pending skip), so a re-invite that only
+// deferred/failed routes to the error path instead of a false success.
+function assertInviteSent(
+  res: {
+    invited: unknown[]
+    skipped: unknown[]
+    failed: { message: string }[]
+    deferred: unknown[]
+  },
+  who: string,
+): void {
+  const failure = res.failed[0]
+  if (failure) throw new Error(failure.message)
+  if (res.deferred.length > 0)
+    throw new Error(`GitHub rate-limited the re-invite to ${who} — try again.`)
+  if (res.invited.length === 0 && res.skipped.length === 0)
+    throw new Error(`No invitation was sent to ${who} — try again.`)
+}
+
 const EnrolledStudents = ({
   students = [],
   parseProblems = [],
@@ -166,6 +194,7 @@ const EnrolledStudents = ({
     isError,
     isEmpty,
     pendingHidden,
+    failedInvitations,
     teamSlugByRole,
     csvMissingCount,
     csvMissingLogins,
@@ -185,6 +214,61 @@ const EnrolledStudents = ({
 
   const invalidateInviteQueries = () =>
     invalidateInviteQueriesForOrg(queryClient, org)
+
+  // Dismiss a failed/expired invitation: cancel it on GitHub (removes it from
+  // the failed list) and refresh. 404 is treated as success by the mutation.
+  const dismissFailedInvite = useMutation({
+    mutationFn: (invitationId: number) =>
+      cancelOrgInvitation(client, { org, invitationId }),
+    onSuccess: () => invalidateInviteQueries(),
+    onError: (err) =>
+      notify({
+        tone: "error",
+        message: t("students.failedInviteDismissError", {
+          error: getErrorMessage(err),
+        }),
+      }),
+  })
+
+  // Re-invite a failed/expired invitation: dismiss the dead one, then re-issue
+  // an equivalent fresh invite — same classroom role (instructor -> org OWNER),
+  // by username when known (carries the team) else by email. A login-less,
+  // email-less invite can't be re-issued (dismiss-only). The invite functions
+  // don't throw on a rate-limited/failed target — they bucket it — so inspect
+  // the result and throw, otherwise a re-issue that didn't actually send would
+  // report success while the dismissed invite is already gone (an orphan).
+  const reinviteFailedInvite = useMutation({
+    mutationFn: async (inv: GitHubOrgInvitation) => {
+      const who = inv.login || inv.email || String(inv.id)
+      await cancelOrgInvitation(client, { org, invitationId: inv.id })
+      const role = roleForOrgRole(inv.role)
+      if (inv.login) {
+        const res = await inviteRosterStudents(client, {
+          org,
+          classroom,
+          students: [{ username: inv.login, role }],
+        })
+        assertInviteSent(res, who)
+      } else if (inv.email) {
+        const res = await bulkInviteByEmail(client, {
+          org,
+          classroom,
+          invites: [{ email: inv.email, role }],
+        })
+        assertInviteSent(res, who)
+      } else {
+        throw new Error(t("students.failedInviteNoTarget"))
+      }
+    },
+    onSuccess: () => invalidateInviteQueries(),
+    onError: (err) =>
+      notify({
+        tone: "error",
+        message: t("students.failedInviteReinviteError", {
+          error: getErrorMessage(err),
+        }),
+      }),
+  })
 
   // A row is selectable unless it's the signed-in teacher (can't bulk-unenroll
   // yourself), mirroring Org Members' self-exclusion. A pure staff row (no
@@ -486,13 +570,14 @@ const EnrolledStudents = ({
   // After a bulk run, clear the selection and refresh the caches the run
   // touched (roster team membership + pending invites).
   const onBulkDone = (
-    action: "unenroll" | "invite",
+    action: "unenroll" | "invite" | "cancel",
     removed?: Array<Pick<TeamRosterRow, "username">>,
   ) => {
     setSelectedKeys(new Set())
     invalidateInviteQueries()
     // Unenroll changes team membership; invite changes org-invite state and may
-    // team-add an already-active member — refresh the enrolled roster for both.
+    // team-add an already-active member; cancel removes pending invites — refresh
+    // the enrolled roster for all three.
     invalidateTeamRoster()
     // After a bulk unenroll, remember the removed logins so the automatic
     // backfills don't re-add them (see the effects). Only confirmed-removed rows
@@ -723,6 +808,66 @@ const EnrolledStudents = ({
         </Alert>
       ) : null}
 
+      {/* Failed/expired invitations (owner-only). GitHub couldn't deliver these,
+          so they need a re-invite or dismissal — surfaced here since they never
+          appear as roster rows. */}
+      {!isLoading && !isError && failedInvitations.length > 0 ? (
+        <Alert tone="warning" className="flex-col items-stretch gap-2">
+          <span className="text-sm font-medium">
+            {t("students.failedInvitesTitle", {
+              count: failedInvitations.length,
+            })}
+          </span>
+          <ul className="flex flex-col divide-y divide-warning/20">
+            {failedInvitations.map((inv) => {
+              const who = inv.login || inv.email || String(inv.id)
+              return (
+                <li
+                  key={inv.id}
+                  className="flex items-center justify-between gap-3 py-1.5"
+                >
+                  <span className="min-w-0 text-sm">
+                    <span className="font-mono">{who}</span>
+                    {inv.failed_reason ? (
+                      <span className="text-base-content/60">
+                        {" "}
+                        — {inv.failed_reason}
+                      </span>
+                    ) : null}
+                  </span>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {inv.login || inv.email ? (
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        disabled={
+                          reinviteFailedInvite.isPending ||
+                          dismissFailedInvite.isPending
+                        }
+                        onClick={() => reinviteFailedInvite.mutate(inv)}
+                      >
+                        {t("students.reinvite")}
+                      </Button>
+                    ) : null}
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      disabled={
+                        reinviteFailedInvite.isPending ||
+                        dismissFailedInvite.isPending
+                      }
+                      onClick={() => dismissFailedInvite.mutate(inv.id)}
+                    >
+                      {t("students.dismiss")}
+                    </Button>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        </Alert>
+      ) : null}
+
       {/* Toolbar: search + status filter (group-by-section lives in the table
           header next to the count). Sync pinned far-right when applicable. */}
       {!isLoading && !isError && !isEmpty ? (
@@ -936,6 +1081,8 @@ const EnrolledStudents = ({
         classroom={classroom}
         teamSlugByRole={teamSlugByRole}
         row={selected}
+        canManage={!pendingHidden}
+        isSelf={selected ? isSelf(selected) : false}
         onClose={() => setSelectedKey(null)}
         onSaved={(rowKey, updated) => onRowMetadataSaved(rowKey, updated)}
         onUnenrolled={(rowKey, teamWarning) =>
@@ -944,6 +1091,14 @@ const EnrolledStudents = ({
         onResent={(rowKey) => {
           dismissWarning(rowKey)
           invalidateInviteQueries()
+        }}
+        onCanceled={(rowKey) => {
+          // A cancelled invite removes the pending person; refresh invite + team
+          // caches so the row leaves the roster.
+          dismissWarning(rowKey)
+          invalidateInviteQueries()
+          invalidateTeamRoster()
+          refetchRoster()
         }}
         onChanged={(rowKey) => {
           dismissWarning(rowKey)

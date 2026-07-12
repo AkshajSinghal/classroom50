@@ -14,6 +14,7 @@ import {
   syncRosterFromTeam,
   writeRosterRoles,
   migrateRosterFile,
+  resolveTeamIdForRoleRead,
   updateStudent,
   updateStudentWithConflictRetry,
   parseStudentsCsv,
@@ -597,6 +598,24 @@ describe("bulkInviteByEmail — bulk org invites by email, no CSV write", () => 
       },
     })
 
+  // A 429 that carries a Retry-After (seconds), so a retry test can assert the
+  // honored delay was slept.
+  const rateLimitWithRetryAfter = (seconds: number) =>
+    new GitHubAPIError({
+      status: 429,
+      url: "/orgs/acme/invitations",
+      message: "secondary rate limit",
+      body: null,
+      rateLimit: {
+        limit: null,
+        remaining: null,
+        used: null,
+        reset: null,
+        resource: null,
+        retryAfter: seconds,
+      },
+    })
+
   // Records every invite body and whether any git tree write happened. Can 422
   // a specific email (already-member), reject one with a 429 (rate limit), or
   // reject one with a generic 500 (failed) so every result bucket is testable.
@@ -605,10 +624,14 @@ describe("bulkInviteByEmail — bulk org invites by email, no CSV write", () => 
     noTeam?: boolean
     rateLimitEmails?: string[]
     failEmails?: string[]
+    // 429 (with Retry-After) the first N POST /invitations attempts, then let
+    // later attempts through — exercises the Retry-After-backed retry pass.
+    rateLimitFirstN?: number
   }) => {
     const memberEmails = new Set(opts?.memberEmails ?? [])
     const rateLimitEmails = new Set(opts?.rateLimitEmails ?? [])
     const failEmails = new Set(opts?.failEmails ?? [])
+    let inviteAttempts = 0
     const state = {
       csvWritten: false,
       inviteBodies: [] as {
@@ -653,6 +676,13 @@ describe("bulkInviteByEmail — bulk org invites by email, no CSV write", () => 
               email: string
               role: string
               team_ids?: number[]
+            }
+            const attempt = inviteAttempts++
+            if (
+              opts?.rateLimitFirstN !== undefined &&
+              attempt < opts.rateLimitFirstN
+            ) {
+              return Promise.reject(rateLimitWithRetryAfter(60))
             }
             if (memberEmails.has(body.email)) {
               return Promise.reject(apiError(422, "already a member"))
@@ -793,6 +823,8 @@ describe("bulkInviteByEmail — bulk org invites by email, no CSV write", () => 
       org: "acme",
       classroom: "cs101",
       invites: targets,
+      // Isolate the mid-batch short-circuit from the Retry-After retry pass.
+      maxRetries: 0,
     })
 
     // The throttled email is deferred; nothing is misrouted to `failed`.
@@ -814,6 +846,90 @@ describe("bulkInviteByEmail — bulk org invites by email, no CSV write", () => 
     for (const email of result.deferred) {
       expect(sentEmails.has(email)).toBe(false)
     }
+  })
+
+  it("auto-retries a deferred email honoring Retry-After, moving it to invited", async () => {
+    // The first POST 429s (with Retry-After 60s), deferring the email; the retry
+    // pass sleeps the honored delay and re-attempts, which succeeds. Injected
+    // sleepFn keeps the test instant and records the honored delay.
+    const { client, state } = makeClient({ rateLimitFirstN: 1 })
+    const slept: number[] = []
+
+    const result = await bulkInviteByEmail(client, {
+      org: "acme",
+      classroom: "cs101",
+      invites: [{ email: "a@x.edu" }],
+      sleepFn: async (ms) => {
+        slept.push(ms)
+      },
+    })
+
+    expect(result.invited.map((i) => i.email)).toEqual(["a@x.edu"])
+    expect(result.deferred).toEqual([])
+    expect(result.failed).toEqual([])
+    // Honored the 60s Retry-After from the rate-limit error.
+    expect(slept.some((ms) => ms >= 60_000)).toBe(true)
+    expect(state.inviteBodies).toHaveLength(1)
+  })
+
+  it("leaves an email deferred when the retry cap is exhausted", async () => {
+    // Throttled on every attempt; with maxRetries: 1 the single retry round also
+    // 429s, so the email ends in `deferred` (never failed), sent zero times.
+    const { client, state } = makeClient({ rateLimitEmails: ["a@x.edu"] })
+    const slept: number[] = []
+
+    const result = await bulkInviteByEmail(client, {
+      org: "acme",
+      classroom: "cs101",
+      invites: [{ email: "a@x.edu" }],
+      maxRetries: 1,
+      sleepFn: async (ms) => {
+        slept.push(ms)
+      },
+    })
+
+    expect(result.deferred).toEqual(["a@x.edu"])
+    expect(result.failed).toEqual([])
+    expect(result.invited).toEqual([])
+    // One retry round ran (one sleep), then the cap was hit.
+    expect(slept).toHaveLength(1)
+    expect(state.inviteBodies).toHaveLength(0)
+  })
+
+  it("routes a non-rate-limit error during a retry round to failed", async () => {
+    // First attempt 429s (deferred); the retry attempt hits a 500 -> failed, not
+    // stuck in deferred.
+    let attempt = 0
+    const { client } = makeClient()
+    // Re-wrap the client's request so the SAME email 429s once then 500s.
+    const inner = client.request as unknown as (
+      p: string,
+      o?: { method?: string; body?: unknown },
+    ) => Promise<unknown>
+    const request = vi
+      .fn()
+      .mockImplementation((path: string, options?: { method?: string }) => {
+        if (path.endsWith("/invitations")) {
+          const n = attempt++
+          if (n === 0) return Promise.reject(rateLimitWithRetryAfter(1))
+          return Promise.reject(apiError(500, "server error"))
+        }
+        return inner(path, options)
+      })
+    const wrapped = { ...client, request } as unknown as GitHubClient
+
+    const result = await bulkInviteByEmail(wrapped, {
+      org: "acme",
+      classroom: "cs101",
+      invites: [{ email: "a@x.edu" }],
+      sleepFn: async () => {},
+    })
+
+    expect(result.failed).toEqual([
+      { email: "a@x.edu", message: expect.stringContaining("server error") },
+    ])
+    expect(result.deferred).toEqual([])
+    expect(result.invited).toEqual([])
   })
 
   it("maps a mixed-role batch to the right team and org role per email", async () => {
@@ -893,6 +1009,73 @@ describe("updateStudent — edit a roster row's teacher-facing fields in place",
       }),
     ).rejects.toThrow(/does not exist in roster/i)
     expect(committed.content).toBeNull()
+  })
+
+  it("upserts a new row when no row matches but identity is provided", async () => {
+    // A team member (e.g. a staff instructor) with no roster.csv row yet: editing
+    // their profile should CREATE the row from identity rather than throw.
+    const { client, committed } = makeClient({ startingCsv: HEADER + aliceRow })
+
+    const result = await updateStudent(client, {
+      org: "acme",
+      classroom: "cs101",
+      key: "77",
+      patch: {
+        first_name: "Sam",
+        last_name: "Staff",
+        email: "sam@x.edu",
+        section: "",
+      },
+      identity: { github_id: "77", username: "sam" },
+    })
+
+    const rows = rowsFromCsv(committed.content!)
+    // Existing alice row is preserved; the new sam row is appended with identity.
+    expect(rows.find((r) => r.github_id === "42")?.username).toBe("alice")
+    const sam = rows.find((r) => r.github_id === "77")
+    expect(sam).toMatchObject({
+      github_id: "77",
+      username: "sam",
+      first_name: "Sam",
+      last_name: "Staff",
+      email: "sam@x.edu",
+    })
+    expect(result.student.github_id).toBe("77")
+  })
+
+  it("updates a username-only row (no duplicate) when editing keyed by github_id", async () => {
+    // A legacy username-only row for "carol"; the edit is keyed by github_id (as
+    // buildTeamRoster stamps an enrolled row's id from the live member). The
+    // upsert must match by the identity claim (username) and UPDATE that row,
+    // not append a second row for the same person.
+    const carolRow = "carol,,,,,\n" // username only, no github_id
+    const { client, committed } = makeClient({
+      startingCsv: HEADER + aliceRow + carolRow,
+    })
+
+    await updateStudent(client, {
+      org: "acme",
+      classroom: "cs101",
+      key: "88", // github_id key, which does NOT match the id-less carol row
+      patch: {
+        first_name: "Carol",
+        last_name: "C",
+        email: "carol@x.edu",
+        section: "Period 3",
+      },
+      identity: { github_id: "88", username: "carol" },
+    })
+
+    const rows = rowsFromCsv(committed.content!)
+    // Exactly one carol row (updated in place), not a duplicate.
+    const carols = rows.filter((r) => r.username === "carol")
+    expect(carols).toHaveLength(1)
+    expect(carols[0]).toMatchObject({
+      first_name: "Carol",
+      email: "carol@x.edu",
+    })
+    // Total rows unchanged (alice + carol), no append.
+    expect(rows).toHaveLength(2)
   })
 
   it("blocks editing into another row's email and leaves the CSV unwritten", async () => {
@@ -2419,6 +2602,9 @@ const makeInviteClient = (opts: {
   // When set, the Nth (0-based) POST /invitations rejects with a 429 rate limit
   // and every later POST would too — used to exercise the mid-batch short-circuit.
   rateLimitFromInvite?: number
+  // When set, ONLY the first N POST /invitations attempts 429; later attempts
+  // succeed — used to exercise the Retry-After-backed retry of the deferred set.
+  rateLimitFirstN?: number
 }) => {
   const invitations: { invitee_id?: number; team_ids?: number[] }[] = []
   const memberSet = new Set((opts.members ?? []).map((m) => m.toLowerCase()))
@@ -2474,6 +2660,12 @@ const makeInviteClient = (opts: {
         if (
           opts.rateLimitFromInvite !== undefined &&
           attempt >= opts.rateLimitFromInvite
+        ) {
+          return Promise.reject(rateLimitError())
+        }
+        if (
+          opts.rateLimitFirstN !== undefined &&
+          attempt < opts.rateLimitFirstN
         ) {
           return Promise.reject(rateLimitError())
         }
@@ -2739,6 +2931,10 @@ describe("inviteRosterStudents — fresh invites for not_in_org students", () =>
         { username: "b", github_id: "2" },
         { username: "c", github_id: "3" },
       ],
+      // Isolate the mid-batch short-circuit from the Retry-After retry pass
+      // (covered by its own test): with the endpoint throttled indefinitely,
+      // skip retries so this asserts the first-pass defer behavior.
+      maxRetries: 0,
     })
 
     expect(res.invited).toEqual([])
@@ -2748,6 +2944,75 @@ describe("inviteRosterStudents — fresh invites for not_in_org students", () =>
     expect(res.deferred.sort()).toEqual(["a", "b", "c"])
     // Only the one attempt that tripped the limit was POSTed; no further invites
     // were fired at the throttled endpoint.
+    expect(invitations).toEqual([])
+  })
+
+  it("auto-retries a deferred (rate-limited) target honoring Retry-After", async () => {
+    // The first POST 429s (deferring the target); the retry pass sleeps the
+    // honored Retry-After and re-attempts, which succeeds. Injected sleepFn
+    // keeps the test instant and records the honored delay.
+    const { client, invitations } = makeInviteClient({ rateLimitFirstN: 1 })
+    const slept: number[] = []
+
+    const res = await inviteRosterStudents(client, {
+      org: "acme",
+      classroom: "cs101",
+      students: [{ username: "a", github_id: "1" }],
+      sleepFn: async (ms) => {
+        slept.push(ms)
+      },
+    })
+
+    expect(res.invited).toEqual([{ username: "a", role: "student" }])
+    expect(res.deferred).toEqual([])
+    expect(res.failed).toEqual([])
+    // Honored the 60s Retry-After from the rate-limit error.
+    expect(slept.some((ms) => ms >= 60_000)).toBe(true)
+    expect(invitations).toHaveLength(1)
+  })
+
+  it("leaves a target deferred when the retry cap is exhausted", async () => {
+    // Throttled on every attempt; maxRetries: 1 runs one retry round that also
+    // 429s, so the target ends in `deferred` (never failed), invited zero times.
+    const { client, invitations } = makeInviteClient({ rateLimitFromInvite: 0 })
+    const slept: number[] = []
+
+    const res = await inviteRosterStudents(client, {
+      org: "acme",
+      classroom: "cs101",
+      students: [{ username: "a", github_id: "1" }],
+      maxRetries: 1,
+      sleepFn: async (ms) => {
+        slept.push(ms)
+      },
+    })
+
+    expect(res.deferred).toEqual(["a"])
+    expect(res.failed).toEqual([])
+    expect(res.invited).toEqual([])
+    expect(slept).toHaveLength(1) // one retry round, then the cap hit
+    expect(invitations).toEqual([])
+  })
+
+  it("routes a non-rate-limit error during a retry round to failed", async () => {
+    // First attempt 429s (deferred); the retry attempt falls through to the
+    // generic invitationFails path (a 500-like error) -> failed, not deferred.
+    const { client, invitations } = makeInviteClient({
+      rateLimitFirstN: 1,
+      invitationFails: true,
+    })
+
+    const res = await inviteRosterStudents(client, {
+      org: "acme",
+      classroom: "cs101",
+      students: [{ username: "a", github_id: "1" }],
+      sleepFn: async () => {},
+    })
+
+    expect(res.failed).toHaveLength(1)
+    expect(res.failed[0]?.username).toBe("a")
+    expect(res.deferred).toEqual([])
+    expect(res.invited).toEqual([])
     expect(invitations).toEqual([])
   })
 })
@@ -2978,6 +3243,14 @@ describe("assignRosterMemberRole — enroll a rostered active member", () => {
 const makeRoleChangeClient = (opts: {
   members: string[]
   failRemoveSlug?: string
+  // The authenticated viewer's login (GET /user) — drives the self-demote
+  // guard. Defaults to a bystander so existing demotion tests don't self-demote.
+  viewerLogin?: string
+  // Logins the org reports as owners (GET /members?role=admin) — drives the
+  // sole-owner guard. Defaults to two owners so a demotion isn't blocked.
+  admins?: string[]
+  // Make the team-add step throw (to exercise the post-demote failure path).
+  failTeamAdd?: boolean
 }) => {
   const memberSet = new Set(opts.members.map((m) => m.toLowerCase()))
   const teamAdds: { slug: string; login: string }[] = []
@@ -2988,6 +3261,8 @@ const makeRoleChangeClient = (opts: {
     | { kind: "teamAdd"; slug: string; login: string }
     | { kind: "teamRemove"; slug: string; login: string }
   )[] = []
+  const viewerLogin = opts.viewerLogin ?? "someviewer"
+  const admins = opts.admins ?? ["owner-a", "owner-b"]
 
   const requestRaw = vi.fn().mockImplementation((path: string) => {
     if (path.includes("/contents/") && path.includes("classroom.json")) {
@@ -3001,6 +3276,16 @@ const makeRoleChangeClient = (opts: {
     .mockImplementation(
       (path: string, options?: { method?: string; body?: unknown }) => {
         const method = options?.method ?? "GET"
+        // Authenticated viewer (getAuthenticatedUser) for the self-demote guard.
+        if (path === "/user") {
+          return Promise.resolve({ id: 1, login: viewerLogin })
+        }
+        // Org owners (listOrgAdmins) for the sole-owner guard.
+        if (path.includes("/members") && path.includes("role=admin")) {
+          return Promise.resolve(
+            admins.map((login, i) => ({ id: 100 + i, login })),
+          )
+        }
         // classroom.json read (resolveClassroomTeamSlugs) -> derived slugs.
         if (path.includes("/contents/") && path.includes("classroom.json")) {
           return Promise.reject(
@@ -3047,6 +3332,9 @@ const makeRoleChangeClient = (opts: {
             teamRemoves.push({ slug, login })
             ops.push({ kind: "teamRemove", slug, login })
             return Promise.resolve()
+          }
+          if (opts.failTeamAdd) {
+            return Promise.reject(new Error(`team add failed: ${slug}`))
           }
           teamAdds.push({ slug, login })
           ops.push({ kind: "teamAdd", slug, login })
@@ -3251,5 +3539,148 @@ describe("applyRosterRoleChange — confirmed team move / enroll", () => {
       }),
     ).rejects.toThrow(/not an active member/)
     expect(teamAdds).toEqual([])
+  })
+
+  it("refuses a self-demotion off instructor before any mutation", async () => {
+    const { client, orgRolePuts, teamAdds } = makeRoleChangeClient({
+      members: ["boss"],
+      viewerLogin: "boss", // the acting owner IS the demotion target
+    })
+
+    await expect(
+      applyRosterRoleChange(client, {
+        org: "acme",
+        classroom: "cs101",
+        username: "boss",
+        fromRoles: ["instructor"],
+        toRole: "student",
+      }),
+    ).rejects.toThrow(/can't demote yourself/i)
+    // Nothing mutated — the guard runs before the owner demote and team moves.
+    expect(orgRolePuts).toEqual([])
+    expect(teamAdds).toEqual([])
+  })
+
+  it("refuses demoting the sole organization owner", async () => {
+    const { client, orgRolePuts } = makeRoleChangeClient({
+      members: ["boss"],
+      viewerLogin: "someviewer",
+      admins: ["boss"], // boss is the only owner
+    })
+
+    await expect(
+      applyRosterRoleChange(client, {
+        org: "acme",
+        classroom: "cs101",
+        username: "boss",
+        fromRoles: ["instructor"],
+        toRole: "student",
+      }),
+    ).rejects.toThrow(/only organization owner/i)
+    expect(orgRolePuts).toEqual([])
+  })
+
+  it("does not block a demotion when the owner list is unreadable (403 -> [])", async () => {
+    // admins:[] models listOrgAdmins' 403 fallback; the guard must NOT block
+    // (fail-open), so the demotion proceeds normally.
+    const { client, orgRolePuts } = makeRoleChangeClient({
+      members: ["boss"],
+      admins: [],
+    })
+
+    await applyRosterRoleChange(client, {
+      org: "acme",
+      classroom: "cs101",
+      username: "boss",
+      fromRoles: ["instructor"],
+      toRole: "student",
+    })
+
+    expect(orgRolePuts).toContainEqual({ login: "boss", role: "member" })
+  })
+
+  it("surfaces an owner-revoked error when a step fails after the demote", async () => {
+    // The owner demote commits, then the target team-add throws — the error
+    // must say the owner was revoked so the caller re-runs, not a generic fail.
+    const { client, orgRolePuts } = makeRoleChangeClient({
+      members: ["boss"],
+      failTeamAdd: true,
+    })
+
+    await expect(
+      applyRosterRoleChange(client, {
+        org: "acme",
+        classroom: "cs101",
+        username: "boss",
+        fromRoles: ["instructor"],
+        toRole: "student",
+      }),
+    ).rejects.toThrow(/demoted from organization owner.*Re-run/s)
+    // The demote did land (it ran first); the failure is the team move.
+    expect(orgRolePuts).toContainEqual({ login: "boss", role: "member" })
+  })
+})
+
+describe("resolveTeamIdForRoleRead — read-only team id per role", () => {
+  const notFound = (path: string) =>
+    new GitHubAPIError({
+      status: 404,
+      url: path,
+      message: "Not Found",
+      body: null,
+      rateLimit: {
+        limit: null,
+        remaining: null,
+        used: null,
+        reset: null,
+        resource: null,
+        retryAfter: null,
+      },
+    })
+
+  // classroom.json read via requestRaw; `json` null models a 404 (no file).
+  const makeClient = (json: Record<string, unknown> | null) => {
+    const requestRaw = vi.fn().mockImplementation((path: string) => {
+      if (path.includes("classroom.json")) {
+        return json === null
+          ? Promise.reject(notFound(path))
+          : Promise.resolve(JSON.stringify(json))
+      }
+      return Promise.reject(new Error(`unexpected requestRaw: ${path}`))
+    })
+    return { requestRaw } as unknown as GitHubClient
+  }
+
+  it("student -> the classroom team id from classroom.json.team", async () => {
+    const client = makeClient({ team: { slug: "classroom50-cs101", id: 4242 } })
+    expect(
+      await resolveTeamIdForRoleRead(client, "acme", "cs101", "student"),
+    ).toBe(4242)
+  })
+
+  it("staff -> the role's team id from classroom.json.teams[role]", async () => {
+    const client = makeClient({
+      teams: { instructor: { id: 7 }, ta: { id: 9 } },
+    })
+    expect(
+      await resolveTeamIdForRoleRead(client, "acme", "cs101", "instructor"),
+    ).toBe(7)
+    expect(await resolveTeamIdForRoleRead(client, "acme", "cs101", "ta")).toBe(
+      9,
+    )
+  })
+
+  it("staff with no teams block -> undefined (no team to attach)", async () => {
+    const client = makeClient({ team: { slug: "classroom50-cs101", id: 1 } })
+    expect(
+      await resolveTeamIdForRoleRead(client, "acme", "cs101", "instructor"),
+    ).toBeUndefined()
+  })
+
+  it("staff, classroom.json 404 -> undefined (not a throw)", async () => {
+    const client = makeClient(null)
+    expect(
+      await resolveTeamIdForRoleRead(client, "acme", "cs101", "ta"),
+    ).toBeUndefined()
   })
 })

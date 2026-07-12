@@ -7,6 +7,7 @@ import {
   UserMinus,
   UserPlus,
   X,
+  XCircle,
 } from "lucide-react"
 
 import { useMutation } from "@tanstack/react-query"
@@ -17,14 +18,21 @@ import EditStudentForm from "@/pages/students/EditStudentForm"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import {
   assignRosterMemberRole,
+  applyRosterRoleChange,
   inviteRosterStudents,
+  resolveTeamIdForRoleRead,
   unenrollStudent,
   type StudentCsvRow,
 } from "@/api/mutations/students"
-import { resendOrgInvitation, getErrorMessage } from "@/hooks/github/mutations"
+import {
+  resendOrgInvitation,
+  cancelOrgInvitation,
+  getErrorMessage,
+} from "@/hooks/github/mutations"
 import { nameFromParts, parseGitHubId } from "@/util/students"
 import { rosterRowInitials } from "@/util/memberRow"
 import {
+  orgRoleForRole,
   rowToStudent,
   sortRolesByRank,
   type RosterRole,
@@ -35,7 +43,7 @@ import {
   STATE_BADGE_TONE,
   STATE_LABEL_KEY,
 } from "@/util/rosterRoles"
-import { Badge, Button, Modal } from "@/components/ui"
+import { Badge, Button, Modal, Select } from "@/components/ui"
 
 // Roster-owned detail modal (single native <dialog>), opened by clicking a
 // roster row. Shares the identity header with the Org Members modal; everything
@@ -54,10 +62,13 @@ const RosterMemberModal = ({
   classroom,
   teamSlugByRole,
   row: rowProp,
+  canManage = true,
+  isSelf = false,
   onClose,
   onSaved,
   onUnenrolled,
   onResent,
+  onCanceled,
   onChanged,
   onError,
 }: {
@@ -70,10 +81,23 @@ const RosterMemberModal = ({
   teamSlugByRole: Record<RosterRole, string>
   // Nullable so the <dialog> can stay mounted across open/close.
   row: TeamRosterRow | null
+  // Whether the viewer can perform owner-scoped membership writes (invite,
+  // resend, cancel, unenroll, role change). False for a non-owner (pending is
+  // hidden), so those actions are hidden with an explanatory note rather than
+  // rendered as buttons that silently no-op.
+  canManage?: boolean
+  // True when this row IS the signed-in viewer. A viewer can't change their own
+  // role here: demoting yourself off instructor would revoke your own org-owner
+  // access mid-change (the mutation refuses it too — this hides the control so
+  // there's no dead action). Mirrors the self-exclusion on bulk select/unenroll.
+  isSelf?: boolean
   onClose: () => void
   onSaved: (rowKey: string, updated: StudentCsvRow) => void
   onUnenrolled: (rowKey: string, teamWarning?: string) => void
   onResent: (rowKey: string) => void
+  // A pending invite was cancelled — the parent drops the row's warning and
+  // refetches so the now-uninvited person leaves the roster.
+  onCanceled: (rowKey: string) => void
   // A needs-attention row was resolved (assigned a role, or invited) — the
   // parent refetches the roster + invalidates invite/team caches so the row
   // moves to enrolled/pending.
@@ -85,11 +109,18 @@ const RosterMemberModal = ({
   const titleId = useId()
   const [confirmingUnenroll, setConfirmingUnenroll] = useState(false)
   const [confirmingResend, setConfirmingResend] = useState(false)
+  const [confirmingCancel, setConfirmingCancel] = useState(false)
   const [editingProfile, setEditingProfile] = useState(false)
   const [working, setWorking] = useState(false)
   const [resending, setResending] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [resolving, setResolving] = useState(false)
+  const [changingRole, setChangingRole] = useState(false)
+  // The role selected in the enrolled-row role dropdown (null = matches current,
+  // no pending change). Instructor target requires the owner-grant confirmation.
+  const [pendingRole, setPendingRole] = useState<RosterRole | null>(null)
+  const [roleOwnerConfirmed, setRoleOwnerConfirmed] = useState(false)
 
   const unenrollMutation = useMutation({
     mutationFn: (student: ReturnType<typeof rowToStudent>) =>
@@ -101,12 +132,21 @@ const RosterMemberModal = ({
   // matching the unenroll (`working`) guard. Without it, closing or switching
   // rows mid-invite would let the captured-row promise apply onResent/onError/
   // onClose to a stale student.
-  const busy = working || submitting || resending || resolving
+  const busy =
+    working ||
+    submitting ||
+    resending ||
+    cancelling ||
+    resolving ||
+    changingRole
 
   const handleClose = () => {
     if (busy) return
     setConfirmingUnenroll(false)
     setConfirmingResend(false)
+    setConfirmingCancel(false)
+    setPendingRole(null)
+    setRoleOwnerConfirmed(false)
     setEditingProfile(false)
     onClose()
   }
@@ -120,6 +160,26 @@ const RosterMemberModal = ({
   useEffect(() => {
     if (rowProp) setLastRow(rowProp)
   }, [rowProp])
+
+  // Reset per-row draft state when the modal's row identity changes without an
+  // intervening close (parent re-points the selection, or a refetch re-resolves
+  // the same key to shifted data). Done during render (not an effect) so a
+  // staged role change — and its owner-grant confirmation, the sole guard
+  // before granting org OWNER — can never carry onto the next member and apply
+  // against a base role the teacher never re-evaluated.
+  const [draftRowKey, setDraftRowKey] = useState<string | null>(
+    rowProp?.key ?? null,
+  )
+  if (rowProp && rowProp.key !== draftRowKey) {
+    setDraftRowKey(rowProp.key)
+    setPendingRole(null)
+    setRoleOwnerConfirmed(false)
+    setConfirmingResend(false)
+    setConfirmingCancel(false)
+    setConfirmingUnenroll(false)
+    setEditingProfile(false)
+  }
+
   const row = rowProp ?? lastRow
 
   if (!row) {
@@ -128,24 +188,58 @@ const RosterMemberModal = ({
   }
 
   const student = rowToStudent(row)
-  // A staff-only row (instructor/TA with no student enrollment) has no
-  // roster.csv row and isn't on the student team — the student-roster actions
-  // (edit CSV metadata, unenroll) don't apply. Staff are managed in Settings. A
-  // person who is BOTH staff and a student keeps the student actions (they do
+  // A staff-only row is an instructor/TA with no student enrollment. Unenroll
+  // (dropping a student-team membership) doesn't apply to them — that's the one
+  // student-only action (see canUnenroll). Profile metadata IS editable for them
+  // (see canEdit): syncRosterFromTeam writes a roster.csv row per team member.
+  // A person who is BOTH staff and a student keeps the student actions (they do
   // have a student enrollment), so gate on the student enrollment, not
   // "student is the sole role" (hasStudentEnrollment — shared with the bulk gate).
   const staffOnly = !hasStudentEnrollment(row)
-  const canEdit = !staffOnly && row.state !== "pending"
+  // Profile metadata (name / email / section) is teacher-supplied and editable
+  // for any enrolled member with a roster.csv row — including a staff-only
+  // instructor/TA, since syncRosterFromTeam writes a (blank-metadata) row for
+  // every team member for the teacher to fill in. It only gates out `pending`
+  // rows (no roster row yet — the invite hasn't been accepted) and rows without
+  // a resolvable roster identity. Unenroll stays student-only (see canUnenroll);
+  // editing profile fields is not the same as unenrolling.
+  const canEdit = row.state !== "pending" && Boolean(row.username)
   const displayName =
     nameFromParts(row.first_name, row.last_name) || row.username || row.email
   const displayInitials = rosterRowInitials(row)
   const label = row.username || row.email
-  const canResend = row.state === "pending" && Boolean(row.github_id)
-  const needsRole = row.state === "needs_attention_in_org"
-  const needsInvite = row.state === "needs_attention_not_in_org"
+  const canResend =
+    canManage && row.state === "pending" && Boolean(row.github_id)
+  // Cancelling a pending invite needs its org-invitation id (set on pending
+  // rows). Available even for an email-only pending invite (no github_id), so
+  // gate on the id, not github_id.
+  const canCancel =
+    canManage &&
+    row.state === "pending" &&
+    typeof row.invitation_id === "number"
+  const needsRole = canManage && row.state === "needs_attention_in_org"
+  const needsInvite = canManage && row.state === "needs_attention_not_in_org"
   // Unenroll drops a roster.csv row + student-team membership — a student-only
   // action. Hidden for a staff-only row (nothing to unenroll from the roster).
-  const canUnenroll = !staffOnly
+  const canUnenroll = canManage && !staffOnly
+  // Per-member role change is offered for an ENROLLED (active-team) member with
+  // a resolvable username — but NOT for the viewer's own row: demoting yourself
+  // off instructor revokes your own org-owner access mid-change (the mutation
+  // refuses it), so the control is suppressed with a note rather than shown as a
+  // dead action. The dropdown seeds from their primary current role; switching +
+  // confirming calls applyRosterRoleChange (which grants/revokes org owner for
+  // an instructor target/demotion).
+  const currentRole: RosterRole = sortRolesByRank(row.roles)[0] ?? "student"
+  const canChangeRole =
+    canManage && !isSelf && row.state === "enrolled" && Boolean(row.username)
+  // Show the "can't change your own role" note only when a role change would
+  // otherwise be offered (an enrolled self row a manager could act on).
+  const selfRoleBlocked =
+    canManage && isSelf && row.state === "enrolled" && Boolean(row.username)
+  const selectedRole = pendingRole ?? currentRole
+  const roleChanged = selectedRole !== currentRole
+  const roleGrantsOwner = selectedRole === "instructor"
+  const canApplyRole = roleChanged && (!roleGrantsOwner || roleOwnerConfirmed)
 
   const handleAssignRole = async () => {
     if (resolving) return
@@ -242,11 +336,24 @@ const RosterMemberModal = ({
     }
     setResending(true)
     try {
+      // Re-attach the row's team so the re-sent invite lands the invitee on the
+      // right team on acceptance (a team-less resend would orphan them).
+      const role = sortRolesByRank(row.roles)[0] ?? "student"
+      const teamId = await resolveTeamIdForRoleRead(
+        client,
+        org,
+        classroom,
+        role,
+      )
       await resendOrgInvitation(client, {
         org,
         username: row.username,
         inviteeId,
         invitationId: row.invitation_id,
+        teamIds: teamId ? [teamId] : undefined,
+        // Re-issue with the same org role as the original invite, so a resend
+        // never downgrades a pending instructor from org OWNER.
+        role: orgRoleForRole(role),
       })
       onResent(row.key)
       onClose()
@@ -261,6 +368,63 @@ const RosterMemberModal = ({
     } finally {
       setResending(false)
       setConfirmingResend(false)
+    }
+  }
+
+  const handleCancelInvite = async () => {
+    if (cancelling) return
+    const invitationId = row.invitation_id
+    if (typeof invitationId !== "number") {
+      onError(row.key, t("students.cancelInviteMissingId", { label }))
+      return
+    }
+    setCancelling(true)
+    try {
+      await cancelOrgInvitation(client, { org, invitationId })
+      onCanceled(row.key)
+      onClose()
+    } catch (err) {
+      onError(
+        row.key,
+        t("students.cancelInviteFailed", {
+          label,
+          error: getErrorMessage(err),
+        }),
+      )
+    } finally {
+      setCancelling(false)
+      setConfirmingCancel(false)
+    }
+  }
+
+  const handleChangeRole = async () => {
+    if (changingRole || !roleChanged) return
+    const { key, username } = row
+    if (!username) {
+      onError(key, t("students.changeRoleNoUsername", { label }))
+      return
+    }
+    setChangingRole(true)
+    try {
+      await applyRosterRoleChange(client, {
+        org,
+        classroom,
+        username,
+        github_id: row.github_id,
+        fromRoles: row.roles,
+        toRole: selectedRole,
+      })
+      setPendingRole(null)
+      setRoleOwnerConfirmed(false)
+      onChanged(key)
+      onClose()
+    } catch (err) {
+      onError(
+        key,
+        t("students.changeRoleFailed", { label, error: getErrorMessage(err) }),
+      )
+    } finally {
+      setChangingRole(false)
     }
   }
 
@@ -361,6 +525,19 @@ const RosterMemberModal = ({
               </Button>
             ) : null}
 
+            {canCancel && !confirmingCancel ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-error hover:bg-error/10"
+                disabled={busy}
+                onClick={() => setConfirmingCancel(true)}
+              >
+                <XCircle aria-hidden="true" className="size-4" />
+                {t("students.cancelInvite")}
+              </Button>
+            ) : null}
+
             {canUnenroll && !confirmingUnenroll ? (
               <Button
                 variant="ghost"
@@ -376,8 +553,19 @@ const RosterMemberModal = ({
           </div>
         </div>
 
+        {/* Non-owner: membership writes (invite/resend/cancel/unenroll/role) are
+              owner-only, so we hide those actions and explain why rather than
+              showing buttons that silently no-op. */}
+        {!canManage && row.state !== "enrolled" ? (
+          <p className="text-sm text-base-content/70">
+            {t("students.manageOwnerOnly")}
+          </p>
+        ) : null}
+
         {/* Inline confirmations for the enrollment actions above. */}
-        {(canResend && confirmingResend) || confirmingUnenroll ? (
+        {(canResend && confirmingResend) ||
+        (canCancel && confirmingCancel) ||
+        confirmingUnenroll ? (
           <section className="flex flex-col gap-3">
             {canResend && confirmingResend ? (
               <div className="flex flex-col gap-3 rounded-box border border-primary/30 bg-primary/5 p-4 text-sm">
@@ -412,6 +600,39 @@ const RosterMemberModal = ({
                         {t("students.resend")}
                       </>
                     )}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
+            {canCancel && confirmingCancel ? (
+              <div className="flex flex-col gap-3 rounded-box border border-error/30 bg-error/5 p-4 text-sm">
+                <p className="text-base-content/80">
+                  {t("students.confirmCancelInviteBody", {
+                    label: row.username || row.email,
+                    org,
+                  })}
+                </p>
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={cancelling}
+                    onClick={() => setConfirmingCancel(false)}
+                  >
+                    {t("students.keepInvite")}
+                  </Button>
+                  <Button
+                    variant="error"
+                    size="sm"
+                    loading={cancelling}
+                    loadingLabel={t("common.working")}
+                    disabled={cancelling}
+                    onClick={() => void handleCancelInvite()}
+                  >
+                    {cancelling
+                      ? t("common.working")
+                      : t("students.cancelInvite")}
                   </Button>
                 </div>
               </div>
@@ -525,6 +746,80 @@ const RosterMemberModal = ({
                 </span>
               )}
             </div>
+
+            {canChangeRole ? (
+              <div className="flex flex-col gap-2 px-4 py-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm text-base-content/70">
+                    {t("students.roleLabel")}
+                  </span>
+                  <Select
+                    selectSize="sm"
+                    className="w-40"
+                    aria-label={t("students.roleLabel")}
+                    disabled={busy}
+                    value={selectedRole}
+                    onChange={(e) => {
+                      const next = e.target.value as RosterRole
+                      setPendingRole(next)
+                      setRoleOwnerConfirmed(false)
+                    }}
+                  >
+                    <option value="student">{t("students.roleStudent")}</option>
+                    <option value="ta">{t("students.roleTa")}</option>
+                    <option value="instructor">
+                      {t("students.roleInstructor")}
+                    </option>
+                  </Select>
+                </div>
+
+                {roleChanged && roleGrantsOwner ? (
+                  <label className="flex items-start gap-2 rounded-box border border-error/30 bg-error/5 p-3 text-sm">
+                    <input
+                      type="checkbox"
+                      className="checkbox checkbox-sm mt-0.5"
+                      checked={roleOwnerConfirmed}
+                      onChange={(e) =>
+                        setRoleOwnerConfirmed(e.currentTarget.checked)
+                      }
+                    />
+                    <span>{t("students.changeRoleOwnerNotice")}</span>
+                  </label>
+                ) : null}
+
+                {roleChanged ? (
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => {
+                        setPendingRole(null)
+                        setRoleOwnerConfirmed(false)
+                      }}
+                    >
+                      {t("common.cancel")}
+                    </Button>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      loading={changingRole}
+                      loadingLabel={t("common.working")}
+                      disabled={busy || !canApplyRole}
+                      onClick={() => void handleChangeRole()}
+                    >
+                      {t("students.changeRoleApply")}
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {selfRoleBlocked ? (
+              <p className="px-4 py-2.5 text-sm text-base-content/70">
+                {t("students.changeRoleSelfBlocked")}
+              </p>
+            ) : null}
           </div>
         </section>
 
@@ -548,11 +843,7 @@ const RosterMemberModal = ({
             ) : null}
           </div>
 
-          {staffOnly ? (
-            <p className="text-sm text-base-content/70">
-              {t("students.staffManagedInSettings")}
-            </p>
-          ) : !canEdit ? (
+          {!canEdit ? (
             <p className="text-sm text-base-content/70">
               {t("students.pendingNoEdit")}
             </p>

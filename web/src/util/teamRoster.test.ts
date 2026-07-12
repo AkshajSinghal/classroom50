@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 import {
   buildTeamRoster,
   countByState,
+  orgRoleForRole,
+  roleForOrgRole,
   rowToStudent,
   teamMembersMissingFromCsv,
   rowsNeedingBackfill,
@@ -381,6 +383,23 @@ describe("buildTeamRoster — needs-attention (CSV row on no team)", () => {
       student: 1,
     })
   })
+
+  it("suppresses needs-attention rows when pending is hidden (non-owner), avoiding a not_in_org mislabel", () => {
+    // A non-owner passes invitations: [] (pending hidden). A CSV row for someone
+    // whose only signal was a now-hidden pending invite must NOT be mislabeled
+    // needs_attention_not_in_org — the whole pass is suppressed without the
+    // pending list, even though org members happen to be readable.
+    const rows = buildTeamRoster({
+      members: [],
+      invitations: [], // hidden for a non-owner
+      students: [csvRow({ github_id: "77", username: "invitee" })],
+      orgMembersKnown: true,
+      orgMemberIds: new Set(),
+      orgMemberLogins: new Set(),
+      pendingHidden: true,
+    })
+    expect(rows).toHaveLength(0)
+  })
 })
 
 describe("buildTeamRoster — roles (union across student + staff teams)", () => {
@@ -620,5 +639,26 @@ describe("buildTeamRoster — CSV-only rows do not render (team-driven)", () => 
       students: [csvRow({ username: "ghost" }), csvRow({ username: "casper" })],
     })
     expect(rows).toEqual([])
+  })
+})
+
+describe("orgRoleForRole / roleForOrgRole — classroom<->org role mapping", () => {
+  it("maps instructor to org OWNER (admin), student/ta to direct_member", () => {
+    expect(orgRoleForRole("instructor")).toBe("admin")
+    expect(orgRoleForRole("ta")).toBe("direct_member")
+    expect(orgRoleForRole("student")).toBe("direct_member")
+  })
+
+  it("maps admin back to instructor, everything else to student", () => {
+    expect(roleForOrgRole("admin")).toBe("instructor")
+    expect(roleForOrgRole("direct_member")).toBe("student")
+    // An unrecognized/absent org role is treated as a plain student, never a
+    // silent owner grant.
+    expect(roleForOrgRole("")).toBe("student")
+    expect(roleForOrgRole("member")).toBe("student")
+  })
+
+  it("round-trips instructor (the security-sensitive owner grant)", () => {
+    expect(roleForOrgRole(orgRoleForRole("instructor"))).toBe("instructor")
   })
 })

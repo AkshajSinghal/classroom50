@@ -8,6 +8,7 @@ import {
   ensureWorkflowPermissions,
   findStaleSkeletonFiles,
   gitBlobSha,
+  resendOrgInvitation,
   triggerRegrade,
   validateServiceToken,
   REGRADE_WORKFLOW,
@@ -925,5 +926,154 @@ describe("ensureSkeletonFiles non-fast-forward retry", () => {
     )
     await expect(ensureSkeletonFiles(client, org)).rejects.toBe(err)
     expect(refPatches).toEqual([1])
+  })
+})
+
+describe("resendOrgInvitation carries team_ids", () => {
+  const apiError = (status: number, message: string) =>
+    new GitHubAPIError({
+      status,
+      url: "/orgs/acme/invitations",
+      message,
+      body: null,
+      rateLimit: {
+        limit: null,
+        remaining: null,
+        used: null,
+        reset: null,
+        resource: null,
+        retryAfter: null,
+      },
+    })
+
+  // Models the still-pending resend path: precheck -> pending, cancel the stale
+  // invite, second precheck -> not-a-member (404), then a fresh POST whose body
+  // we capture. `membershipStates` is consumed in order per GET.
+  const makeClient = () => {
+    const membershipStates = ["pending", "not-member"]
+    const state = {
+      inviteBodies: [] as Record<string, unknown>[],
+      cancelled: 0,
+    }
+    const request = vi
+      .fn()
+      .mockImplementation(
+        (path: string, options?: { method?: string; body?: unknown }) => {
+          if (path.includes("/memberships/")) {
+            const next = membershipStates.shift() ?? "not-member"
+            if (next === "not-member")
+              return Promise.reject(apiError(404, "not a member"))
+            return Promise.resolve({ state: next })
+          }
+          if (path.includes("/invitations/") && options?.method === "DELETE") {
+            state.cancelled += 1
+            return Promise.resolve({})
+          }
+          if (path.endsWith("/invitations") && options?.method === "POST") {
+            state.inviteBodies.push(options?.body as Record<string, unknown>)
+            return Promise.resolve({})
+          }
+          return Promise.reject(new Error(`unexpected: ${path}`))
+        },
+      )
+    return { client: { request } as unknown as GitHubClient, state }
+  }
+
+  it("recreates the invite with the passed teamIds", async () => {
+    const { client, state } = makeClient()
+    await resendOrgInvitation(client, {
+      org: "acme",
+      username: "octocat",
+      inviteeId: 1,
+      invitationId: 42,
+      teamIds: [4242],
+    })
+    expect(state.cancelled).toBe(1)
+    expect(state.inviteBodies).toHaveLength(1)
+    expect(state.inviteBodies[0]).toMatchObject({
+      invitee_id: 1,
+      team_ids: [4242],
+    })
+  })
+
+  it("re-issues with the same org role (instructor -> admin), not a downgrade", async () => {
+    const { client, state } = makeClient()
+    await resendOrgInvitation(client, {
+      org: "acme",
+      username: "prof",
+      inviteeId: 1,
+      invitationId: 42,
+      teamIds: [7],
+      role: "admin",
+    })
+    // The recreated invite must carry role "admin" so a re-sent instructor
+    // invite is equivalent to the original, not silently downgraded to member.
+    expect(state.inviteBodies[0]).toMatchObject({
+      invitee_id: 1,
+      role: "admin",
+    })
+  })
+
+  it("re-issues the invite (no orphan) and rethrows when the recreate fails", async () => {
+    // Pending precheck -> cancel the stale invite -> recreate POST 429s. The
+    // stale invite is already gone, so a naive impl would orphan the invitee;
+    // the compensating re-issue must fire (a second POST) and the original 429
+    // must still propagate so the caller surfaces the failure.
+    const membershipStates = ["pending", "not-member"]
+    const state = {
+      cancelled: 0,
+      invitePosts: 0,
+      bodies: [] as Record<string, unknown>[],
+    }
+    let recreateAttempts = 0
+    const request = vi
+      .fn()
+      .mockImplementation(
+        (path: string, options?: { method?: string; body?: unknown }) => {
+          if (path.includes("/memberships/")) {
+            const next = membershipStates.shift() ?? "not-member"
+            if (next === "not-member")
+              return Promise.reject(apiError(404, "not a member"))
+            return Promise.resolve({ state: next })
+          }
+          if (path.includes("/invitations/") && options?.method === "DELETE") {
+            state.cancelled += 1
+            return Promise.resolve({})
+          }
+          if (path.endsWith("/invitations") && options?.method === "POST") {
+            state.invitePosts += 1
+            state.bodies.push(options?.body as Record<string, unknown>)
+            // First recreate attempt 429s; the compensating re-issue succeeds.
+            if (recreateAttempts++ === 0)
+              return Promise.reject(apiError(429, "rate limited"))
+            return Promise.resolve({})
+          }
+          return Promise.reject(new Error(`unexpected: ${path}`))
+        },
+      )
+    const client = { request } as unknown as GitHubClient
+
+    await expect(
+      resendOrgInvitation(client, {
+        org: "acme",
+        username: "octocat",
+        inviteeId: 1,
+        invitationId: 42,
+        teamIds: [4242],
+        role: "admin",
+      }),
+    ).rejects.toBeInstanceOf(GitHubAPIError)
+
+    expect(state.cancelled).toBe(1)
+    // Two POSTs: the failed recreate + the compensating re-issue that keeps the
+    // invitee pending rather than orphaned.
+    expect(state.invitePosts).toBe(2)
+    // The compensating re-issue preserves the original role + team, so the
+    // orphan-recovery invite is still equivalent to the original.
+    expect(state.bodies[1]).toMatchObject({
+      invitee_id: 1,
+      team_ids: [4242],
+      role: "admin",
+    })
   })
 })

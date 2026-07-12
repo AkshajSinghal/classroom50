@@ -1,17 +1,23 @@
 import { useId, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { Plus, Send, Upload, UserMinus, X } from "lucide-react"
+import { Plus, Send, Upload, UserMinus, X, XCircle } from "lucide-react"
 
 import type { GitHubClient } from "@/hooks/github/client"
 import { ConfirmModal } from "@/components/modals"
 import { Alert, Button, Modal, Toolbar } from "@/components/ui"
 import { GitHubAPIError } from "@/hooks/github/errors"
-import { resendOrgInvitation, getErrorMessage } from "@/hooks/github/mutations"
+import {
+  resendOrgInvitation,
+  cancelOrgInvitation,
+  getErrorMessage,
+} from "@/hooks/github/mutations"
 import {
   bulkUnenrollRoster,
   type BulkUnenrollRosterResult,
 } from "@/pages/students/bulkUnenrollRoster"
+import { resolveTeamIdForRoleRead } from "@/api/mutations/students"
 import { parseGitHubId } from "@/util/students"
+import { orgRoleForRole, sortRolesByRank } from "@/util/teamRoster"
 import {
   BulkResultSection,
   type BulkPhase,
@@ -116,7 +122,7 @@ const RosterBulkActionsBar = ({
   // rows are passed so the page can suppress the automatic backfills from
   // re-adding them.
   onDone: (
-    action: "unenroll" | "invite",
+    action: "unenroll" | "invite" | "cancel",
     removed?: Array<Pick<TeamRosterRow, "username">>,
   ) => void
   // The "add students" triggers shown on the right when nothing is selected.
@@ -130,7 +136,9 @@ const RosterBulkActionsBar = ({
   const { t } = useTranslation()
   const titleId = useId()
 
-  const [action, setAction] = useState<"unenroll" | "invite" | null>(null)
+  const [action, setAction] = useState<"unenroll" | "invite" | "cancel" | null>(
+    null,
+  )
   const [phase, setPhase] = useState<BulkPhase>("idle")
   const [progress, setProgress] = useState<BulkProgress>({
     processed: 0,
@@ -141,12 +149,17 @@ const RosterBulkActionsBar = ({
   const [error, setError] = useState<string | null>(null)
   const [confirmingUnenroll, setConfirmingUnenroll] = useState(false)
   const [confirmingInvite, setConfirmingInvite] = useState(false)
+  const [confirmingCancel, setConfirmingCancel] = useState(false)
 
   const hasSelection = selectedRows.length > 0
   const pendingSelected = selectedRows.filter((r) => r.state === "pending")
   // Only pending rows are "invitable" — the action resends their org invite.
   // (The roster is team-driven; there are no CSV-only rows to freshly invite.)
   const invitableSelected = pendingSelected.length
+  // Cancellable = pending rows that carry an org-invitation id.
+  const cancellableSelected = pendingSelected.filter(
+    (r) => typeof r.invitation_id === "number",
+  )
 
   const isOpen = phase !== "idle"
 
@@ -213,6 +226,7 @@ const RosterBulkActionsBar = ({
     const invited: { key: string; label: string; detail?: string }[] = []
     const skipped: { key: string; label: string; detail?: string }[] = []
     const failed: { key: string; label: string; detail?: string }[] = []
+    const deferred: { key: string; label: string; detail?: string }[] = []
     let rateLimited = false
     let processed = 0
     const tick = (label: string) => {
@@ -223,6 +237,13 @@ const RosterBulkActionsBar = ({
     // Pending rows: cancel + re-send the existing invite (resendOrgInvitation).
     for (const row of pendingSelected) {
       const label = row.username || row.email
+      // Once GitHub rate-limits us, stop issuing new resends (hammering only
+      // extends the throttle) and defer the rest for a later retry.
+      if (rateLimited) {
+        deferred.push({ key: row.key, label })
+        tick(label)
+        continue
+      }
       const inviteeId = parseGitHubId(row.github_id)
       if (inviteeId === null || !row.username) {
         skipped.push({
@@ -234,20 +255,34 @@ const RosterBulkActionsBar = ({
         continue
       }
       try {
+        const role = sortRolesByRank(row.roles)[0] ?? "student"
+        const teamId = await resolveTeamIdForRoleRead(
+          client,
+          org,
+          classroom,
+          role,
+        )
         const outcome = await resendOrgInvitation(client, {
           org,
           username: row.username,
           inviteeId,
           invitationId: row.invitation_id,
+          teamIds: teamId ? [teamId] : undefined,
+          // Preserve the original invite's org role (instructor -> org OWNER).
+          role: orgRoleForRole(role),
         })
         if (outcome.state === "invited") invited.push({ key: row.key, label })
         else skipped.push({ key: row.key, label })
       } catch (err) {
-        log.debug("bulk resend: per-row invite failed", { err })
-        failed.push({ key: row.key, label, detail: getErrorMessage(err) })
+        // A 429 is deferred (never failed) — mirroring the deferred bucket in
+        // inviteRosterStudents — and flips the flag so the remaining rows are
+        // deferred too rather than hammering a throttled endpoint.
         if (err instanceof GitHubAPIError && err.isRateLimited) {
           rateLimited = true
-          break
+          deferred.push({ key: row.key, label })
+        } else {
+          log.debug("bulk resend: per-row invite failed", { err })
+          failed.push({ key: row.key, label, detail: getErrorMessage(err) })
         }
       }
       tick(label)
@@ -268,6 +303,7 @@ const RosterBulkActionsBar = ({
               resent: invited.length,
             }),
           },
+          ...deferred,
         ],
       })
     setResult({
@@ -276,6 +312,57 @@ const RosterBulkActionsBar = ({
     })
     setPhase("complete")
     onDone("invite")
+  }
+
+  const runCancel = async () => {
+    if (cancellableSelected.length === 0) return
+    setAction("cancel")
+    setPhase("working")
+    setError(null)
+    setResult(null)
+    const total = cancellableSelected.length
+    setProgress({ processed: 0, total, message: t("students.bulk.starting") })
+
+    const cancelled: { key: string; label: string }[] = []
+    const alreadyGone: { key: string; label: string }[] = []
+    const failed: { key: string; label: string; detail?: string }[] = []
+    let processed = 0
+    for (const row of cancellableSelected) {
+      const label = row.username || row.email
+      try {
+        // Non-null: cancellableSelected is filtered on a numeric invitation_id.
+        const { cancelled: didCancel } = await cancelOrgInvitation(client, {
+          org,
+          invitationId: row.invitation_id as number,
+        })
+        // A 404 means the id was stale (e.g. a resend already replaced it), so
+        // report it as "already gone" rather than a phantom cancellation.
+        if (didCancel) cancelled.push({ key: row.key, label })
+        else alreadyGone.push({ key: row.key, label })
+      } catch (err) {
+        log.debug("bulk cancel: per-row cancel failed", { err })
+        failed.push({ key: row.key, label, detail: getErrorMessage(err) })
+      }
+      processed += 1
+      setProgress({ processed, total, message: label })
+    }
+
+    const sections: BulkResultView["sections"] = []
+    if (alreadyGone.length > 0)
+      sections.push({
+        title: t("students.bulk.cancelAlreadyGone"),
+        rows: alreadyGone,
+      })
+    if (failed.length > 0)
+      sections.push({ title: t("students.bulk.resultFailed"), rows: failed })
+    setResult({
+      headline: t("students.bulk.cancelledHeadline", {
+        count: cancelled.length,
+      }),
+      sections,
+    })
+    setPhase("complete")
+    onDone("cancel")
   }
 
   const progressPercent =
@@ -366,6 +453,22 @@ const RosterBulkActionsBar = ({
                   {t("students.bulk.invite")}
                 </Button>
                 <Button
+                  size="sm"
+                  className="join-item"
+                  disabled={cancellableSelected.length === 0}
+                  title={
+                    cancellableSelected.length === 0
+                      ? t("students.bulk.cancelNoneCancellable")
+                      : t("students.bulk.cancelSelected", {
+                          count: cancellableSelected.length,
+                        })
+                  }
+                  onClick={() => setConfirmingCancel(true)}
+                >
+                  <XCircle aria-hidden="true" className="size-4" />
+                  {t("students.bulk.cancelInvite")}
+                </Button>
+                <Button
                   variant="ghost"
                   size="sm"
                   className="join-item text-error hover:bg-error/10"
@@ -433,6 +536,24 @@ const RosterBulkActionsBar = ({
         onClose={() => setConfirmingInvite(false)}
       />
 
+      <ConfirmModal
+        open={confirmingCancel}
+        dangerous
+        needsConfirm={false}
+        title={t("students.bulk.confirmCancelTitle", {
+          count: cancellableSelected.length,
+        })}
+        description={t("students.bulk.confirmCancelBody", {
+          count: cancellableSelected.length,
+        })}
+        confirmLabel={t("students.bulk.cancelInvite")}
+        onConfirm={async () => {
+          setConfirmingCancel(false)
+          setTimeout(() => void runCancel(), 0)
+        }}
+        onClose={() => setConfirmingCancel(false)}
+      />
+
       <Modal
         open={isOpen}
         onClose={closeModal}
@@ -444,7 +565,9 @@ const RosterBulkActionsBar = ({
           <h3 id={titleId} className="text-lg font-bold">
             {action === "invite"
               ? t("students.bulk.inviteTitle")
-              : t("students.bulk.unenrollTitle")}
+              : action === "cancel"
+                ? t("students.bulk.cancelTitle")
+                : t("students.bulk.unenrollTitle")}
           </h3>
         </div>
 
