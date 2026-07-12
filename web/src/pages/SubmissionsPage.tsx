@@ -125,7 +125,12 @@ const SubmissionsPageContent = () => {
   // enrolled team member but not a gradee, and "Collect scores" already runs
   // only against the student team, so excluding them keeps this roster in step
   // with what's actually graded (a student who is also staff still counts).
-  const { students: csvStudents } = useGetStudents(org, classroom)
+  const {
+    students: csvStudents,
+    isLoading: csvStudentsLoading,
+    isError: csvStudentsError,
+    recheckRoster,
+  } = useGetStudents(org, classroom)
   // A TA is a non-owner and can't read the owner-only signals the team-driven
   // roster needs (org members / invitations), so for them that roster degrades
   // to empty and would blank the whole gradebook. Source their enrollment from
@@ -148,9 +153,14 @@ const SubmissionsPageContent = () => {
     refetch: refetchRoster,
   } = useTeamRoster(org ?? "", classroom ?? "", csvStudents)
   // For a TA, enrollment (and its ready/error state) comes from roster.csv, not
-  // the team roster; owner/instructor keep the team-driven source unchanged.
-  const rosterLoading = isTaView ? false : teamRosterLoading
-  const rosterError = isTaView ? false : teamRosterError
+  // the team roster; owner/instructor keep the team-driven source unchanged. A
+  // still-loading or failed roster.csv read must surface as loading/error —
+  // never an authoritative empty roster that would blank a populated gradebook.
+  const rosterLoading = isTaView ? csvStudentsLoading : teamRosterLoading
+  const rosterError = isTaView ? csvStudentsError : teamRosterError
+  // The retry on the roster error alert must re-run whichever source backs the
+  // current view: roster.csv for a TA, the team roster otherwise.
+  const retryRoster = isTaView ? recheckRoster : refetchRoster
   const students: Student[] = useMemo(
     () =>
       isTaView
@@ -166,10 +176,15 @@ const SubmissionsPageContent = () => {
   const teamEmptyRoster = useEmptyRosterWarning(org, classroom)
   // useEmptyRosterWarning is team-driven, so for a TA (whose enrollment comes
   // from roster.csv) it would always report empty and falsely block collect /
-  // regrade. Derive the TA gate from the roster.csv student set instead.
+  // regrade. Derive the TA gate from the roster.csv student set instead, and
+  // stay loading/error-aware so it doesn't flash "empty" before the CSV
+  // resolves or on a failed read.
   const emptyRoster = isTaView
     ? {
-        show: csvEnrollment.length === 0,
+        show:
+          !csvStudentsLoading &&
+          !csvStudentsError &&
+          csvEnrollment.length === 0,
         hasRosterRows: csvStudents.length > 0,
       }
     : teamEmptyRoster
@@ -497,7 +512,7 @@ const SubmissionsPageContent = () => {
               {t("submissions.errors.rosterLoadHint")}
             </>
           }
-          onRetry={() => refetchRoster()}
+          onRetry={() => retryRoster()}
         />
       )}
       {scoresError && (
