@@ -29,7 +29,11 @@ const useGetStudents = (
 ) => {
   const client = useGitHubClient()
   const queryClient = useQueryClient()
-  const { data: students, isLoading } = useQuery({
+  const {
+    data: students,
+    isLoading,
+    isError,
+  } = useQuery({
     ...csvFileQuery<Student>(
       client,
       org ?? "",
@@ -66,6 +70,10 @@ const useGetStudents = (
   return {
     students: students ?? EMPTY_STUDENTS,
     isLoading,
+    // Whether the tolerant display read failed (forbidden/network/etc.). Lets a
+    // read-only consumer distinguish "roster couldn't load" from "empty roster"
+    // instead of collapsing a failure into the empty state.
+    isError,
     parseProblems,
     // Re-read the raw roster.csv so a teacher who just fixed the file can
     // re-verify it in place (also refetches the tolerant display read).

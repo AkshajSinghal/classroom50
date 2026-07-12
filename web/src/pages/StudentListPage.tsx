@@ -17,6 +17,11 @@ import { useSuppressedLogins } from "@/hooks/useSuppressedLogins"
 import { invalidateInviteQueries } from "@/hooks/github/queries"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import RequireTeacher from "@/components/RequireTeacher"
+import NotFound from "@/components/NotFound"
+import RoleResolvingFallback from "@/components/RoleResolvingFallback"
+import TaRosterView from "@/pages/students/TaRosterView"
+import { useClassroomRole } from "@/hooks/useClassroomRole"
+import { useGithubAuth } from "@/auth/useGithubAuth"
 import { CONFIG_REPO } from "@/hooks/github/orgChecks"
 import { toStudent } from "@/util/roster"
 import { rosterPath } from "@/util/rosterPath"
@@ -24,7 +29,34 @@ import { Badge } from "@/components/ui"
 import { ROLE_BADGE_TONE } from "@/util/rosterRoles"
 import { useTranslation } from "react-i18next"
 
-const StudentListContent = ({
+export const StudentListContent = ({
+  org,
+  classroom,
+}: {
+  org: string
+  classroom: string
+}) => {
+  const { user } = useGithubAuth()
+  const { role, isLoading: roleLoading } = useClassroomRole(
+    org,
+    classroom,
+    user?.login,
+  )
+
+  // Resolve the viewer's effective role before subscribing to any owner-only
+  // data. TAs get a read-only roster.csv view; the owner-only hooks below never
+  // run for them (R6). "View as TA" downgrades role to "ta", so an owner
+  // previewing as TA sees this same view. A downgraded non-staff preview (e.g.
+  // "View as student") is not authorized here and gets NotFound rather than the
+  // owner UI.
+  if (roleLoading || role === "unresolved") return <RoleResolvingFallback />
+  if (role === "ta") return <TaRosterView org={org} classroom={classroom} />
+  if (role !== "owner" && role !== "instructor") return <NotFound />
+
+  return <OwnerRosterContent org={org} classroom={classroom} />
+}
+
+const OwnerRosterContent = ({
   org,
   classroom,
 }: {

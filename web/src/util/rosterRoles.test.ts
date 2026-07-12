@@ -3,6 +3,7 @@ import {
   countByRole,
   enrolledCountsByRole,
   hasStudentEnrollment,
+  knownRosterRole,
   primaryRole,
   sortRolesByRank,
 } from "./rosterRoles"
@@ -89,5 +90,21 @@ describe("enrolledCountsByRole", () => {
       ta: 1,
       student: 2,
     })
+  })
+})
+
+describe("knownRosterRole", () => {
+  it("returns the role for a known value", () => {
+    expect(knownRosterRole("instructor")).toBe("instructor")
+    expect(knownRosterRole("ta")).toBe("ta")
+    expect(knownRosterRole("student")).toBe("student")
+  })
+  it("trims surrounding whitespace before matching", () => {
+    expect(knownRosterRole("  ta  ")).toBe("ta")
+  })
+  it("returns null for an empty or unrecognized value", () => {
+    expect(knownRosterRole("")).toBeNull()
+    expect(knownRosterRole("   ")).toBeNull()
+    expect(knownRosterRole("grader")).toBeNull()
   })
 })

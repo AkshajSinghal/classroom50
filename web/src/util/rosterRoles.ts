@@ -31,6 +31,15 @@ export const ROLE_BADGE_TONE: Record<RosterRole, BadgeTone> = {
   student: "neutral",
 }
 
+// Narrow a free-form roster.csv `role` string to a known RosterRole, or null.
+// The CSV role column is best-effort metadata and may be "" (pre-role file) or
+// an unrecognized value; callers rendering a badge use this to skip the badge
+// for anything outside the closed instructor/ta/student union.
+export function knownRosterRole(role: string): RosterRole | null {
+  const value = role.trim()
+  return value in ROLE_BADGE_TONE ? (value as RosterRole) : null
+}
+
 // Enrollment-state badge tone + i18n label, single-sourced so the roster row
 // list and the member modal render the same status chip (AGENTS.md: one recipe,
 // one source — previously hand-synced across EnrolledStudents + RosterMemberModal
