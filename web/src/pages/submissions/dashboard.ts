@@ -38,6 +38,16 @@ export function rosterScopedRows(
   return rows.filter((row) => rowOnRoster(row, rosterLogins))
 }
 
+// The gradee set from roster.csv, for a non-owner (TA) view that can't read the
+// owner-only signals the team-driven roster needs. Keeps only rows recorded as
+// `role === "student"` — instructors/TAs are enrolled team members but not
+// gradees, matching what collect-scores runs against (the student team). A row
+// whose role predates the column (blank) is NOT included, so a pre-role
+// roster.csv yields no gradees here.
+export function csvStudentEnrollment(students: Student[]): Student[] {
+  return students.filter((s) => s.role.trim() === "student")
+}
+
 // `thresholdFraction` is the passing bar as a fraction of max, or `null` when
 // the assignment sets no threshold — then every row is "ungraded" (as is an
 // ungraded/zero-max row).

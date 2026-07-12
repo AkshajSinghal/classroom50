@@ -26,6 +26,7 @@ import {
   buildSectionLookup,
   classAverage,
   computeStats,
+  csvStudentEnrollment,
   distinctSections,
   filterAndSortRows,
   filterNonSubmitters,
@@ -43,6 +44,8 @@ import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import useGetStudents from "@/hooks/useGetStudents"
 import { useTeamRoster } from "@/hooks/useTeamRoster"
+import { useClassroomRole } from "@/hooks/useClassroomRole"
+import { useGithubAuth } from "@/auth/useGithubAuth"
 import { rowToStudent } from "@/util/teamRoster"
 import { hasStudentEnrollment } from "@/util/rosterRoles"
 import type { Student } from "@/types/classroom"
@@ -123,26 +126,53 @@ const SubmissionsPageContent = () => {
   // only against the student team, so excluding them keeps this roster in step
   // with what's actually graded (a student who is also staff still counts).
   const { students: csvStudents } = useGetStudents(org, classroom)
+  // A TA is a non-owner and can't read the owner-only signals the team-driven
+  // roster needs (org members / invitations), so for them that roster degrades
+  // to empty and would blank the whole gradebook. Source their enrollment from
+  // roster.csv instead (rows recorded as role "student"). Keys off the
+  // effective role, so "View as TA" exercises the same path.
+  const { user } = useGithubAuth()
+  const { role } = useClassroomRole(org, classroom, user?.login)
+  const isTaView = role === "ta"
+  const csvEnrollment = useMemo(
+    () => csvStudentEnrollment(csvStudents),
+    [csvStudents],
+  )
   // Surface the team fetch's error/loading: a transient or permission failure
   // of the enrolled source of truth must render as error+retry, not an
   // authoritative empty roster.
   const {
     rows: teamRows,
-    isLoading: rosterLoading,
-    isError: rosterError,
+    isLoading: teamRosterLoading,
+    isError: teamRosterError,
     refetch: refetchRoster,
   } = useTeamRoster(org ?? "", classroom ?? "", csvStudents)
+  // For a TA, enrollment (and its ready/error state) comes from roster.csv, not
+  // the team roster; owner/instructor keep the team-driven source unchanged.
+  const rosterLoading = isTaView ? false : teamRosterLoading
+  const rosterError = isTaView ? false : teamRosterError
   const students: Student[] = useMemo(
     () =>
-      teamRows
-        .filter((r) => r.state === "enrolled" && hasStudentEnrollment(r))
-        .map(rowToStudent),
-    [teamRows],
+      isTaView
+        ? csvEnrollment
+        : teamRows
+            .filter((r) => r.state === "enrolled" && hasStudentEnrollment(r))
+            .map(rowToStudent),
+    [isTaView, csvEnrollment, teamRows],
   )
   // Gate Regrade all / Collect now on an empty roster: dispatching with no
   // students is wasted effort. `show` is loading-aware (won't flash before the
   // roster resolves).
-  const emptyRoster = useEmptyRosterWarning(org, classroom)
+  const teamEmptyRoster = useEmptyRosterWarning(org, classroom)
+  // useEmptyRosterWarning is team-driven, so for a TA (whose enrollment comes
+  // from roster.csv) it would always report empty and falsely block collect /
+  // regrade. Derive the TA gate from the roster.csv student set instead.
+  const emptyRoster = isTaView
+    ? {
+        show: csvEnrollment.length === 0,
+        hasRosterRows: csvStudents.length > 0,
+      }
+    : teamEmptyRoster
   // Teacher-only page, so reading the classroom's capability-URL secret from
   // classroom.json is fine. For a protected classroom the shared accept link
   // must carry the key as `?k=<secret>`, else students hit "not found".

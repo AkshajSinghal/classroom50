@@ -11,6 +11,7 @@ import {
   buildScoresCsvRows,
   buildSectionLookup,
   computeStats,
+  csvStudentEnrollment,
   distinctSections,
   filterAndSortRows,
   filterNonSubmitters,
@@ -59,6 +60,27 @@ const repo = (name: string): GitHubRepo => ({ name }) as GitHubRepo
 const filters = (over: Partial<SubmissionFilters> = {}): SubmissionFilters => ({
   ...DEFAULT_FILTERS,
   ...over,
+})
+
+describe("csvStudentEnrollment", () => {
+  it("keeps only rows recorded as role student", () => {
+    const roster = [
+      student({ username: "alice", role: "student" }),
+      student({ username: "bob", role: "ta" }),
+      student({ username: "carol", role: "instructor" }),
+    ]
+    expect(csvStudentEnrollment(roster).map((s) => s.username)).toEqual([
+      "alice",
+    ])
+  })
+
+  it("excludes rows with a blank (pre-role) role", () => {
+    const roster = [
+      student({ username: "alice", role: "" }),
+      student({ username: "bob", role: "  " }),
+    ]
+    expect(csvStudentEnrollment(roster)).toEqual([])
+  })
 })
 
 describe("rowOnRoster / rosterScopedRows", () => {
