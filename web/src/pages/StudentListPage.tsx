@@ -17,11 +17,8 @@ import { useSuppressedLogins } from "@/hooks/useSuppressedLogins"
 import { invalidateInviteQueries } from "@/hooks/github/queries"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import RequireTeacher from "@/components/RequireTeacher"
-import NotFound from "@/components/NotFound"
-import RoleResolvingFallback from "@/components/RoleResolvingFallback"
 import TaRosterView from "@/pages/students/TaRosterView"
-import { useClassroomRole } from "@/hooks/useClassroomRole"
-import { useGithubAuth } from "@/auth/useGithubAuth"
+import { useClassroomRoleContext } from "@/context/classroomRole/ClassroomRoleProvider"
 import { CONFIG_REPO } from "@/hooks/github/orgChecks"
 import { toStudent } from "@/util/roster"
 import { rosterPath } from "@/util/rosterPath"
@@ -36,23 +33,12 @@ export const StudentListContent = ({
   org: string
   classroom: string
 }) => {
-  const { user } = useGithubAuth()
-  const { role, isLoading: roleLoading } = useClassroomRole(
-    org,
-    classroom,
-    user?.login,
-  )
+  // Role is resolved once by the $org/$classroom boundary; a blocked/unresolved
+  // viewer never reaches here, and RequireTeacher (allow="staff") has already
+  // excluded a plain student. "View as TA" surfaces as role === "ta".
+  const { role } = useClassroomRoleContext()
 
-  // Resolve the viewer's effective role before subscribing to any owner-only
-  // data. TAs get a read-only roster.csv view; the owner-only hooks below never
-  // run for them (R6). "View as TA" downgrades role to "ta", so an owner
-  // previewing as TA sees this same view. A downgraded non-staff preview (e.g.
-  // "View as student") is not authorized here and gets NotFound rather than the
-  // owner UI.
-  if (roleLoading || role === "unresolved") return <RoleResolvingFallback />
   if (role === "ta") return <TaRosterView org={org} classroom={classroom} />
-  if (role !== "owner" && role !== "instructor") return <NotFound />
-
   return <OwnerRosterContent org={org} classroom={classroom} />
 }
 

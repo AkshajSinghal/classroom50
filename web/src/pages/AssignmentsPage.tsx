@@ -25,13 +25,12 @@ import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useGetStudents from "@/hooks/useGetStudents"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import useEmptyRosterWarning from "@/hooks/useEmptyRosterWarning"
-import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
 import {
-  useClassroomRole,
   roleLabelKey,
   isResolvedInstructorOrOwner,
+  isStaffRole,
 } from "@/hooks/useClassroomRole"
-import { useGithubAuth } from "@/auth/useGithubAuth"
+import { useClassroomRoleContext } from "@/context/classroomRole/ClassroomRoleProvider"
 import { isClassroomArchived } from "@/types/classroom"
 import { OrgRepos } from "./ClassesPage"
 
@@ -118,15 +117,12 @@ const TeacherAssignmentsView = ({
     org,
     classroom,
   )
-  const { user } = useGithubAuth()
-  const { role: myRole } = useClassroomRole(org, classroom, user?.login)
+  const { role: myRole } = useClassroomRoleContext()
   const myRoleLabelKey = roleLabelKey(myRole)
   const myRoleLabel = myRoleLabelKey ? t(myRoleLabelKey) : null
   const archived = isClassroomArchived(classroomData ?? {})
-  // Gate the owner-only team roster on a resolved owner/instructor. Enabling it
-  // for a TA (or during the unresolved window) fires org members/invitations
-  // reads that 403 for a non-owner. The empty-roster warning is an owner/
-  // instructor affordance, so a TA simply doesn't get it.
+  // The empty-roster warning is an owner/instructor affordance; a TA doesn't get
+  // it. Role is already resolved by the boundary, so this gates directly.
   const emptyRoster = useEmptyRosterWarning(org, classroom, {
     enabled: isResolvedInstructorOrOwner(myRole),
   })
@@ -264,26 +260,18 @@ const AssignmentsPage = () => {
   const { t } = useTranslation()
   useDocumentTitle(t("documentTitle.assignments"))
   const { org, classroom } = useParams({ strict: false })
-  const {
-    isTeacher,
-    isStudent,
-    isLoading: roleLoading,
-  } = useCourseTeacherAccess(org)
+  // Role is resolved once by the $org/$classroom boundary (blocked/unresolved
+  // never reach here). Staff (owner/instructor/ta) get the teacher view; a
+  // student gets the student view.
+  const { role } = useClassroomRoleContext()
 
   return (
     <PageShell selected="assignments">
       <Breadcrumb endpoint={t("nav.assignments")} />
-      {roleLoading && (
-        <div className="space-y-4">
-          <div className="skeleton skeleton-shimmer h-6 w-48" />
-          <div className="skeleton skeleton-shimmer h-4 w-32" />
-          <div className="skeleton skeleton-shimmer h-64 w-full rounded-box" />
-        </div>
-      )}
-      {!roleLoading && isTeacher && org && classroom && (
+      {isStaffRole(role) && org && classroom && (
         <TeacherAssignmentsView org={org} classroom={classroom} />
       )}
-      {!roleLoading && isStudent && org && classroom && (
+      {role === "student" && org && classroom && (
         <StudentAssignmentsView org={org} classroom={classroom} />
       )}
     </PageShell>

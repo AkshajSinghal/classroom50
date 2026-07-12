@@ -39,8 +39,7 @@ function ClassroomLayout() {
   )
 
   const onUngatedRoute = useRouterState({
-    select: (s) =>
-      s.matches.some((m) => UNGATED_ROUTE_IDS.includes(m.routeId)),
+    select: (s) => s.matches.some((m) => UNGATED_ROUTE_IDS.includes(m.routeId)),
   })
 
   // Pre-enrollment flows must reach a teamless user — never gate them.

@@ -24,10 +24,7 @@ export function ClassroomRoleProvider({
   value: ResolvedClassroomRole
   children: ReactNode
 }) {
-  const memoized = useMemo(
-    () => value,
-    [value.role, value.actualRole],
-  )
+  const memoized = useMemo(() => value, [value.role, value.actualRole])
   return (
     <ClassroomRoleContext.Provider value={memoized}>
       {children}

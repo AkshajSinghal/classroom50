@@ -38,6 +38,7 @@ import {
   isStaffRole,
   type ViewAsRole,
 } from "@/hooks/useClassroomRole"
+import { useOptionalClassroomRoleContext } from "@/context/classroomRole/ClassroomRoleProvider"
 import { useRoleView } from "@/context/roleView/RoleViewProvider"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import useGetOrgMembership from "@/hooks/useGetOrgMembership"
@@ -372,7 +373,15 @@ const AssignmentSidebarMenu = ({
     org,
     studentRepoNameForSecret,
   )
-  const { actualRole } = useClassroomRole(org, classroom, user?.login)
+  const { actualRole: hookActualRole } = useClassroomRole(
+    org,
+    classroom,
+    user?.login,
+  )
+  // Prefer the boundary-resolved role when under a classroom (this menu only
+  // renders on classroom routes, but the hook stays as a defensive fallback).
+  const ctxRole = useOptionalClassroomRoleContext()
+  const actualRole = ctxRole?.actualRole ?? hookActualRole
   const isActuallyStaff = isStaffRole(actualRole) && actualRole !== "unresolved"
   const { data: classroomMeta } = useGetClassroom(org, classroom, {
     enabled: isActuallyStaff,
@@ -550,7 +559,9 @@ export const TeacherSidebarMenu = ({
   // instructor-only; gating on this makes "View as student/TA" faithfully hide
   // what a real student/TA wouldn't see. `unresolved` is permissive (no flash).
   const { user } = useGithubAuth()
-  const { role: classroomRole } = useClassroomRole(org, classroom, user?.login)
+  const { role: hookRole } = useClassroomRole(org, classroom, user?.login)
+  const ctxRole = useOptionalClassroomRoleContext()
+  const classroomRole = ctxRole?.role ?? hookRole
   const showStaffItems = showTeacherUi && isStaffRole(classroomRole)
   const canEditSettings =
     classroomRole === "owner" || classroomRole === "instructor"
@@ -625,12 +636,19 @@ export const SidebarFooter = () => {
   // often undefined (the snapshot then reports "unknown" with a reason).
   const { data: orgPlanDetails } = useGetOrgPlanDetails(org)
   // Precise classroom role (Instructor vs TA); respects the "view as" preview.
-  // `actualRole` is the real (preview-independent) role.
+  // `actualRole` is the real (preview-independent) role. On a classroom route
+  // the boundary already resolved this, so prefer the context; the hook remains
+  // the org-route fallback (and covers a classroom route not yet wrapped).
   const {
-    role: classroomRole,
-    actualRole: actualClassroomRole,
-    isLoading: classroomRoleLoading,
+    role: hookClassroomRole,
+    actualRole: hookActualClassroomRole,
+    isLoading: hookClassroomRoleLoading,
   } = useClassroomRole(org, classroom, user?.login)
+  const ctxRole = useOptionalClassroomRoleContext()
+  const classroomRole = ctxRole?.role ?? hookClassroomRole
+  const actualClassroomRole = ctxRole?.actualRole ?? hookActualClassroomRole
+  // A resolved context role is never loading.
+  const classroomRoleLoading = ctxRole ? false : hookClassroomRoleLoading
   const { viewAs, setViewAs } = useRoleView()
   // Offer "View as" only to a real owner/instructor in a classroom (the roles
   // with something lower to preview).

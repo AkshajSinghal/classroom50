@@ -113,13 +113,15 @@ export type ViewAsRole = "ta" | "student"
 // intentionally absent — we never clamp an in-flight role (still showing a
 // spinner) nor a blocked one (the classroom is hidden; there's nothing to
 // preview).
-const ROLE_RANK: Record<Exclude<EffectiveRole, "unresolved" | "blocked">, number> =
-  {
-    owner: 3,
-    instructor: 2,
-    ta: 1,
-    student: 0,
-  }
+const ROLE_RANK: Record<
+  Exclude<EffectiveRole, "unresolved" | "blocked">,
+  number
+> = {
+  owner: 3,
+  instructor: 2,
+  ta: 1,
+  student: 0,
+}
 
 // Apply a "view as" preview to an actual role. DOWNGRADE-ONLY: the preview can
 // only lower the effective role, never raise it, so it can't be abused to gain
@@ -234,7 +236,8 @@ export function useClassroomRole(
   // authoritative slug lives in the private classroom.json they can't read).
   // Classroom creation rejects names that GitHub would re-slugify, so the
   // heuristic is authoritative; a miss safe-degrades to a 404 => non-member.
-  const studentSlug = org && classroom ? classroomTeamSlugHeuristic(classroom) : ""
+  const studentSlug =
+    org && classroom ? classroomTeamSlugHeuristic(classroom) : ""
 
   const instructorQuery = useQuery({
     ...teamMembershipQuery(

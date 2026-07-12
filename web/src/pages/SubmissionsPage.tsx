@@ -45,10 +45,10 @@ import useGetClassroom from "@/hooks/useGetClassroom"
 import useGetStudents from "@/hooks/useGetStudents"
 import { useTeamRoster } from "@/hooks/useTeamRoster"
 import {
-  useClassroomRole,
   isResolvedInstructorOrOwner,
+  isStaffRole,
 } from "@/hooks/useClassroomRole"
-import { useGithubAuth } from "@/auth/useGithubAuth"
+import { useClassroomRoleContext } from "@/context/classroomRole/ClassroomRoleProvider"
 import { rowToStudent } from "@/util/teamRoster"
 import { hasStudentEnrollment } from "@/util/rosterRoles"
 import type { Student } from "@/types/classroom"
@@ -60,8 +60,6 @@ import useTriggerScoreCollection from "@/hooks/useTriggerScoreCollection"
 import useTriggerRegrade from "@/hooks/useTriggerRegrade"
 import { RegradeCoordinatorProvider } from "@/context/regrade/RegradeCoordinator"
 import useGetLastCollectScoresRun from "@/hooks/useGetLastCollectScoresRun"
-import { useCourseTeacherAccess } from "@/hooks/useCourseTeacherAccess"
-import RoleResolvingFallback from "@/components/RoleResolvingFallback"
 import {
   COLLECT_SCORES_WORKFLOW,
   REGRADE_WORKFLOW,
@@ -139,14 +137,10 @@ const SubmissionsPageContent = () => {
   // to empty and would blank the whole gradebook. Source their enrollment from
   // roster.csv instead (rows recorded as role "student"). Keys off the
   // effective role, so "View as TA" exercises the same path.
-  const { user } = useGithubAuth()
-  const { role } = useClassroomRole(org, classroom, user?.login)
+  const { role } = useClassroomRoleContext()
   const isTaView = role === "ta"
-  // Gate the owner-only team roster on a RESOLVED non-TA role. Enabling on
-  // `!isTaView` alone also fires during the `unresolved` window (role starts
-  // unresolved, so isTaView is briefly false), launching owner-only requests
-  // that then 403 for a TA — disabling after the role resolves can't cancel an
-  // already-dispatched fetch. Hold the queries until the role is known.
+  // Gate the owner-only team roster on a RESOLVED non-TA role. The boundary
+  // already resolved the role, so this is simply owner/instructor.
   const teamRosterEnabled = isResolvedInstructorOrOwner(role)
   const csvEnrollment = useMemo(
     () => csvStudentEnrollment(csvStudents),
@@ -169,12 +163,7 @@ const SubmissionsPageContent = () => {
   // the team roster; owner/instructor keep the team-driven source unchanged. A
   // still-loading or failed roster.csv read must surface as loading/error —
   // never an authoritative empty roster that would blank a populated gradebook.
-  // The classroom-role-unresolved window counts as loading too: a disabled
-  // team-roster query reports isLoading:false, so without this a TA (isTaView
-  // still false while unresolved) would read rosterReady=true against an empty
-  // team roster and rosterScopedRows would drop every submission.
-  const rosterLoading =
-    role === "unresolved" || (isTaView ? csvStudentsLoading : teamRosterLoading)
+  const rosterLoading = isTaView ? csvStudentsLoading : teamRosterLoading
   const rosterError = isTaView ? csvStudentsError : teamRosterError
   // The retry on the roster error alert must re-run whichever source backs the
   // current view: roster.csv for a TA, the team roster otherwise.
@@ -826,19 +815,16 @@ const SubmissionsPageContent = () => {
 }
 
 // The teacher gradebook. Students who land here directly (e.g. an old link) are
-// redirected to their own submission view; we wait for the role to resolve so a
-// real teacher never bounces, and avoid firing teacher-only reads for a student.
+// redirected to their own submission view. The $org/$classroom boundary has
+// already resolved the role and gated blocked/loading, so staff render the
+// gradebook and a plain student bounces to their per-assignment page.
 const SubmissionsPage = () => {
   const { t } = useTranslation()
   useDocumentTitle(t("documentTitle.submissions"))
   const { org, classroom, assignment } = useParams({ strict: false })
-  const { showTeacherUi, roleResolved } = useCourseTeacherAccess(org)
+  const { role } = useClassroomRoleContext()
 
-  if (!roleResolved) {
-    return <RoleResolvingFallback className="min-h-screen" />
-  }
-
-  if (!showTeacherUi && org && classroom && assignment) {
+  if (!isStaffRole(role) && org && classroom && assignment) {
     return (
       <Navigate
         to="/$org/$classroom/assignments/$assignment/submission"

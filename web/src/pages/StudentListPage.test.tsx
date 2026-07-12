@@ -10,9 +10,9 @@ vi.mock("react-i18next", async (importOriginal) => {
   }
 })
 
-const useClassroomRole = vi.fn()
-vi.mock("@/hooks/useClassroomRole", () => ({
-  useClassroomRole: (...args: unknown[]) => useClassroomRole(...args),
+const useClassroomRoleContext = vi.fn()
+vi.mock("@/context/classroomRole/ClassroomRoleProvider", () => ({
+  useClassroomRoleContext: () => useClassroomRoleContext(),
 }))
 
 vi.mock("@/auth/useGithubAuth", () => ({
@@ -66,12 +66,6 @@ vi.mock("@/context/github/GitHubProvider", () => ({
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({}),
 }))
-vi.mock("@/components/RoleResolvingFallback", () => ({
-  default: () => <div data-testid="role-fallback" />,
-}))
-vi.mock("@/components/NotFound", () => ({
-  default: () => <div data-testid="not-found" />,
-}))
 
 import { StudentListContent } from "./StudentListPage"
 
@@ -80,8 +74,8 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-const setRole = (role: string, isLoading = false) =>
-  useClassroomRole.mockReturnValue({ role, actualRole: role, isLoading })
+const setRole = (role: string) =>
+  useClassroomRoleContext.mockReturnValue({ role, actualRole: role })
 
 const renderContent = () =>
   render(<StudentListContent org="acme" classroom="cs101" />)
@@ -107,26 +101,5 @@ describe("StudentListContent role branch", () => {
     setRole("instructor")
     renderContent()
     expect(screen.getByTestId("enrolled-students")).toBeTruthy()
-  })
-
-  it("shows the role-resolving fallback while loading or unresolved", () => {
-    setRole("unresolved", true)
-    renderContent()
-    expect(screen.getByTestId("role-fallback")).toBeTruthy()
-    expect(screen.queryByTestId("enrolled-students")).toBeNull()
-    expect(screen.queryByTestId("ta-roster-view")).toBeNull()
-
-    cleanup()
-    setRole("unresolved", false)
-    renderContent()
-    expect(screen.getByTestId("role-fallback")).toBeTruthy()
-  })
-
-  it("shows NotFound for a downgraded non-staff preview (e.g. student)", () => {
-    setRole("student")
-    renderContent()
-    expect(screen.getByTestId("not-found")).toBeTruthy()
-    expect(screen.queryByTestId("enrolled-students")).toBeNull()
-    expect(screen.queryByTestId("ta-roster-view")).toBeNull()
   })
 })
