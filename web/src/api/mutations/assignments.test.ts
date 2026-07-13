@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from "vitest"
 
 import {
+  addFounderCollaborator,
+  assertAssignmentModeCoherent,
   buildReusedEntry,
   copyAssignmentToClassroom,
   editAssignment,
+  founderPermission,
   nextAvailableSlug,
+  permissionSatisfies,
   preserveUnmanagedAssignmentKeys,
   resolveTemplate,
   verifyTemplateAccess,
@@ -1126,5 +1130,172 @@ describe("resolveTemplate (create/edit blocking path)", () => {
     const result = await resolveTemplate(client, ORG, ref(ORG, "tmpl"))
 
     expect(result.template?.repo).toBe("tmpl")
+  })
+})
+
+// Mirrors gh-student's TestFounderPermission: individual gets least-privilege
+// `push` (enough to push and trigger autograding, not to delete/transfer or
+// manage collaborators); group gets `admin` for the founder-driven invite flow.
+describe("founderPermission — accept-time repo role", () => {
+  it("grants push for individual assignments", () => {
+    expect(founderPermission("individual")).toBe("push")
+  })
+
+  it("grants admin for group assignments (founder manages collaborators)", () => {
+    expect(founderPermission("group")).toBe("admin")
+  })
+})
+
+// Mirrors gh-student's assertModeCoherentForCreate: a group-shaped entry
+// (max_group_size >= 2) whose mode isn't `group` is rejected so the founder
+// isn't silently under-privileged (push instead of admin).
+describe("assertAssignmentModeCoherent", () => {
+  it("accepts a coherent group entry", () => {
+    expect(() => assertAssignmentModeCoherent("hw", "group", 3)).not.toThrow()
+  })
+
+  it("accepts an individual entry with no group size", () => {
+    expect(() =>
+      assertAssignmentModeCoherent("hw", "individual", undefined),
+    ).not.toThrow()
+    expect(() =>
+      assertAssignmentModeCoherent("hw", "individual", 0),
+    ).not.toThrow()
+  })
+
+  it("rejects a group-shaped size with a non-group mode", () => {
+    expect(() => assertAssignmentModeCoherent("hw", "individual", 2)).toThrow(
+      /max_group_size 2 but mode "individual"/,
+    )
+  })
+})
+
+// permissionSatisfies decides whether the read-back after the grant matches the
+// role we set, accounting for GitHub collapsing push -> legacy "write". Guards
+// the verified self-demotion (a repo creator is admin until this downgrades it).
+describe("permissionSatisfies — verified founder demotion", () => {
+  it("accepts a push grant that reads back as legacy write", () => {
+    expect(permissionSatisfies("write", "write", "push")).toBe(true)
+    expect(permissionSatisfies("write", "push", "push")).toBe(true)
+  })
+
+  it("accepts an admin grant that reads back as admin", () => {
+    expect(permissionSatisfies("admin", "admin", "admin")).toBe(true)
+  })
+
+  it("rejects a still-admin read-back after a push grant (downgrade ignored)", () => {
+    expect(permissionSatisfies("admin", "admin", "push")).toBe(false)
+  })
+
+  it("rejects a maintain read-back for a push target (the guard's boundary)", () => {
+    // GitHub collapses maintain->legacy "write", so legacy alone would pass;
+    // the authoritative role_name must catch the still-over-privileged founder.
+    expect(permissionSatisfies("write", "maintain", "push")).toBe(false)
+  })
+
+  it("rejects a push read-back for an admin target (group under-grant)", () => {
+    expect(permissionSatisfies("write", "push", "admin")).toBe(false)
+  })
+
+  it("falls back to the legacy field when role_name is absent", () => {
+    expect(permissionSatisfies("write", undefined, "push")).toBe(true)
+    expect(permissionSatisfies("admin", undefined, "admin")).toBe(true)
+    expect(permissionSatisfies("write", undefined, "admin")).toBe(false)
+  })
+
+  it("rejects an under-grant (read only) for a push target", () => {
+    expect(permissionSatisfies("read", "read", "push")).toBe(false)
+  })
+})
+
+// Drives addFounderCollaborator end-to-end (PUT grant -> read-back -> throw),
+// the web mirror of gh-student's TestInviteFounder / _VerificationFails.
+describe("addFounderCollaborator — grant + read-back verification", () => {
+  const owner = "cs50"
+  const repo = "cs50-fall-2026-hello-alice"
+  const username = "alice"
+  const collabPath = `/repos/${owner}/${repo}/collaborators/${username}`
+  const permPath = `${collabPath}/permission`
+
+  // A mock client that records the collaborator PUT body and answers the
+  // permission read-back with `readback`.
+  function makeClient(readback: { permission?: string; role_name?: string }) {
+    const put = vi.fn()
+    const request = vi.fn(async (path: string, opts?: { method?: string }) => {
+      if (path === collabPath && opts?.method === "PUT") {
+        put(opts)
+        return undefined
+      }
+      if (path === permPath) return readback
+      throw new Error(`unexpected request: ${opts?.method ?? "GET"} ${path}`)
+    })
+    return { client: { request } as unknown as GitHubClient, request, put }
+  }
+
+  it("PUTs push and succeeds when the read-back satisfies", async () => {
+    const { client, request } = makeClient({
+      permission: "write",
+      role_name: "push",
+    })
+    await expect(
+      addFounderCollaborator({
+        client,
+        owner,
+        repo,
+        username,
+        permission: "push",
+      }),
+    ).resolves.toBeUndefined()
+    expect(request).toHaveBeenCalledWith(collabPath, {
+      method: "PUT",
+      body: { permission: "push" },
+    })
+  })
+
+  it("PUTs admin for a group founder", async () => {
+    const { client, request } = makeClient({
+      permission: "admin",
+      role_name: "admin",
+    })
+    await addFounderCollaborator({
+      client,
+      owner,
+      repo,
+      username,
+      permission: "admin",
+    })
+    expect(request).toHaveBeenCalledWith(collabPath, {
+      method: "PUT",
+      body: { permission: "admin" },
+    })
+  })
+
+  it("throws when the read-back still reports admin after a push grant", async () => {
+    const { client } = makeClient({ permission: "admin", role_name: "admin" })
+    await expect(
+      addFounderCollaborator({
+        client,
+        owner,
+        repo,
+        username,
+        permission: "push",
+      }),
+    ).rejects.toThrow(/"push"/)
+  })
+
+  it("throws when the read-back is maintain for a push grant (the guard's boundary)", async () => {
+    const { client } = makeClient({
+      permission: "write",
+      role_name: "maintain",
+    })
+    await expect(
+      addFounderCollaborator({
+        client,
+        owner,
+        repo,
+        username,
+        permission: "push",
+      }),
+    ).rejects.toThrow(/"push"/)
   })
 })

@@ -6,27 +6,29 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/foundation50/gh-student/internal/ui"
 )
 
-// TestCheckAcceptableMode pins the lifted accept seam: group is now accepted
-// (previously rejected), individual and empty are accepted, and only an
-// unrecognized mode errors.
+// TestCheckAcceptableMode pins the accept mode gate: individual, group, and
+// empty (defaults to individual) are accepted; only an unknown mode errors.
+// Group-shape coherence is a separate check (TestAssertModeCoherentForCreate).
 func TestCheckAcceptableMode(t *testing.T) {
 	cases := []struct {
+		name    string
 		mode    string
 		wantErr bool
 	}{
-		{"", false},
-		{"individual", false},
-		{"group", false},
-		{"team", true},
-		{"GROUP", true}, // case-sensitive; the canonical value is lowercase
+		{"empty", "", false},
+		{"individual", "individual", false},
+		{"group", "group", false},
+		{"unknown mode", "team", true},
+		{"uppercase group is not canonical", "GROUP", true},
 	}
 	for _, tc := range cases {
-		t.Run(tc.mode, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			err := checkAcceptableMode("hello", tc.mode)
 			if tc.wantErr && err == nil {
 				t.Errorf("mode %q: expected an error, got nil", tc.mode)
@@ -38,43 +40,176 @@ func TestCheckAcceptableMode(t *testing.T) {
 	}
 }
 
-// TestInviteUserAsAdmin pins the founder-admin grant: accept must keep the
-// student as an `admin` collaborator (not the old `maintain`), because only an
-// admin can manage collaborators for the founder-driven group-invite flow. A
-// regression to a weaker permission silently breaks `gh student invite`, so
-// assert the exact PUT path and request body.
-func TestInviteUserAsAdmin(t *testing.T) {
+// TestAssertModeCoherentForCreate pins the fresh-create coherence gate: a
+// group-shaped entry (max_group_size >= 2) whose mode isn't `group` is rejected
+// (the founder would be under-privileged), while coherent and non-group-shaped
+// entries pass. This gate must NOT run on the already-accepted reconcile path.
+func TestAssertModeCoherentForCreate(t *testing.T) {
+	cases := []struct {
+		name         string
+		mode         string
+		maxGroupSize int
+		wantErr      bool
+	}{
+		{"individual no size", "individual", 0, false},
+		{"group with size", "group", 3, false},
+		{"empty no size", "", 0, false},
+		{"group size but empty mode is inconsistent", "", 3, true},
+		{"group size but individual mode is inconsistent", "individual", 2, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := assertModeCoherentForCreate("hello", tc.mode, tc.maxGroupSize)
+			if tc.wantErr && err == nil {
+				t.Errorf("mode %q size %d: expected an error, got nil", tc.mode, tc.maxGroupSize)
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("mode %q size %d: unexpected error %v", tc.mode, tc.maxGroupSize, err)
+			}
+		})
+	}
+}
+
+// TestPermissionSatisfies pins the read-back decision, incl. the guard's
+// boundary: a `maintain` founder (legacy collapses to "write") must FAIL a
+// `push` target, so an ignored self-downgrade isn't passed green.
+func TestPermissionSatisfies(t *testing.T) {
+	cases := []struct {
+		name     string
+		legacy   string
+		roleName string
+		want     string
+		ok       bool
+	}{
+		{"push grant reads role_name push", "write", "push", "push", true},
+		{"push grant reads role_name write", "write", "write", "push", true},
+		{"maintain must fail a push target", "write", "maintain", "push", false},
+		{"admin must fail a push target", "admin", "admin", "push", false},
+		{"read must fail a push target", "read", "read", "push", false},
+		{"admin grant reads role_name admin", "admin", "admin", "admin", true},
+		{"push must fail an admin target", "write", "push", "admin", false},
+		{"empty role_name falls back to legacy write for push", "write", "", "push", true},
+		{"empty role_name falls back to legacy admin for admin", "admin", "", "admin", true},
+		{"empty role_name legacy write must fail admin", "write", "", "admin", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := permissionSatisfies(tc.legacy, tc.roleName, tc.want); got != tc.ok {
+				t.Errorf("permissionSatisfies(%q,%q,%q) = %v, want %v", tc.legacy, tc.roleName, tc.want, got, tc.ok)
+			}
+		})
+	}
+}
+
+// TestFounderPermission pins the mode→role mapping: individual (and
+// empty/unknown, which default to individual) gets least-privilege `push`,
+// group gets `admin` so the founder can add teammates via `gh student invite`.
+func TestFounderPermission(t *testing.T) {
+	cases := []struct {
+		mode string
+		want string
+	}{
+		{"individual", "push"},
+		{"", "push"},
+		{"team", "push"}, // unknown modes default to individual (least privilege)
+		{"group", "admin"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.mode, func(t *testing.T) {
+			if got := founderPermission(tc.mode); got != tc.want {
+				t.Errorf("founderPermission(%q) = %q, want %q", tc.mode, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestInviteFounder pins the grant + verification: accept PUTs the student at
+// the requested role, then succeeds only when the read-back matches (a push
+// grant reads back as legacy `write`). Asserts the exact PUT path/body.
+func TestInviteFounder(t *testing.T) {
 	const (
 		org      = "cs50"
 		repoName = "cs50-fall-2026-hello-alice"
 		username = "alice"
 	)
-	wantPath := "/repos/" + org + "/" + repoName + "/collaborators/" + username
+	collabPath := "/repos/" + org + "/" + repoName + "/collaborators/" + username
+	permPath := collabPath + "/permission"
 
-	var gotPath, gotMethod string
-	var gotBody map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		gotMethod = r.Method
-		raw, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(raw, &gotBody)
-		w.WriteHeader(http.StatusNoContent) // 204: added directly
-	}))
+	// want is the role we set; legacyBack is what GitHub reports on the
+	// read-back (push collapses to the legacy "write" role).
+	cases := []struct {
+		want       string
+		legacyBack string
+	}{
+		{"push", "write"},
+		{"admin", "admin"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.want, func(t *testing.T) {
+			var gotPutPath, gotMethod string
+			var gotBody map[string]any
+			mux := http.NewServeMux()
+			mux.HandleFunc(permPath, func(w http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]any{"permission": tc.legacyBack, "role_name": tc.want})
+			})
+			mux.HandleFunc(collabPath, func(w http.ResponseWriter, r *http.Request) {
+				gotPutPath = r.URL.Path
+				gotMethod = r.Method
+				raw, _ := io.ReadAll(r.Body)
+				_ = json.Unmarshal(raw, &gotBody)
+				w.WriteHeader(http.StatusNoContent) // 204: updated directly
+			})
+			server := httptest.NewServer(mux)
+			t.Cleanup(server.Close)
+			client := newTestRESTClient(t, server)
+
+			var out bytes.Buffer
+			if err := inviteFounder(client, ui.NewForced(&out, false), false, username, org, repoName, tc.want); err != nil {
+				t.Fatalf("inviteFounder returned error: %v", err)
+			}
+
+			if gotMethod != http.MethodPut {
+				t.Errorf("method = %q, want PUT", gotMethod)
+			}
+			if gotPutPath != collabPath {
+				t.Errorf("path = %q, want %q", gotPutPath, collabPath)
+			}
+			if perm := gotBody["permission"]; perm != tc.want {
+				t.Errorf("collaborator permission = %v, want %q", perm, tc.want)
+			}
+		})
+	}
+}
+
+// TestInviteFounder_VerificationFails proves the demotion is verified, not
+// fire-and-forget: a read-back still reporting admin after a push grant must
+// return an actionable error, not silently report success.
+func TestInviteFounder_VerificationFails(t *testing.T) {
+	const (
+		org      = "cs50"
+		repoName = "cs50-fall-2026-hello-alice"
+		username = "alice"
+	)
+	collabPath := "/repos/" + org + "/" + repoName + "/collaborators/" + username
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(collabPath+"/permission", func(w http.ResponseWriter, _ *http.Request) {
+		// The downgrade didn't take — student is still admin.
+		_ = json.NewEncoder(w).Encode(map[string]any{"permission": "admin", "role_name": "admin"})
+	})
+	mux.HandleFunc(collabPath, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	client := newTestRESTClient(t, server)
 
 	var out bytes.Buffer
-	if err := inviteUserAsAdmin(client, ui.NewForced(&out, false), false, username, org, repoName); err != nil {
-		t.Fatalf("inviteUserAsAdmin returned error: %v", err)
+	err := inviteFounder(client, ui.NewForced(&out, false), false, username, org, repoName, "push")
+	if err == nil {
+		t.Fatalf("expected an error when the effective permission stays admin after a push grant, got nil")
 	}
-
-	if gotMethod != http.MethodPut {
-		t.Errorf("method = %q, want PUT", gotMethod)
-	}
-	if gotPath != wantPath {
-		t.Errorf("path = %q, want %q", gotPath, wantPath)
-	}
-	if perm := gotBody["permission"]; perm != "admin" {
-		t.Errorf("collaborator permission = %v, want \"admin\" (regression to maintain/push breaks gh student invite)", perm)
+	if !strings.Contains(err.Error(), "push") || !strings.Contains(err.Error(), "admin") {
+		t.Errorf("error should name the wanted (push) and actual (admin) roles, got: %v", err)
 	}
 }
