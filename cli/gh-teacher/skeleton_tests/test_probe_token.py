@@ -195,7 +195,47 @@ def test_team_members_403_fails(monkeypatch):
     assert check.skipped is False
 
 
-# main() exit-code contract ---------------------------------------------------
+# Scope checks — staff-team visibility (collect-time grant target) ------------
+
+
+def test_resolve_staff_team_slugs_present_and_absent():
+    meta = {"teams": {"ta": {"id": 2, "slug": "classroom50-cs1-ta"}, "instructor": {"id": 1, "slug": "classroom50-cs1-instructor"}}}
+    assert pt.resolve_staff_team_slugs(meta) == {
+        "ta": "classroom50-cs1-ta",
+        "instructor": "classroom50-cs1-instructor",
+    }
+    assert pt.resolve_staff_team_slugs({}) == {}
+    assert pt.resolve_staff_team_slugs({"teams": {"ta": {"id": 2}}}) == {}
+
+
+def test_staff_team_visible_ok(monkeypatch):
+    monkeypatch.setattr(pt, "http_get", lambda *a, **k: (200, b"[]"))
+    check = pt.check_staff_team_visible("https://api", "cs50", "tok", "cs1", "ta", "classroom50-cs1-ta")
+    assert check.ok is True and check.skipped is False
+
+
+def test_staff_team_404_is_skip_not_fail(monkeypatch):
+    # Staff team not provisioned yet -> skip-pass (the grant simply skips it).
+    def boom(*a, **k):
+        raise _http_error(404)
+
+    monkeypatch.setattr(pt, "http_get", boom)
+    check = pt.check_staff_team_visible("https://api", "cs50", "tok", "cs1", "ta", "classroom50-cs1-ta")
+    assert check.ok is True
+    assert check.skipped is True
+
+
+def test_staff_team_403_fails_the_green_while_red_gap(monkeypatch):
+    # A secret/invisible staff team the token can't see -> the grant would
+    # silently grant TAs nothing at cron. The probe must fail RED here.
+    def boom(*a, **k):
+        raise _http_error(403)
+
+    monkeypatch.setattr(pt, "http_get", boom)
+    check = pt.check_staff_team_visible("https://api", "cs50", "tok", "cs1", "ta", "classroom50-cs1-ta")
+    assert check.ok is False
+    assert check.skipped is False
+    assert "silently grant" in check.message.lower()
 
 
 def _set_env(monkeypatch, tmp_path, *, org="cs50", token="tok"):

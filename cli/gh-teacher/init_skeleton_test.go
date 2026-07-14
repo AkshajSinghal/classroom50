@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -8,6 +9,7 @@ import (
 
 	"github.com/foundation50/classroom50-cli-shared/contract"
 	"github.com/foundation50/gh-teacher/internal/assignment"
+	"github.com/foundation50/gh-teacher/internal/configrepo"
 )
 
 // TestSkeletonFiles_Manifest pins every path the init skeleton
@@ -404,6 +406,36 @@ func TestCollectScoresCommitPrefix(t *testing.T) {
 	want := `commit -m "` + contract.CommitPrefix + " "
 	if !strings.Contains(body, want) {
 		t.Errorf("collect-scores.yaml commit message does not start with the shared prefix %q; the [Classroom 50] mirror has drifted from contract.CommitPrefix:\n%s", contract.CommitPrefix, body)
+	}
+}
+
+// TestStaffPermsParity_GoVsInlinePython pins the Go->Python leg of the
+// staff-team repo-permission mirror. configrepo.StaffTeamRepoPermissions is the
+// source of truth; collect_scores.py hand-mirrors it as STAFF_TEAM_PERMISSIONS
+// with no compile-time link, so a role added on only one side (e.g. a future
+// head-TA -> push in Go) would otherwise pass CI while the collector silently
+// grants the wrong set. Assert every Go entry appears verbatim as a Python dict
+// literal in the embedded script.
+func TestStaffPermsParity_GoVsInlinePython(t *testing.T) {
+	files, err := skeletonFiles("main")
+	if err != nil {
+		t.Fatalf("skeletonFiles: %v", err)
+	}
+	script, ok := files[".github/scripts/collect_scores.py"]
+	if !ok {
+		t.Fatal("collect_scores.py missing from skeleton")
+	}
+	if len(configrepo.StaffTeamRepoPermissions) == 0 {
+		t.Fatal("configrepo.StaffTeamRepoPermissions is empty; the parity check would be vacuous")
+	}
+	for role, perm := range configrepo.StaffTeamRepoPermissions {
+		// The Python literal is `"ta": "pull"` (double-quoted, per the mirror
+		// in collect_scores.py). A Go-side role/perm change that isn't mirrored
+		// drops its literal from the script and fails here.
+		want := fmt.Sprintf("%q: %q", string(role), perm)
+		if !strings.Contains(script, want) {
+			t.Errorf("collect_scores.py STAFF_TEAM_PERMISSIONS is missing the entry mirrored from configrepo.StaffTeamRepoPermissions: %s — the Go<->Python permission map has drifted", want)
+		}
 	}
 }
 

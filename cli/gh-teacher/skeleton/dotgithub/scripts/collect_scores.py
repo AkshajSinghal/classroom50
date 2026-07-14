@@ -164,6 +164,12 @@ def main() -> int:
             failed_classrooms.append(classroom_short)
             continue
 
+        # Grant staff teams (e.g. TAs) repo access as a SEPARATE, non-fatal pass:
+        # it needs Administration, which collection does not, so a grant failure
+        # (a missing-Administration 403, a secret staff team, GitHub down) must
+        # NOT abort score collection — the core job — for this or any later
+        # classroom. Warn, mark the classroom failed so the run still exits
+        # non-zero (loud in CI), and fall through to collect.
         try:
             grant_classroom_team_access(
                 api_url=api_url,
@@ -173,6 +179,23 @@ def main() -> int:
                 assignments=assignments,
                 service_token=service_token,
             )
+        except urllib.error.HTTPError as exc:
+            grant_hint = (
+                f" — grant staff teams repo access needs a fine-grained PAT with "
+                f"Repository -> Administration: Read and write; run "
+                f"`gh teacher rotate-service-token {org}`"
+                if exc.code in (401, 403)
+                else ""
+            )
+            emit_error(
+                f"{classroom_short}: staff-team access grant failed with HTTP "
+                f"{exc.code} ({exc.reason or 'no reason'}){grant_hint}. Score "
+                f"collection continues; TAs may not see student repos until this "
+                f"is fixed."
+            )
+            failed_classrooms.append(classroom_short)
+
+        try:
             updates, mode_flip_assignments = collect_classroom(
                 api_url=api_url,
                 org=org,
@@ -183,21 +206,20 @@ def main() -> int:
                 roster_meta=load_roster_metadata(base_dir / classroom_short),
             )
         except urllib.error.HTTPError as exc:
-            # Auth (401/403) and synthetic-network (599) failures are GLOBAL —
-            # the token is bad or GitHub is unreachable, so every remaining
-            # classroom would fail identically. Abort the whole run loudly
-            # rather than warn-and-skip per classroom (which would report a
-            # broken run as success that collected nothing). A 403 here also
-            # covers a token missing the Administration scope the staff-access
-            # grant needs.
+            # Auth (401/403) and synthetic-network (599) failures on COLLECTION
+            # are GLOBAL — the token can't read repos/members or GitHub is
+            # unreachable, so every remaining classroom would fail identically.
+            # Abort the whole run loudly rather than warn-and-skip per classroom
+            # (which would report a broken run as success that collected
+            # nothing). The staff-grant pass above is deliberately excluded from
+            # this abort — its Administration scope is not needed to collect.
             if exc.code in (401, 403):
                 emit_error(
                     f"{classroom_short}: service token was rejected with HTTP {exc.code} "
                     f"({exc.reason or 'no reason'}) — run `gh teacher rotate-service-token {org}` "
                     f"with a fine-grained PAT scoped to Organization -> Members: Read (collection "
-                    f"lists the classroom team's members), Repository -> Contents: Read and write "
-                    f"(read the student repos' releases; the write scope is shared with regrade), "
-                    f"AND Repository -> Administration: Read and write (grant staff teams repo access)"
+                    f"lists the classroom team's members) AND Repository -> Contents: Read and write "
+                    f"(read the student repos' releases; the write scope is shared with regrade)"
                 )
             else:
                 emit_error(
@@ -246,9 +268,14 @@ def main() -> int:
         f"{len(classroom_dirs)} classroom(s)"
     )
     if failed_classrooms:
+        # Dedup (preserve order): a classroom can be recorded once for a
+        # non-fatal staff-grant failure and again for a scores write failure.
+        unique_failed = list(dict.fromkeys(failed_classrooms))
         emit_error(
-            f"collect: {len(failed_classrooms)} classroom(s) failed and were skipped: "
-            f"{', '.join(failed_classrooms)} (the other classrooms were collected)"
+            f"collect: {len(unique_failed)} classroom(s) had a failure (staff-team "
+            f"grant and/or scores write): {', '.join(unique_failed)}. Score "
+            f"collection ran for every classroom; a grant-only failure means TAs "
+            f"may not yet have access."
         )
         return 1
     return 0
@@ -417,18 +444,11 @@ def collect_classroom(
         return results, mode_flip_assignments
 
     # Deduplicate case-insensitively, preserving first-seen order/casing.
-    seen_logins: set[str] = set()
-    team_usernames: list[str] = []
-    for login in team_logins:
-        key = login.strip().lower()
-        if not key or key in seen_logins:
-            continue
-        seen_logins.add(key)
-        team_usernames.append(login.strip())
+    team_usernames = _dedupe_logins(team_logins)
 
     # Group attribution credits a collaborator only if on the team (owner always
     # credited) — same trust model, team-sourced set.
-    roster_logins = set(seen_logins)
+    roster_logins = {u.lower() for u in team_usernames}
     for entry in assignments.get("assignments") or []:
         slug = entry.get("slug")
         if not isinstance(slug, str) or not slug:

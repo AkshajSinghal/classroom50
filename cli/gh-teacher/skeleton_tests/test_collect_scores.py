@@ -2034,6 +2034,56 @@ class TestMain:
         assert cs.main() == 0
         assert "collected 0 submissions" not in capsys.readouterr().err
 
+    def test_grant_hard_error_does_not_abort_collection(self, tmp_path, monkeypatch, capsys):
+        # Decoupling: a staff-grant hard error (403 missing Administration) must
+        # NOT abort score collection. The classroom is still collected, the run
+        # exits non-zero (loud), and the error names the Administration scope.
+        write_minimal_classroom(tmp_path)
+        # A teams block so grant_classroom_team_access does real work (then fails).
+        (tmp_path / "cs-principles" / "classroom.json").write_text(
+            json.dumps(
+                {
+                    "schema": cs.CLASSROOM_SCHEMA_V1,
+                    "short_name": "cs-principles",
+                    "team": {"id": 1, "slug": "classroom50-cs-principles"},
+                    "teams": {"ta": {"id": 2, "slug": "classroom50-cs-principles-ta"}},
+                }
+            )
+        )
+        monkeypatch.setenv("GITHUB_WORKSPACE", str(tmp_path))
+        monkeypatch.setenv("GITHUB_REPOSITORY_OWNER", "cs50")
+        monkeypatch.setenv("CLASSROOM50_SERVICE_TOKEN", "token")
+
+        def grant_403(**kwargs):
+            raise cs.urllib.error.HTTPError(
+                url="https://api.github.com/orgs/cs50/teams/classroom50-cs-principles-ta/repos/cs50/x",
+                code=403,
+                msg="forbidden",
+                hdrs=None,
+                fp=None,
+            )
+
+        collected = {"called": False}
+
+        def fake_collect(**kwargs):
+            collected["called"] = True
+            return [make_update(username="alice")], 0
+
+        monkeypatch.setattr(cs, "grant_classroom_team_access", grant_403)
+        monkeypatch.setattr(cs, "collect_classroom", fake_collect)
+
+        rc = cs.main()
+        err = capsys.readouterr().err
+        # Collection ran despite the grant failure.
+        assert collected["called"] is True
+        # The gradebook was written (collection was not skipped).
+        scores = json.loads((tmp_path / "cs-principles" / "scores.json").read_text())
+        assert scores["assignments"]  # non-empty -> a submission landed
+        # The run still exits non-zero and names the Administration scope.
+        assert rc == 1
+        assert "Administration: Read and write" in err
+        assert "Score collection continues" in err
+
     def test_one_malformed_scores_json_does_not_block_other_classrooms(
         self, tmp_path, monkeypatch, capsys
     ):

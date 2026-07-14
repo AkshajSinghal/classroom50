@@ -34,8 +34,11 @@ Scope -> probe (mirrors the wiki REST table):
 Config + org scopes are ALWAYS probed. Per-classroom, the probe also reads the
 classroom team's members (the exact call collect-scores makes), which exercises
 team VISIBILITY — a secret team the token can't see 404/403s here even when the
-org-members proxy passes. A team that doesn't exist yet (404) is a PASS with a
-note (an early-term classroom legitimately has no team), never a failure.
+org-members proxy passes. It additionally reads each STAFF team (classroom.json
+`teams`, e.g. `classroom50-<short>-ta`) the collect-time grant targets, so a
+secret/invisible staff team fails RED here rather than silently granting TAs no
+access at cron. A team that doesn't exist yet (404) is a PASS with a note (an
+early-term classroom legitimately has no team), never a failure.
 
 Environment (set by `probe-token.yaml`):
   CLASSROOM50_SERVICE_TOKEN — the fine-grained PAT to probe.
@@ -193,7 +196,9 @@ def check_config_contents_and_write(api_url: str, org: str, token: str) -> list[
         Check(
             "Administration: Write (config repo)",
             admin,
-            "permissions.admin is true (collect can grant staff teams repo access)"
+            "permissions.admin is true (collect can grant staff teams repo access) — "
+            "note this proves admin on the config repo only; the grant targets student "
+            "repos + templates, so the token must be scoped to All repositories"
             if admin
             else "permissions.admin is false — collect grants staff teams (e.g. TAs) repo access, which needs Administration: Read and write",
         ),
@@ -281,6 +286,23 @@ def resolve_team_slug(classroom_meta: dict[str, Any], classroom_short: str) -> s
     return f"classroom50-{classroom_short}"
 
 
+def resolve_staff_team_slugs(classroom_meta: dict[str, Any]) -> dict[str, str]:
+    """role -> slug for each staff team present in classroom.json `teams`.
+    Mirrors collect_scores.py's resolve_staff_team_slugs so the probe reads the
+    EXACT staff teams the grant pass targets."""
+    teams = classroom_meta.get("teams")
+    if not isinstance(teams, dict):
+        return {}
+    out: dict[str, str] = {}
+    for role, ref in teams.items():
+        if not isinstance(ref, dict):
+            continue
+        slug = ref.get("slug")
+        if isinstance(slug, str) and slug.strip():
+            out[role] = slug.strip()
+    return out
+
+
 def iter_classroom_meta(base_dir: pathlib.Path):
     """Yield (short_name, classroom_meta) for each v1 classroom dir. Non-v1 or
     unreadable dirs are skipped silently (the probe is about the token, not the
@@ -332,6 +354,49 @@ def check_classroom_team(
         f"Team members: {classroom_short} ({team_slug})",
         True,
         "classroom team members are readable",
+    )
+
+
+def check_staff_team_visible(
+    api_url: str, org: str, token: str, classroom_short: str, role: str, team_slug: str
+) -> Check:
+    """Staff-team visibility for the collect-time grant. `PUT /orgs/{org}/teams/
+    {slug}/repos/...` requires the token to SEE the team, not just repo
+    Administration — a scope the config-repo admin check can't prove. A secret
+    staff team the token can't see (or a Members-scope gap) would pass every
+    org/config check, then the grant's team_has_repo_access GET-404s -> PUT-404
+    is soft-skipped -> TAs silently get NO access while the run reports success.
+    Reading the staff team's members is the same visibility proxy used for the
+    student team; do it against the EXACT staff slug the grant targets so that
+    green-while-red gap fails RED here instead."""
+    url = (
+        f"{api_url}/orgs/{urllib.parse.quote(org, safe='')}/teams/"
+        f"{urllib.parse.quote(team_slug, safe='')}/members?per_page=1"
+    )
+    label = f"Staff team visible: {classroom_short} {role} ({team_slug})"
+    try:
+        http_get(url, token)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            # Staff team not provisioned yet (or renamed) — not a token problem,
+            # and the grant simply skips a role whose team is absent.
+            return Check(
+                label,
+                True,
+                "staff team not found (404) — not created yet, or renamed; not a token scope problem",
+                skipped=True,
+            )
+        return Check(
+            label,
+            False,
+            f"GET orgs/{org}/teams/{team_slug}/members: {_classify_repo_read(exc)} — "
+            f"the grant can't see this staff team, so it would silently grant TAs no "
+            f"access (Members: Read, and the team must be visible to the token)",
+        )
+    return Check(
+        label,
+        True,
+        "staff team is visible (the collect-time grant can target it)",
     )
 
 
@@ -400,6 +465,15 @@ def main() -> int:
             check = check_classroom_team(api_url, org, token, classroom_short, team_slug)
             print_check(check)
             checks.append(check)
+            # Also probe each staff team the collect-time grant targets, so a
+            # secret/invisible staff team fails RED here instead of silently
+            # granting TAs nothing at cron.
+            for role, staff_slug in resolve_staff_team_slugs(meta).items():
+                staff_check = check_staff_team_visible(
+                    api_url, org, token, classroom_short, role, staff_slug
+                )
+                print_check(staff_check)
+                checks.append(staff_check)
     else:
         print("\nNo classrooms found in the config repo yet — skipping per-team reads.")
 
