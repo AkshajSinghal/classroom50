@@ -29,6 +29,25 @@ func TestStaffTeamName(t *testing.T) {
 	}
 }
 
+// TestStaffTeamRepoPermissions pins the collect-time grant map: the TA team
+// gets read (pull), and the instructor role is intentionally absent (its access
+// is granted at classroom setup, not by the collector). This map is the source
+// of truth the collector's STAFF_TEAM_PERMISSIONS mirror must match in lockstep.
+func TestStaffTeamRepoPermissions(t *testing.T) {
+	if got := StaffTeamRepoPermissions[RoleTA]; got != "pull" {
+		t.Errorf("StaffTeamRepoPermissions[ta] = %q, want %q", got, "pull")
+	}
+	if _, ok := StaffTeamRepoPermissions[RoleInstructor]; ok {
+		t.Error("instructor must NOT be in StaffTeamRepoPermissions — the collector grants it nothing")
+	}
+	valid := map[string]bool{"pull": true, "triage": true, "push": true, "maintain": true, "admin": true}
+	for role, perm := range StaffTeamRepoPermissions {
+		if !valid[perm] {
+			t.Errorf("StaffTeamRepoPermissions[%q] = %q is not a valid GitHub team repo permission", role, perm)
+		}
+	}
+}
+
 // TestEnsureStaffTeams verifies both staff teams are created and each is
 // granted push (write) on the config repo, and that the returned refs
 // carry the created ids/slugs.
