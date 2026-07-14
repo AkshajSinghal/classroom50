@@ -50,6 +50,19 @@ const (
 // StaffRoles is every staff role, in a stable order (instructor first).
 var StaffRoles = []StaffRole{RoleInstructor, RoleTA}
 
+// StaffTeamRepoPermissions maps a staff role to the repo permission
+// collect-scores grants that role's team on each student assignment repo and on
+// private in-org templates. Source of truth for the collector's hand-mirrored
+// STAFF_TEAM_PERMISSIONS (collect_scores.py) — keep the two in lockstep.
+//
+// A role absent from this map is granted nothing (the instructor team already
+// gets its access at classroom setup, so only the TA team needs a collect-time
+// grant today). Adding a future head-TA write team is a one-line addition here
+// and in the mirror.
+var StaffTeamRepoPermissions = map[StaffRole]string{
+	RoleTA: "pull",
+}
+
 // staffTeamName derives the staff-role team name: `classroom50-<short>-<role>`.
 // Mirrors the web's staffTeamName. The short-name is canonical, so slug == name.
 func staffTeamName(shortName string, role StaffRole) string {

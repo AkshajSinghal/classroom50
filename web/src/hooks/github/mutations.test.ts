@@ -450,11 +450,13 @@ describe("triggerRegrade", () => {
 })
 
 // validateServiceToken asserts the token can WRITE the classroom50 repo
-// (permissions.push — regrade needs write, not just the read collect needs)
-// AND can read the org's members (Members: Read — team-driven collection lists
-// the classroom team). It reads GET /repos/{org}/classroom50 then GET
-// /orgs/{org}/members as the pasted token (via a mocked createGitHubClient) and
-// rejects a read-only or Members-less token with an actionable hint.
+// (permissions.push — regrade needs write, not just the read collect needs),
+// can ADMINISTER it (permissions.admin — collect grants staff teams repo
+// access), AND can read the org's members (Members: Read — team-driven
+// collection lists the classroom team). It reads GET /repos/{org}/classroom50
+// then GET /orgs/{org}/members as the pasted token (via a mocked
+// createGitHubClient) and rejects a read-only, admin-less, or Members-less token
+// with an actionable hint.
 describe("validateServiceToken", () => {
   const mockTokenClient = (impl: (path: string) => Promise<unknown>) => {
     const request = vi.fn().mockImplementation(impl)
@@ -484,7 +486,7 @@ describe("validateServiceToken", () => {
   it("accepts a token with write access and org-members read", async () => {
     const request = mockTokenClient((path) => {
       if (path === "/repos/acme/classroom50") {
-        return Promise.resolve({ permissions: { push: true } })
+        return Promise.resolve({ permissions: { push: true, admin: true } })
       }
       if (path === "/orgs/acme/members?per_page=1") {
         return Promise.resolve([])
@@ -506,10 +508,19 @@ describe("validateServiceToken", () => {
     )
   })
 
+  it("rejects an admin-less token (permissions.admin false) with an admin hint", async () => {
+    mockTokenClient(() =>
+      Promise.resolve({ permissions: { push: true, admin: false } }),
+    )
+    await expect(validateServiceToken("github_pat_x", "acme")).rejects.toThrow(
+      /lacks admin access|Administration: Read and write/,
+    )
+  })
+
   it("rejects a Members-less token (org members 403) with a Members: Read hint", async () => {
     mockTokenClient((path) => {
       if (path === "/repos/acme/classroom50") {
-        return Promise.resolve({ permissions: { push: true } })
+        return Promise.resolve({ permissions: { push: true, admin: true } })
       }
       return Promise.reject(apiError(403))
     })
@@ -521,7 +532,7 @@ describe("validateServiceToken", () => {
   it("rejects when the org members probe 404s (no Members scope)", async () => {
     mockTokenClient((path) => {
       if (path === "/repos/acme/classroom50") {
-        return Promise.resolve({ permissions: { push: true } })
+        return Promise.resolve({ permissions: { push: true, admin: true } })
       }
       return Promise.reject(apiError(404))
     })
@@ -535,7 +546,7 @@ describe("validateServiceToken", () => {
   it("proceeds when the org members probe 401s (inconclusive, not fatal)", async () => {
     mockTokenClient((path) => {
       if (path === "/repos/acme/classroom50") {
-        return Promise.resolve({ permissions: { push: true } })
+        return Promise.resolve({ permissions: { push: true, admin: true } })
       }
       return Promise.reject(apiError(401))
     })
@@ -547,7 +558,7 @@ describe("validateServiceToken", () => {
   it("proceeds when the org members probe 500s or hits a network error", async () => {
     mockTokenClient((path) => {
       if (path === "/repos/acme/classroom50") {
-        return Promise.resolve({ permissions: { push: true } })
+        return Promise.resolve({ permissions: { push: true, admin: true } })
       }
       return Promise.reject(apiError(500))
     })
@@ -557,7 +568,7 @@ describe("validateServiceToken", () => {
 
     mockTokenClient((path) => {
       if (path === "/repos/acme/classroom50") {
-        return Promise.resolve({ permissions: { push: true } })
+        return Promise.resolve({ permissions: { push: true, admin: true } })
       }
       return Promise.reject(new TypeError("Failed to fetch"))
     })

@@ -55,7 +55,7 @@ Create a **fine-grained personal access token** at **Settings → Developer sett
 2. **Resource owner** — select **the organization** (`<org>`). This is the critical step: the token can only reach repos owned by the resource owner you pick here. If the org isn't listed, the org has blocked fine-grained PATs (an org owner must allow them).
 3. **Expiration** — your choice (fine-grained PATs allow up to 1 year). Set a calendar reminder to rotate before it expires.
 4. **Repository access** — **All repositories**. Student repos are created on demand by `gh student accept`, so they don't exist yet — a "Only select repositories" token silently misses them (see the note below).
-5. **Repository permissions** — set **Contents: Read and write** and **Actions: Read and write**. (`Metadata: Read-only` is added automatically; that's all group-assignment collaborator reads need too.) Contents read collects scores; Contents write lets regrade push `submit/*` tags; Actions write lets regrade re-run each student repo's autograde workflow.
+5. **Repository permissions** — set **Contents: Read and write**, **Actions: Read and write**, and **Administration: Read and write**. (`Metadata: Read-only` is added automatically; that's all group-assignment collaborator reads need too.) Contents read collects scores; Contents write lets regrade push `submit/*` tags; Actions write lets regrade re-run each student repo's autograde workflow; Administration write lets collect grant staff teams (e.g. TAs) read access to student repos and private templates.
 6. **Organization permissions** — set **Members: Read-only**. This is a **separate section** from Repository permissions and only appears once the org is the Resource owner; it lets `collect-scores` list the classroom team's members (collection is team-driven). It is **not** implied by any repository scope.
 7. **Generate** and copy the `github_pat_…` value.
 
@@ -69,7 +69,7 @@ Create a **fine-grained personal access token** at **Settings → Developer sett
 gh workflow run probe-token.yaml --repo <org>/classroom50
 ```
 
-A green run confirms Contents Read+Write, Actions Read+Write, org Members: Read (including each classroom's team read), and Metadata; a red run's log names the missing scope. It's side-effect free — no tags pushed, no runs re-run.
+A green run confirms Contents Read+Write, Actions Read+Write, Administration Read+Write, org Members: Read (including each classroom's team read), and Metadata; a red run's log names the missing scope. It's side-effect free — no tags pushed, no runs re-run.
 
 > **Group assignments need no extra scope.** A group assignment grades once in
 > the first-accepter's repo; `collect-scores` then reads that repo's collaborators
@@ -329,7 +329,7 @@ What it does on each run:
 5. Logs a per-assignment `cs-principles/hello: 23/30 submitted` line so you see roster coverage at a glance.
 6. Commits the updated `*/scores.json` files back to `<org>/classroom50` on a single `[Classroom 50] collect: refresh scores.json` commit. A no-op run (no submissions changed) does not produce a commit.
 
-**Token requirements.** The workflow reads the `CLASSROOM50_SERVICE_TOKEN` secret provisioned by `gh teacher init` (a fine-grained PAT with `Contents: Read and write`, `Actions: Read and write`, and `Members: Read` on the org; see the service-token note in the setup section above). If that token expires mid-semester, the workflow run fails loudly with a 401/403 — rotate with `gh teacher rotate-service-token <org>`.
+**Token requirements.** The workflow reads the `CLASSROOM50_SERVICE_TOKEN` secret provisioned by `gh teacher init` (a fine-grained PAT with `Contents: Read and write`, `Actions: Read and write`, `Administration: Read and write`, and `Members: Read` on the org; see the service-token note in the setup section above). If that token expires mid-semester, the workflow run fails loudly with a 401/403 — rotate with `gh teacher rotate-service-token <org>`.
 
 **Override workflow.** To grant partial credit for a flaky test or correct a misgrade, hand-edit `<classroom>/scores.json` in the config repo, change the entry's submission `score`, and add `"override": true` to the entry. Commit and push. The next collect run will leave that entry alone. A `gh teacher score override` CLI helper is planned for a later release; until then, the JSON edit is the canonical path.
 

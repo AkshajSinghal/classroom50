@@ -2034,6 +2034,56 @@ class TestMain:
         assert cs.main() == 0
         assert "collected 0 submissions" not in capsys.readouterr().err
 
+    def test_grant_hard_error_does_not_abort_collection(self, tmp_path, monkeypatch, capsys):
+        # Decoupling: a staff-grant hard error (403 missing Administration) must
+        # NOT abort score collection. The classroom is still collected, the run
+        # exits non-zero (loud), and the error names the Administration scope.
+        write_minimal_classroom(tmp_path)
+        # A teams block so grant_classroom_team_access does real work (then fails).
+        (tmp_path / "cs-principles" / "classroom.json").write_text(
+            json.dumps(
+                {
+                    "schema": cs.CLASSROOM_SCHEMA_V1,
+                    "short_name": "cs-principles",
+                    "team": {"id": 1, "slug": "classroom50-cs-principles"},
+                    "teams": {"ta": {"id": 2, "slug": "classroom50-cs-principles-ta"}},
+                }
+            )
+        )
+        monkeypatch.setenv("GITHUB_WORKSPACE", str(tmp_path))
+        monkeypatch.setenv("GITHUB_REPOSITORY_OWNER", "cs50")
+        monkeypatch.setenv("CLASSROOM50_SERVICE_TOKEN", "token")
+
+        def grant_403(**kwargs):
+            raise cs.urllib.error.HTTPError(
+                url="https://api.github.com/orgs/cs50/teams/classroom50-cs-principles-ta/repos/cs50/x",
+                code=403,
+                msg="forbidden",
+                hdrs=None,
+                fp=None,
+            )
+
+        collected = {"called": False}
+
+        def fake_collect(**kwargs):
+            collected["called"] = True
+            return [make_update(username="alice")], 0
+
+        monkeypatch.setattr(cs, "grant_classroom_team_access", grant_403)
+        monkeypatch.setattr(cs, "collect_classroom", fake_collect)
+
+        rc = cs.main()
+        err = capsys.readouterr().err
+        # Collection ran despite the grant failure.
+        assert collected["called"] is True
+        # The gradebook was written (collection was not skipped).
+        scores = json.loads((tmp_path / "cs-principles" / "scores.json").read_text())
+        assert scores["assignments"]  # non-empty -> a submission landed
+        # The run still exits non-zero and names the Administration scope.
+        assert rc == 1
+        assert "Administration: Read and write" in err
+        assert "Score collection continues" in err
+
     def test_one_malformed_scores_json_does_not_block_other_classrooms(
         self, tmp_path, monkeypatch, capsys
     ):
@@ -2152,3 +2202,242 @@ class TestCollectClassroomModeFlip:
         assert mode_flip == 0
         err = capsys.readouterr().err
         assert "NONE were creditable" not in err
+
+
+# Staff-team repo-access grant ------------------------------------------------
+
+
+class TestStaffTeamPermissions:
+    def test_ta_maps_to_pull(self):
+        assert cs.STAFF_TEAM_PERMISSIONS["ta"] == "pull"
+
+    def test_instructor_not_granted_at_collect_time(self):
+        # The instructor team gets its access at classroom setup; the collector
+        # must not grant it (parity with Go StaffTeamRepoPermissions).
+        assert "instructor" not in cs.STAFF_TEAM_PERMISSIONS
+
+    def test_all_permissions_are_valid_github_values(self):
+        valid = {"pull", "triage", "push", "maintain", "admin"}
+        assert set(cs.STAFF_TEAM_PERMISSIONS.values()) <= valid
+
+
+class TestResolveStaffTeamSlugs:
+    def test_returns_present_roles_with_slugs(self):
+        meta = {
+            "teams": {
+                "instructor": {"id": 1, "slug": "classroom50-cs-instructor"},
+                "ta": {"id": 2, "slug": "classroom50-cs-ta"},
+            }
+        }
+        assert cs.resolve_staff_team_slugs(meta) == {
+            "instructor": "classroom50-cs-instructor",
+            "ta": "classroom50-cs-ta",
+        }
+
+    def test_no_teams_block_yields_empty(self):
+        assert cs.resolve_staff_team_slugs({}) == {}
+
+    def test_skips_role_without_slug(self):
+        meta = {"teams": {"ta": {"id": 2}, "instructor": {"slug": "  "}}}
+        assert cs.resolve_staff_team_slugs(meta) == {}
+
+
+class TestAssignmentTemplateRef:
+    def test_returns_owner_repo(self):
+        entry = {"slug": "hw", "template": {"owner": "cs50", "repo": "hw-starter", "branch": "main"}}
+        assert cs.assignment_template_ref(entry) == ("cs50", "hw-starter")
+
+    def test_no_template_is_none(self):
+        assert cs.assignment_template_ref({"slug": "hw"}) is None
+
+    def test_malformed_template_is_none(self):
+        assert cs.assignment_template_ref({"template": {"owner": "cs50"}}) is None
+
+
+class TestGrantTeamRepo:
+    def test_skips_put_when_already_granted(self, monkeypatch):
+        calls: list[tuple[str, str]] = []
+
+        def fake_send(method, url, token, *, accept, body, _retries=3):
+            calls.append((method, url))
+            # GET pre-check: 2xx means already has access.
+            return 200, b"{}"
+
+        monkeypatch.setattr(cs, "_http_send", fake_send)
+        granted = cs.grant_team_repo(
+            "https://api.github.com", "cs50", "classroom50-cs-ta", "cs50", "cs-hw-alice", "pull", "tok"
+        )
+        assert granted is False
+        # Only the GET pre-check ran; no PUT.
+        assert [m for m, _ in calls] == ["GET"]
+
+    def test_puts_when_not_yet_granted(self, monkeypatch):
+        calls: list[tuple[str, str, bytes | None]] = []
+
+        def fake_send(method, url, token, *, accept, body, _retries=3):
+            calls.append((method, url, body))
+            if method == "GET":
+                raise cs.urllib.error.HTTPError(url=url, code=404, msg="no", hdrs=None, fp=None)
+            return 204, b""
+
+        monkeypatch.setattr(cs, "_http_send", fake_send)
+        granted = cs.grant_team_repo(
+            "https://api.github.com", "cs50", "classroom50-cs-ta", "cs50", "cs-hw-alice", "pull", "tok"
+        )
+        assert granted is True
+        methods = [m for m, _, _ in calls]
+        assert methods == ["GET", "PUT"]
+        # The PUT body carries the mapped permission.
+        put_body = next(b for m, _, b in calls if m == "PUT")
+        assert json.loads(put_body.decode()) == {"permission": "pull"}
+
+    def test_hard_error_on_precheck_propagates(self, monkeypatch):
+        # A 403 (token lacks Administration) on the pre-check must propagate so
+        # main() aborts the run — is_hard_http_error treats 403 as hard.
+        def fake_send(method, url, token, *, accept, body, _retries=3):
+            raise cs.urllib.error.HTTPError(url=url, code=403, msg="forbidden", hdrs=None, fp=None)
+
+        monkeypatch.setattr(cs, "_http_send", fake_send)
+        with pytest.raises(cs.urllib.error.HTTPError) as ei:
+            cs.grant_team_repo(
+                "https://api.github.com", "cs50", "classroom50-cs-ta", "cs50", "cs-hw-alice", "pull", "tok"
+            )
+        assert ei.value.code == 403
+        assert cs.is_hard_http_error(ei.value)
+
+
+class TestGrantClassroomTeamAccess:
+    """Behavior of the per-classroom grant pass. Network is mocked at
+    grant_team_repo / get_repo / list_team_member_logins so these stay
+    pure-helper tests (the live PUT path is smoke-tested)."""
+
+    ASSIGNMENTS = {
+        "schema": cs.ASSIGNMENTS_SCHEMA_V1,
+        "assignments": [
+            {"slug": "hw1", "name": "HW1", "mode": "individual"},
+            {"slug": "hw2", "name": "HW2", "mode": "individual"},
+        ],
+    }
+    META = {
+        "schema": cs.CLASSROOM_SCHEMA_V1,
+        "short_name": "cs",
+        "team": {"id": 1, "slug": "classroom50-cs"},
+        "teams": {"ta": {"id": 2, "slug": "classroom50-cs-ta"}},
+    }
+
+    def _capture_grants(self, monkeypatch):
+        grants: list[tuple[str, str, str, str]] = []
+
+        def fake_grant(api_url, org, team_slug, owner, repo, permission, token):
+            grants.append((team_slug, owner, repo, permission))
+            return True
+
+        monkeypatch.setattr(cs, "grant_team_repo", fake_grant)
+        return grants
+
+    def test_grants_ta_pull_on_each_student_repo(self, monkeypatch):
+        grants = self._capture_grants(monkeypatch)
+        monkeypatch.setattr(cs, "list_team_member_logins", lambda *a, **k: ["alice", "bob"])
+        cs.grant_classroom_team_access(
+            api_url="https://api.github.com", org="cs50", classroom_short="cs",
+            classroom_meta=self.META, assignments=self.ASSIGNMENTS, service_token="tok",
+        )
+        student_grants = {(r, p) for _, _, r, p in grants}
+        # 2 assignments x 2 members = 4 student repos, all TA pull.
+        assert ("cs-hw1-alice", "pull") in student_grants
+        assert ("cs-hw2-bob", "pull") in student_grants
+        assert len([g for g in grants if g[2].startswith("cs-")]) == 4
+        assert all(team == "classroom50-cs-ta" and perm == "pull" for team, _, _, perm in grants)
+
+    def test_no_teams_block_is_noop(self, monkeypatch):
+        grants = self._capture_grants(monkeypatch)
+        called = {"members": False}
+
+        def fake_members(*a, **k):
+            called["members"] = True
+            return ["alice"]
+
+        monkeypatch.setattr(cs, "list_team_member_logins", fake_members)
+        cs.grant_classroom_team_access(
+            api_url="https://api.github.com", org="cs50", classroom_short="cs",
+            classroom_meta={"schema": cs.CLASSROOM_SCHEMA_V1, "short_name": "cs"},
+            assignments=self.ASSIGNMENTS, service_token="tok",
+        )
+        assert grants == []
+        # No team block => no membership read either (fully short-circuited).
+        assert called["members"] is False
+
+    def test_grants_private_in_org_template_skips_public_and_out_of_org(self, monkeypatch):
+        grants = self._capture_grants(monkeypatch)
+        monkeypatch.setattr(cs, "list_team_member_logins", lambda *a, **k: [])  # no students
+        assignments = {
+            "schema": cs.ASSIGNMENTS_SCHEMA_V1,
+            "assignments": [
+                {"slug": "priv", "mode": "individual", "template": {"owner": "cs50", "repo": "priv-tmpl"}},
+                {"slug": "pub", "mode": "individual", "template": {"owner": "cs50", "repo": "pub-tmpl"}},
+                {"slug": "ext", "mode": "individual", "template": {"owner": "other-org", "repo": "ext-tmpl"}},
+            ],
+        }
+
+        def fake_get_repo(api_url, owner, repo, token):
+            return {"private": repo == "priv-tmpl"}
+
+        monkeypatch.setattr(cs, "get_repo", fake_get_repo)
+        cs.grant_classroom_team_access(
+            api_url="https://api.github.com", org="cs50", classroom_short="cs",
+            classroom_meta=self.META, assignments=assignments, service_token="tok",
+        )
+        template_grants = {repo for _, _, repo, _ in grants}
+        assert template_grants == {"priv-tmpl"}  # public + out-of-org skipped
+
+    def test_idempotent_skip_grants_nothing_new(self, monkeypatch, capsys):
+        # grant_team_repo returns False when the team already has access; the
+        # pass must not report any new grant.
+        monkeypatch.setattr(cs, "list_team_member_logins", lambda *a, **k: ["alice"])
+        monkeypatch.setattr(cs, "grant_team_repo", lambda *a, **k: False)
+        cs.grant_classroom_team_access(
+            api_url="https://api.github.com", org="cs50", classroom_short="cs",
+            classroom_meta=self.META,
+            assignments={"schema": cs.ASSIGNMENTS_SCHEMA_V1, "assignments": [{"slug": "hw1", "mode": "individual"}]},
+            service_token="tok",
+        )
+        assert "granted" not in capsys.readouterr().out
+
+    def test_per_repo_404_warns_and_continues(self, monkeypatch, capsys):
+        # A student repo not accepted yet (404) is skipped, not fatal; the rest
+        # still get granted.
+        monkeypatch.setattr(cs, "list_team_member_logins", lambda *a, **k: ["alice", "bob"])
+        seen: list[str] = []
+
+        def fake_grant(api_url, org, team_slug, owner, repo, permission, token):
+            seen.append(repo)
+            if repo == "cs-hw1-alice":
+                raise cs.urllib.error.HTTPError(url="u", code=404, msg="no", hdrs=None, fp=None)
+            return True
+
+        monkeypatch.setattr(cs, "grant_team_repo", fake_grant)
+        cs.grant_classroom_team_access(
+            api_url="https://api.github.com", org="cs50", classroom_short="cs",
+            classroom_meta=self.META,
+            assignments={"schema": cs.ASSIGNMENTS_SCHEMA_V1, "assignments": [{"slug": "hw1", "mode": "individual"}]},
+            service_token="tok",
+        )
+        assert "cs-hw1-bob" in seen  # bob still processed after alice's 404
+        assert "::warning::" in capsys.readouterr().err
+
+    def test_hard_error_propagates(self, monkeypatch):
+        # A 403 (missing Administration) must abort the pass so main() fails.
+        monkeypatch.setattr(cs, "list_team_member_logins", lambda *a, **k: ["alice"])
+
+        def fake_grant(*a, **k):
+            raise cs.urllib.error.HTTPError(url="u", code=403, msg="forbidden", hdrs=None, fp=None)
+
+        monkeypatch.setattr(cs, "grant_team_repo", fake_grant)
+        with pytest.raises(cs.urllib.error.HTTPError) as ei:
+            cs.grant_classroom_team_access(
+                api_url="https://api.github.com", org="cs50", classroom_short="cs",
+                classroom_meta=self.META,
+                assignments={"schema": cs.ASSIGNMENTS_SCHEMA_V1, "assignments": [{"slug": "hw1", "mode": "individual"}]},
+                service_token="tok",
+            )
+        assert ei.value.code == 403

@@ -28,9 +28,11 @@ accepted/submitted); the per-assignment "X of Y submitted" log shows coverage.
 Environment (set by `collect-scores.yaml`):
   CLASSROOM50_SERVICE_TOKEN — fine-grained PAT. Needs Organization ->
                               Members: Read (collection lists the classroom
-                              team) and Repository -> Contents: Read and write
-                              (read scope only used here; write scope shared
-                              with regrade.yaml).
+                              team), Repository -> Contents: Read and write
+                              (read scope used here; write scope shared with
+                              regrade.yaml), and Repository -> Administration:
+                              Read and write (grant staff teams repo access via
+                              PUT teams/.../repos/...).
   CLASSROOM_FILTER          — optional single-classroom limit.
   GITHUB_REPOSITORY_OWNER   — org name (auto-set by Actions).
   GITHUB_API_URL            — API URL on GHES runners.
@@ -68,6 +70,12 @@ RESULT_SCHEMA_V1 = "classroom50/result/v1"
 # Trigger contract: only `submit/*` tag releases count as submissions
 # (created by autograde-runner.yaml on push to the repo's default branch).
 SUBMIT_TAG_PREFIX = "submit/"
+
+# Repo permission the collect-time grant gives each staff role's team. Hand-
+# mirrored from Go StaffTeamRepoPermissions (source of truth; parity-tested) —
+# keep in lockstep. A role absent here gets nothing (the instructor team is
+# granted at classroom setup, so only TA needs a collect-time grant today).
+STAFF_TEAM_PERMISSIONS = {"ta": "pull"}
 
 RFC3339_RE = re.compile(
     r"^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d:[0-5]\d"
@@ -153,6 +161,35 @@ def main() -> int:
             failed_classrooms.append(classroom_short)
             continue
 
+        # Staff-team grant is a SEPARATE, non-fatal pass: it needs Administration
+        # (collection doesn't), so its failure must not abort the core job. On
+        # failure, warn and mark the classroom failed (non-zero exit) but still
+        # collect — here and for every later classroom.
+        try:
+            grant_classroom_team_access(
+                api_url=api_url,
+                org=org,
+                classroom_short=classroom_short,
+                classroom_meta=classroom_meta,
+                assignments=assignments,
+                service_token=service_token,
+            )
+        except urllib.error.HTTPError as exc:
+            grant_hint = (
+                f" — grant staff teams repo access needs a fine-grained PAT with "
+                f"Repository -> Administration: Read and write; run "
+                f"`gh teacher rotate-service-token {org}`"
+                if exc.code in (401, 403)
+                else ""
+            )
+            emit_error(
+                f"{classroom_short}: staff-team access grant failed with HTTP "
+                f"{exc.code} ({exc.reason or 'no reason'}){grant_hint}. Score "
+                f"collection continues; TAs may not see student repos until this "
+                f"is fixed."
+            )
+            failed_classrooms.append(classroom_short)
+
         try:
             updates, mode_flip_assignments = collect_classroom(
                 api_url=api_url,
@@ -164,11 +201,13 @@ def main() -> int:
                 roster_meta=load_roster_metadata(base_dir / classroom_short),
             )
         except urllib.error.HTTPError as exc:
-            # Auth (401/403) and synthetic-network (599) failures are GLOBAL —
-            # the token is bad or GitHub is unreachable, so every remaining
-            # classroom would fail identically. Abort the whole run loudly
-            # rather than warn-and-skip per classroom (which would report a
-            # broken run as success that collected nothing).
+            # Auth (401/403) and synthetic-network (599) failures on COLLECTION
+            # are GLOBAL — the token can't read repos/members or GitHub is
+            # unreachable, so every remaining classroom would fail identically.
+            # Abort the whole run loudly rather than warn-and-skip per classroom
+            # (which would report a broken run as success that collected
+            # nothing). The staff-grant pass above is excluded — its
+            # Administration scope isn't needed to collect.
             if exc.code in (401, 403):
                 emit_error(
                     f"{classroom_short}: service token was rejected with HTTP {exc.code} "
@@ -224,9 +263,14 @@ def main() -> int:
         f"{len(classroom_dirs)} classroom(s)"
     )
     if failed_classrooms:
+        # Dedup (preserve order): a classroom can be recorded once for a
+        # non-fatal staff-grant failure and again for a scores write failure.
+        unique_failed = list(dict.fromkeys(failed_classrooms))
         emit_error(
-            f"collect: {len(failed_classrooms)} classroom(s) failed and were skipped: "
-            f"{', '.join(failed_classrooms)} (the other classrooms were collected)"
+            f"collect: {len(unique_failed)} classroom(s) had a failure (staff-team "
+            f"grant and/or scores write): {', '.join(unique_failed)}. Score "
+            f"collection ran for every classroom; a grant-only failure means TAs "
+            f"may not yet have access."
         )
         return 1
     return 0
@@ -395,18 +439,11 @@ def collect_classroom(
         return results, mode_flip_assignments
 
     # Deduplicate case-insensitively, preserving first-seen order/casing.
-    seen_logins: set[str] = set()
-    team_usernames: list[str] = []
-    for login in team_logins:
-        key = login.strip().lower()
-        if not key or key in seen_logins:
-            continue
-        seen_logins.add(key)
-        team_usernames.append(login.strip())
+    team_usernames = _dedupe_logins(team_logins)
 
     # Group attribution credits a collaborator only if on the team (owner always
     # credited) — same trust model, team-sourced set.
-    roster_logins = set(seen_logins)
+    roster_logins = {u.lower() for u in team_usernames}
     for entry in assignments.get("assignments") or []:
         slug = entry.get("slug")
         if not isinstance(slug, str) or not slug:
@@ -628,6 +665,182 @@ def resolve_team_slug(classroom_meta: dict[str, Any], classroom_short: str) -> s
             return slug.strip()
     return f"classroom50-{classroom_short}"
 
+
+def resolve_staff_team_slugs(classroom_meta: dict[str, Any]) -> dict[str, str]:
+    """Map each staff role present in classroom.json `teams` to its authoritative
+    slug (role -> slug). Only roles with a non-empty slug are returned; a
+    classroom with no `teams` block yields {}. The slug is authoritative — never
+    re-derived — mirroring resolve_team_slug's contract for the student team."""
+    teams = classroom_meta.get("teams")
+    if not isinstance(teams, dict):
+        return {}
+    out: dict[str, str] = {}
+    for role, ref in teams.items():
+        if not isinstance(ref, dict):
+            continue
+        slug = ref.get("slug")
+        if isinstance(slug, str) and slug.strip():
+            out[role] = slug.strip()
+    return out
+
+
+def get_repo(api_url: str, owner: str, repo: str, token: str) -> dict[str, Any] | None:
+    """GET /repos/{owner}/{repo} → the repo object, or None on 404. Used to read
+    a template's `private` flag before granting a staff team access to it. A hard
+    error (401/403/599) propagates so main() aborts."""
+    url = (
+        f"{api_url}/repos/{urllib.parse.quote(owner, safe='')}/"
+        f"{urllib.parse.quote(repo, safe='')}"
+    )
+    try:
+        body = _http_get(url, token, accept="application/vnd.github+json")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+    parsed = json.loads(body.decode("utf-8"))
+    return parsed if isinstance(parsed, dict) else None
+
+
+def assignment_template_ref(entry: dict[str, Any]) -> tuple[str, str] | None:
+    """(owner, repo) of an assignment's `template` block, or None when absent or
+    malformed. Mirrors the `template` shape in assignments-v1 ({owner, repo,
+    branch})."""
+    template = entry.get("template")
+    if not isinstance(template, dict):
+        return None
+    owner = template.get("owner")
+    repo = template.get("repo")
+    if isinstance(owner, str) and owner and isinstance(repo, str) and repo:
+        return owner, repo
+    return None
+
+
+def grant_classroom_team_access(
+    *,
+    api_url: str,
+    org: str,
+    classroom_short: str,
+    classroom_meta: dict[str, Any],
+    assignments: dict[str, Any],
+    service_token: str,
+) -> None:
+    """Grant each classroom staff team its mapped repo permission (see
+    STAFF_TEAM_PERMISSIONS) on every EXISTING student assignment repo and on each
+    private, in-org assignment template. Additive + idempotent, so re-running
+    collection re-affirms access cheaply.
+
+    Student-repo targets are the (team member × assignment) product — the same
+    set collect_classroom polls. A per-repo 404/422 (repo not accepted yet, or
+    template not org-owned) is warned-and-skipped; a hard error (401/403/599)
+    propagates so main() aborts. A classroom with no mapped staff team is a no-op.
+    """
+    role_slugs = resolve_staff_team_slugs(classroom_meta)
+    grant_slugs = {
+        role: (slug, STAFF_TEAM_PERMISSIONS[role])
+        for role, slug in role_slugs.items()
+        if role in STAFF_TEAM_PERMISSIONS
+    }
+    if not grant_slugs:
+        return
+
+    slugs = valid_assignment_slugs(assignments)
+    if not slugs:
+        return
+
+    student_team_slug = resolve_team_slug(classroom_meta, classroom_short)
+    try:
+        team_logins = list_team_member_logins(api_url, org, student_team_slug, service_token)
+    except urllib.error.HTTPError as exc:
+        if is_hard_http_error(exc):
+            raise
+        emit_warning(
+            f"{classroom_short}: could not read team {student_team_slug!r} members for "
+            f"staff-access grant: HTTP {exc.code} ({exc.reason or 'no reason'}); skipping grant."
+        )
+        return
+    except (json.JSONDecodeError, ValueError) as exc:
+        emit_warning(
+            f"{classroom_short}: team {student_team_slug!r} member listing malformed "
+            f"({exc}); skipping staff-access grant."
+        )
+        return
+
+    usernames = _dedupe_logins(team_logins)
+
+    # Grant on each existing student repo (the team × assignment product).
+    for role, (team_slug, permission) in grant_slugs.items():
+        granted = 0
+        for slug in slugs:
+            for username in usernames:
+                repo_name = assignment_repo_name(classroom_short, slug, username)
+                try:
+                    if grant_team_repo(
+                        api_url, org, team_slug, org, repo_name, permission, service_token
+                    ):
+                        granted += 1
+                except urllib.error.HTTPError as exc:
+                    if is_hard_http_error(exc):
+                        raise
+                    # 404 = repo not accepted yet; 422 = not org-owned. Neither is
+                    # a token problem — skip that repo.
+                    emit_warning(
+                        f"{org}/{repo_name}: could not grant {team_slug!r} {permission}: "
+                        f"HTTP {exc.code} ({exc.reason or 'no reason'}); skipping"
+                    )
+
+        # Grant on each private, in-org template (starter code the staff team
+        # should also be able to read). Public and out-of-org templates are
+        # skipped: a public template needs no grant, and an out-of-org private
+        # template can't be granted to this org's team.
+        for entry in assignments.get("assignments") or []:
+            ref = assignment_template_ref(entry) if isinstance(entry, dict) else None
+            if ref is None:
+                continue
+            t_owner, t_repo = ref
+            if t_owner.lower() != org.lower():
+                continue
+            try:
+                repo = get_repo(api_url, t_owner, t_repo, service_token)
+            except urllib.error.HTTPError as exc:
+                if is_hard_http_error(exc):
+                    raise
+                emit_warning(
+                    f"{t_owner}/{t_repo}: could not read template for {team_slug!r} grant: "
+                    f"HTTP {exc.code} ({exc.reason or 'no reason'}); skipping"
+                )
+                continue
+            if repo is None or not repo.get("private"):
+                continue
+            try:
+                if grant_team_repo(
+                    api_url, org, team_slug, t_owner, t_repo, permission, service_token
+                ):
+                    granted += 1
+            except urllib.error.HTTPError as exc:
+                if is_hard_http_error(exc):
+                    raise
+                emit_warning(
+                    f"{t_owner}/{t_repo}: could not grant {team_slug!r} {permission}: "
+                    f"HTTP {exc.code} ({exc.reason or 'no reason'}); skipping"
+                )
+
+        if granted:
+            print(f"{classroom_short}: granted {team_slug} {permission} on {granted} repo(s)")
+
+
+def _dedupe_logins(logins: list[str]) -> list[str]:
+    """Case-insensitive dedupe of team logins, preserving first-seen order and
+    casing. Same normalization collect_classroom applies to its team roster."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for login in logins:
+        key = login.strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(login.strip())
+    return out
 
 
 # Due-date / lateness ---------------------------------------------------------
@@ -1481,6 +1694,105 @@ def _http_get_with_headers(
                 fp=None,
             ) from exc
     raise RuntimeError(f"_http_get_with_headers called with _retries={_retries}")
+
+
+def _http_send(
+    method: str,
+    url: str,
+    token: str,
+    *,
+    accept: str,
+    body: bytes | None,
+    _retries: int = 3,
+) -> tuple[int, bytes]:
+    """Issue `method url` with bearer auth; return (status, body). Same
+    retry/backoff and synthetic-599 contract as _http_get_with_headers (and
+    _OPENER strips Authorization on a cross-host redirect). Mirrors
+    regrade_repos.py's transport; used only for the team-repo grant PUT/GET."""
+    headers = {
+        "Accept": accept,
+        "Authorization": f"Bearer {token}",
+        "User-Agent": "classroom50-collect-scores",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+    for attempt in range(_retries):
+        req = urllib.request.Request(url, method=method, data=body, headers=headers)
+        try:
+            with _OPENER.open(req, timeout=30) as resp:
+                return resp.status, resp.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code in (429, 500, 502, 503, 504) and attempt < _retries - 1:
+                retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                delay = min(int(retry_after), 30) if (retry_after or "").isdigit() else 2 ** attempt
+                time.sleep(delay)
+                continue
+            raise
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            if attempt < _retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+            raise urllib.error.HTTPError(
+                url=url,
+                code=599,
+                msg=f"network error: {exc}",
+                hdrs=None,  # type: ignore[arg-type]
+                fp=None,
+            ) from exc
+    raise RuntimeError(f"_http_send called with _retries={_retries}")
+
+
+def team_has_repo_access(
+    api_url: str, org: str, team_slug: str, repo_owner: str, repo: str, token: str
+) -> bool:
+    """Whether `team_slug` already has any access to <repo_owner>/<repo> (2xx =
+    yes, 404 = no). Keeps grant_team_repo idempotent. Mirrors Go's
+    teamHasRepoAccess."""
+    url = (
+        f"{api_url}/orgs/{urllib.parse.quote(org, safe='')}/teams/"
+        f"{urllib.parse.quote(team_slug, safe='')}/repos/"
+        f"{urllib.parse.quote(repo_owner, safe='')}/{urllib.parse.quote(repo, safe='')}"
+    )
+    try:
+        _http_send("GET", url, token, accept="application/vnd.github+json", body=None)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return False
+        raise
+    return True
+
+
+def grant_team_repo(
+    api_url: str,
+    org: str,
+    team_slug: str,
+    repo_owner: str,
+    repo: str,
+    permission: str,
+    token: str,
+) -> bool:
+    """Grant `team_slug` `permission` on <repo_owner>/<repo> via
+    PUT /orgs/{org}/teams/{slug}/repos/{owner}/{repo}, skipping the write when
+    the team already has any access (idempotent). Returns whether a new grant was
+    applied. Mirrors Go's grantTeamRepo. A 403 (token lacks Administration) or
+    599 propagates so main() aborts the run (is_hard_http_error); a 404/422 (repo
+    absent / not org-owned) is left for the caller to warn-and-skip."""
+    if team_has_repo_access(api_url, org, team_slug, repo_owner, repo, token):
+        return False
+    url = (
+        f"{api_url}/orgs/{urllib.parse.quote(org, safe='')}/teams/"
+        f"{urllib.parse.quote(team_slug, safe='')}/repos/"
+        f"{urllib.parse.quote(repo_owner, safe='')}/{urllib.parse.quote(repo, safe='')}"
+    )
+    _http_send(
+        "PUT",
+        url,
+        token,
+        accept="application/vnd.github+json",
+        body=json.dumps({"permission": permission}).encode("utf-8"),
+    )
+    return True
 
 
 def is_hard_http_error(exc: urllib.error.HTTPError) -> bool:

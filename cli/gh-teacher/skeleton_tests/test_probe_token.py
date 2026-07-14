@@ -62,29 +62,60 @@ def test_iter_classroom_meta_skips_non_v1_and_unreadable(tmp_path):
 # Scope checks — Contents R/W -------------------------------------------------
 
 
-def test_config_contents_read_and_write_both_pass(monkeypatch):
+def test_config_contents_read_write_admin_all_pass(monkeypatch):
     monkeypatch.setattr(
-        pt, "http_get", lambda *a, **k: (200, json.dumps({"permissions": {"push": True}}).encode())
+        pt,
+        "http_get",
+        lambda *a, **k: (
+            200,
+            json.dumps({"permissions": {"push": True, "admin": True}}).encode(),
+        ),
     )
     checks = pt.check_config_contents_and_write("https://api", "cs50", "tok")
     assert all(c.ok for c in checks)
-    assert any("Read" in c.name for c in checks)
-    assert any("Write" in c.name for c in checks)
+    assert any("Contents: Read" in c.name for c in checks)
+    assert any("Contents: Write" in c.name for c in checks)
+    assert any("Administration: Write" in c.name for c in checks)
 
 
 def test_config_contents_read_only_token_fails_write(monkeypatch):
     monkeypatch.setattr(
-        pt, "http_get", lambda *a, **k: (200, json.dumps({"permissions": {"push": False}}).encode())
+        pt,
+        "http_get",
+        lambda *a, **k: (
+            200,
+            json.dumps({"permissions": {"push": False, "admin": False}}).encode(),
+        ),
     )
     checks = pt.check_config_contents_and_write("https://api", "cs50", "tok")
-    read = next(c for c in checks if "Read" in c.name)
-    write = next(c for c in checks if "Write" in c.name)
+    read = next(c for c in checks if "Contents: Read" in c.name)
+    write = next(c for c in checks if "Contents: Write" in c.name)
     assert read.ok is True
     assert write.ok is False
     assert "read-only" in write.message.lower() or "read and write" in write.message.lower()
 
 
-def test_config_contents_unreadable_fails_both(monkeypatch):
+def test_config_admin_less_token_fails_administration(monkeypatch):
+    # A token with contents-write but no Administration can't grant staff teams
+    # repo access — collect's new grant pass would 403. permissions.admin false
+    # must fail the Administration: Write check while Contents passes.
+    monkeypatch.setattr(
+        pt,
+        "http_get",
+        lambda *a, **k: (
+            200,
+            json.dumps({"permissions": {"push": True, "admin": False}}).encode(),
+        ),
+    )
+    checks = pt.check_config_contents_and_write("https://api", "cs50", "tok")
+    write = next(c for c in checks if "Contents: Write" in c.name)
+    admin = next(c for c in checks if "Administration: Write" in c.name)
+    assert write.ok is True
+    assert admin.ok is False
+    assert "administration" in admin.message.lower()
+
+
+def test_config_contents_unreadable_fails_all(monkeypatch):
     def boom(*a, **k):
         raise _http_error(404)
 
@@ -164,7 +195,47 @@ def test_team_members_403_fails(monkeypatch):
     assert check.skipped is False
 
 
-# main() exit-code contract ---------------------------------------------------
+# Scope checks — staff-team visibility (collect-time grant target) ------------
+
+
+def test_resolve_staff_team_slugs_present_and_absent():
+    meta = {"teams": {"ta": {"id": 2, "slug": "classroom50-cs1-ta"}, "instructor": {"id": 1, "slug": "classroom50-cs1-instructor"}}}
+    assert pt.resolve_staff_team_slugs(meta) == {
+        "ta": "classroom50-cs1-ta",
+        "instructor": "classroom50-cs1-instructor",
+    }
+    assert pt.resolve_staff_team_slugs({}) == {}
+    assert pt.resolve_staff_team_slugs({"teams": {"ta": {"id": 2}}}) == {}
+
+
+def test_staff_team_visible_ok(monkeypatch):
+    monkeypatch.setattr(pt, "http_get", lambda *a, **k: (200, b"[]"))
+    check = pt.check_staff_team_visible("https://api", "cs50", "tok", "cs1", "ta", "classroom50-cs1-ta")
+    assert check.ok is True and check.skipped is False
+
+
+def test_staff_team_404_is_skip_not_fail(monkeypatch):
+    # Staff team not provisioned yet -> skip-pass (the grant simply skips it).
+    def boom(*a, **k):
+        raise _http_error(404)
+
+    monkeypatch.setattr(pt, "http_get", boom)
+    check = pt.check_staff_team_visible("https://api", "cs50", "tok", "cs1", "ta", "classroom50-cs1-ta")
+    assert check.ok is True
+    assert check.skipped is True
+
+
+def test_staff_team_403_fails_the_green_while_red_gap(monkeypatch):
+    # A secret/invisible staff team the token can't see -> the grant would
+    # silently grant TAs nothing at cron. The probe must fail RED here.
+    def boom(*a, **k):
+        raise _http_error(403)
+
+    monkeypatch.setattr(pt, "http_get", boom)
+    check = pt.check_staff_team_visible("https://api", "cs50", "tok", "cs1", "ta", "classroom50-cs1-ta")
+    assert check.ok is False
+    assert check.skipped is False
+    assert "silently grant" in check.message.lower()
 
 
 def _set_env(monkeypatch, tmp_path, *, org="cs50", token="tok"):
@@ -193,7 +264,12 @@ def test_main_all_scopes_pass_exits_0(monkeypatch, tmp_path, capsys):
     _set_env(monkeypatch, tmp_path)
     # No classroom dirs -> per-team reads skipped; org/config checks all pass.
     monkeypatch.setattr(
-        pt, "http_get", lambda url, token, **k: (200, json.dumps({"permissions": {"push": True}}).encode())
+        pt,
+        "http_get",
+        lambda url, token, **k: (
+            200,
+            json.dumps({"permissions": {"push": True, "admin": True}}).encode(),
+        ),
     )
     assert pt.main() == 0
     err = capsys.readouterr().err
@@ -225,7 +301,12 @@ def test_main_no_student_repos_is_pass(monkeypatch, tmp_path, capsys):
     )
     _set_env(monkeypatch, tmp_path)
     monkeypatch.setattr(
-        pt, "http_get", lambda url, token, **k: (200, json.dumps({"permissions": {"push": True}}).encode())
+        pt,
+        "http_get",
+        lambda url, token, **k: (
+            200,
+            json.dumps({"permissions": {"push": True, "admin": True}}).encode(),
+        ),
     )
     assert pt.main() == 0
     assert "PASSED" in capsys.readouterr().err

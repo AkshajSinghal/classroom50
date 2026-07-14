@@ -1987,12 +1987,15 @@ export async function encryptSecret(publicKey: string, secret: string) {
  * reading the classroom50 repo *as the supplied token* and asserting it can
  * WRITE (permissions.push), mapping failures to actionable messages.
  *
- * The shared token needs Contents: Read and write AND Actions: Read and write on
- * student repos: collect-scores reads, but regrade (re-running an autograde run,
- * or pushing a submit/* tag) WRITES. We can't introspect a fine-grained PAT's
- * Actions scope via the API, so we assert the Contents write capability
- * (permissions.push) here — a read-only token is rejected — and the UI instructs
- * the teacher to also grant Actions: Read and write. Mirrors the CLI's
+ * The shared token needs Contents: Read and write, Actions: Read and write, AND
+ * Administration: Read and write on student repos: collect-scores reads, regrade
+ * (re-running an autograde run, or pushing a submit/* tag) WRITES, and collect
+ * grants staff teams (e.g. TAs) repo access via PUT /orgs/{org}/teams/{slug}/repos/...
+ * which needs Administration. We can't introspect a fine-grained PAT's Actions
+ * scope via the API, so we assert the Contents write capability
+ * (permissions.push) AND the admin capability (permissions.admin) here — a
+ * read-only or admin-less token is rejected — and the UI instructs the teacher
+ * to also grant Actions: Read and write. Mirrors the CLI's
  * servicetoken.validateTokenWithClient.
  *
  * Caveat: GET /repos/{org}/classroom50 proves access to the config repo, not the
@@ -2016,7 +2019,8 @@ export async function validateServiceToken(
   const scopeHint =
     `Create a fine-grained PAT with Resource owner = ${org}, Repository access = ` +
     "All repositories, Repository permissions → Contents: Read and write " +
-    "AND Actions: Read and write (collecting scores reads; regrading re-runs " +
+    "AND Actions: Read and write AND Administration: Read and write (collecting " +
+    "scores reads and grants staff teams repo access; regrading re-runs " +
     "student autograde workflows and may push submit/* tags, which need write), " +
     "AND Organization permissions → Members: Read (collection is team-driven and " +
     "lists the classroom team — a separate section shown once the org is the " +
@@ -2024,14 +2028,15 @@ export async function validateServiceToken(
     "If your org requires PAT approval and you are not an org owner, an owner " +
     "must approve it first (owners' tokens are auto-approved)."
 
-  let repo: { permissions?: { push?: boolean } }
+  let repo: { permissions?: { push?: boolean; admin?: boolean } }
   try {
     // Probes api.github.com directly with the pasted token, relying on GitHub's
     // permissive CORS on authenticated REST calls. The repo object's
-    // `permissions` reflects the token's effective access (push === can write).
-    repo = await tokenClient.request<{ permissions?: { push?: boolean } }>(
-      `/repos/${org}/classroom50`,
-    )
+    // `permissions` reflects the token's effective access (push === can write,
+    // admin === can administer).
+    repo = await tokenClient.request<{
+      permissions?: { push?: boolean; admin?: boolean }
+    }>(`/repos/${org}/classroom50`)
   } catch (err) {
     if (err instanceof GitHubAPIError) {
       if (err.status === 401) {
@@ -2075,6 +2080,14 @@ export async function validateServiceToken(
   if (!repo.permissions?.push) {
     throw new Error(
       `This token can read ${org}/classroom50 but lacks write access — collecting scores needs read, but regrading needs write. ${scopeHint}`,
+    )
+  }
+
+  // Contents is proven, but collect grants staff teams repo access, needing
+  // Administration (not implied by Contents); reject an admin-less token here.
+  if (!repo.permissions?.admin) {
+    throw new Error(
+      `This token can read and write ${org}/classroom50 but lacks admin access — collecting scores grants staff teams (e.g. TAs) read access to student repos, which needs Administration: write. ${scopeHint}`,
     )
   }
 
