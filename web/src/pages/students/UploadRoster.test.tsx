@@ -32,16 +32,13 @@ vi.mock("@/api/mutations/students", async (importOriginal) => {
     resolveRosterUploadPreflight: (...args: unknown[]) =>
       resolveRosterUploadPreflight(...args),
     inviteRosterStudents: (...args: unknown[]) => inviteRosterStudents(...args),
+    bulkEnrollStudentsInClassroom: (...args: unknown[]) =>
+      bulkEnrollStudentsInClassroom(...args),
   }
 })
 
-vi.mock("@/hooks/github/mutations", () => ({
-  bulkEnrollStudentsInClassroom: (...args: unknown[]) =>
-    bulkEnrollStudentsInClassroom(...args),
-}))
-
 import UploadRoster from "./UploadRoster"
-import type { GitHubClient } from "@/hooks/github/client"
+import type { GitHubClient } from "@/github-core/client"
 
 afterEach(() => {
   cleanup()

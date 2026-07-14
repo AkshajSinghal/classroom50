@@ -3,6 +3,8 @@ import globals from "globals"
 import reactHooks from "eslint-plugin-react-hooks"
 import reactRefresh from "eslint-plugin-react-refresh"
 import jsxA11y from "eslint-plugin-jsx-a11y"
+import { importX } from "eslint-plugin-import-x"
+import { createTypeScriptImportResolver } from "eslint-import-resolver-typescript"
 import tseslint from "typescript-eslint"
 import prettier from "eslint-config-prettier/flat"
 import { defineConfig, globalIgnores } from "eslint/config"
@@ -106,6 +108,43 @@ export default defineConfig([
             'A <Button> inside a <form> needs an explicit `type`: add type="submit" for the submit action or type="button" for a click handler. The <Button> default is "button", which silently disables implicit form submit.',
         },
       ],
+    },
+  },
+  // Guard the data-layer boundary: no runtime import cycle. The api/ <-> data
+  // layer once cycled (barrel re-exports + a TDZ workaround), as did the two
+  // data-layer giants (mutations.ts <-> queries.ts) via shared primitives; both
+  // are now broken (primitives extracted into leaf modules) and this keeps them
+  // broken. Scoped to the data layer where cycles are the real risk; unbounded
+  // (no maxDepth) so a cycle that closes through a longer detour can't hide —
+  // measured negligible over this ~35-file scope, and ignoreExternal keeps
+  // node_modules out of the walk. Type-only imports are ignored by the rule, so
+  // the remaining `import type` edges don't trip it.
+  //
+  // no-cycle is inert without BOTH a parser (import-x/parsers) AND a resolver
+  // that understands the `@/*` tsconfig alias every data-layer edge uses —
+  // without them it parses/resolves nothing and passes green while a cycle
+  // exists. So this block wires both, and enables no-unresolved on the same
+  // scope as a LOUD tripwire: if the alias ever stops resolving, CI fails here
+  // instead of no-cycle silently going inert. Verified against an injected
+  // fixture cycle before trusting it.
+  {
+    files: ["src/github-core/**/*.{ts,tsx}", "src/api/**/*.{ts,tsx}"],
+    plugins: { "import-x": importX },
+    settings: {
+      "import-x/parsers": {
+        "@typescript-eslint/parser": [".ts", ".tsx"],
+      },
+      "import-x/resolver-next": [
+        createTypeScriptImportResolver({
+          project: ["tsconfig.app.json", "tsconfig.node.json"],
+          alwaysTryTypes: true,
+          noWarnOnMultipleProjects: true,
+        }),
+      ],
+    },
+    rules: {
+      "import-x/no-unresolved": "error",
+      "import-x/no-cycle": ["error", { ignoreExternal: true }],
     },
   },
   // The only files allowed to touch `console` directly: the logger wrapper
