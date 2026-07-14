@@ -55,11 +55,12 @@ func TestServiceSecretExists(t *testing.T) {
 func TestValidateServiceToken(t *testing.T) {
 	cases := []struct {
 		name string
-		// repoStatus/canPush describe the GET /repos/{org}/classroom50
+		// repoStatus/canPush/canAdmin describe the GET /repos/{org}/classroom50
 		// response; membersStatus describes the follow-on
-		// GET /orgs/{org}/members probe (only reached on a 200 push repo).
+		// GET /orgs/{org}/members probe (only reached on a 200 push+admin repo).
 		repoStatus    int
 		canPush       bool
+		canAdmin      bool
 		membersStatus int
 		wantErr       bool
 		errSubstr     string
@@ -67,19 +68,20 @@ func TestValidateServiceToken(t *testing.T) {
 		// inconclusive-Members-scope advisory to its writer (fail-open branch).
 		wantWarn bool
 	}{
-		{"valid read+write+members", http.StatusOK, true, http.StatusOK, false, "", false},
-		{"read-only rejected", http.StatusOK, false, http.StatusOK, true, "lacks write access", false},
-		{"revoked", http.StatusUnauthorized, false, 0, true, "invalid, expired, or revoked", false},
-		{"no repo access", http.StatusNotFound, false, 0, true, "can't read", false},
-		{"repo forbidden", http.StatusForbidden, false, 0, true, "can't read", false},
-		{"members forbidden", http.StatusOK, true, http.StatusForbidden, true, "can't read the org's members", false},
-		{"members not found", http.StatusOK, true, http.StatusNotFound, true, "can't read the org's members", false},
+		{"valid read+write+admin+members", http.StatusOK, true, true, http.StatusOK, false, "", false},
+		{"read-only rejected", http.StatusOK, false, false, http.StatusOK, true, "lacks write access", false},
+		{"write-but-no-admin rejected", http.StatusOK, true, false, http.StatusOK, true, "lacks admin access", false},
+		{"revoked", http.StatusUnauthorized, false, false, 0, true, "invalid, expired, or revoked", false},
+		{"no repo access", http.StatusNotFound, false, false, 0, true, "can't read", false},
+		{"repo forbidden", http.StatusForbidden, false, false, 0, true, "can't read", false},
+		{"members forbidden", http.StatusOK, true, true, http.StatusForbidden, true, "can't read the org's members", false},
+		{"members not found", http.StatusOK, true, true, http.StatusNotFound, true, "can't read the org's members", false},
 		// FAIL-OPEN: a 401 or 5xx on the members probe (after a 200 repo read
 		// that already proved the token live) is inconclusive, not fatal — the
 		// probe must not reject a valid token on GitHub-side flakiness, but it
 		// MUST warn so the teacher knows to run probe-token before relying on it.
-		{"members unauthorized proceeds", http.StatusOK, true, http.StatusUnauthorized, false, "", true},
-		{"members server error proceeds", http.StatusOK, true, http.StatusInternalServerError, false, "", true},
+		{"members unauthorized proceeds", http.StatusOK, true, true, http.StatusUnauthorized, false, "", true},
+		{"members server error proceeds", http.StatusOK, true, true, http.StatusInternalServerError, false, "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -88,12 +90,13 @@ func TestValidateServiceToken(t *testing.T) {
 				switch {
 				// Validation first reads the config repo (GET
 				// /repos/{org}/classroom50) to assert
-				// permissions.push, then probes org members (GET
-				// /orgs/{org}/members) for the Members: Read scope.
+				// permissions.push AND permissions.admin, then probes
+				// org members (GET /orgs/{org}/members) for the
+				// Members: Read scope.
 				case strings.HasSuffix(r.URL.Path, "/repos/cs50/classroom50"):
 					sawRepo = true
 					if tc.repoStatus == http.StatusOK {
-						_, _ = w.Write([]byte(`{"permissions":{"push":` + boolJSON(tc.canPush) + `}}`))
+						_, _ = w.Write([]byte(`{"permissions":{"push":` + boolJSON(tc.canPush) + `,"admin":` + boolJSON(tc.canAdmin) + `}}`))
 						return
 					}
 					w.WriteHeader(tc.repoStatus)
@@ -114,7 +117,7 @@ func TestValidateServiceToken(t *testing.T) {
 			var warnOut strings.Builder
 			err := validateTokenWithClient(client, "cs50", &warnOut)
 			if tc.wantErr && err == nil {
-				t.Fatalf("expected an error (repo=%d canPush=%v members=%d)", tc.repoStatus, tc.canPush, tc.membersStatus)
+				t.Fatalf("expected an error (repo=%d canPush=%v canAdmin=%v members=%d)", tc.repoStatus, tc.canPush, tc.canAdmin, tc.membersStatus)
 			}
 			if !tc.wantErr && err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -130,9 +133,10 @@ func TestValidateServiceToken(t *testing.T) {
 				t.Error("validation should always GET the config repo")
 			}
 			// The members probe is only reachable once the config repo
-			// returns 200 with push access. On any earlier failure it
-			// must NOT be hit (fail fast on the Contents check).
-			wantMembersProbe := tc.repoStatus == http.StatusOK && tc.canPush
+			// returns 200 with push AND admin access. On any earlier failure
+			// it must NOT be hit (fail fast on the Contents/Administration
+			// checks).
+			wantMembersProbe := tc.repoStatus == http.StatusOK && tc.canPush && tc.canAdmin
 			if sawMembers != wantMembersProbe {
 				t.Errorf("members probe reached = %v, want %v", sawMembers, wantMembersProbe)
 			}
@@ -150,8 +154,14 @@ func TestValidateServiceToken(t *testing.T) {
 					t.Errorf("read-only error should explain the Contents: Read and write fix: %q", err.Error())
 				}
 			}
+			// A write-but-no-admin token must be told to add Administration.
+			if tc.repoStatus == http.StatusOK && tc.canPush && !tc.canAdmin {
+				if !strings.Contains(err.Error(), "Administration: Read and write") {
+					t.Errorf("no-admin error should explain the Administration: Read and write fix: %q", err.Error())
+				}
+			}
 			// A Members-less token must be told to add Members: Read.
-			if tc.repoStatus == http.StatusOK && tc.canPush &&
+			if tc.repoStatus == http.StatusOK && tc.canPush && tc.canAdmin &&
 				(tc.membersStatus == http.StatusForbidden || tc.membersStatus == http.StatusNotFound) {
 				if !strings.Contains(err.Error(), "Members: Read") {
 					t.Errorf("members-denied error should explain the Members: Read fix: %q", err.Error())

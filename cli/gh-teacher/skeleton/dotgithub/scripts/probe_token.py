@@ -14,6 +14,9 @@ GitHub gates behind the write permission:
   - Contents: write  -> GET /repos/{org}/classroom50 reports
                         `permissions.push == true` only with contents-write
                         (same signal the CLI/web validators use).
+  - Administration: write -> the same GET reports `permissions.admin == true`
+                        only with the Administration permission (collect grants
+                        staff teams repo access via PUT teams/.../repos/...).
   - Actions:  write  -> GET /repos/{org}/classroom50/actions/permissions is
                         reachable only with the Actions permission; a
                         fine-grained PAT's Actions permission is a single
@@ -24,6 +27,7 @@ Scope -> probe (mirrors the wiki REST table):
   Organization Members: R   -> GET /orgs/{org}/members      (+ per-team read)
   Repository Contents: R    -> GET /repos/{org}/classroom50 (config repo)
   Repository Contents: W    -> permissions.push on the config repo
+  Repository Administration: W -> permissions.admin on the config repo
   Repository Actions:  R/W  -> GET /repos/{org}/classroom50/actions/permissions
   Repository Metadata: R    -> GET /repos/{org}/classroom50/collaborators
 
@@ -152,8 +156,9 @@ def _classify_repo_read(exc: urllib.error.HTTPError) -> str:
 
 
 def check_config_contents_and_write(api_url: str, org: str, token: str) -> list[Check]:
-    """Contents: Read (config repo readable) AND Contents: Write
-    (permissions.push true). One request establishes both."""
+    """Contents: Read (config repo readable), Contents: Write
+    (permissions.push true), AND Administration: Write (permissions.admin true —
+    collect grants staff teams repo access). One request establishes all three."""
     url = _repo_url(api_url, org, CONFIG_REPO)
     try:
         _status, body = http_get(url, token)
@@ -162,6 +167,7 @@ def check_config_contents_and_write(api_url: str, org: str, token: str) -> list[
         return [
             Check("Contents: Read (config repo)", False, f"GET {org}/{CONFIG_REPO}: {cause}"),
             Check("Contents: Write (config repo)", False, "not checked — the config-repo read failed above"),
+            Check("Administration: Write (config repo)", False, "not checked — the config-repo read failed above"),
         ]
     try:
         repo = json.loads(body.decode("utf-8"))
@@ -169,8 +175,12 @@ def check_config_contents_and_write(api_url: str, org: str, token: str) -> list[
         return [
             Check("Contents: Read (config repo)", False, f"GET {org}/{CONFIG_REPO}: malformed JSON ({exc})"),
             Check("Contents: Write (config repo)", False, "not checked — the config-repo read failed above"),
+            Check("Administration: Write (config repo)", False, "not checked — the config-repo read failed above"),
         ]
-    push = bool(isinstance(repo, dict) and (repo.get("permissions") or {}).get("push"))
+    permissions = repo.get("permissions") if isinstance(repo, dict) else None
+    permissions = permissions if isinstance(permissions, dict) else {}
+    push = bool(permissions.get("push"))
+    admin = bool(permissions.get("admin"))
     return [
         Check("Contents: Read (config repo)", True, f"{org}/{CONFIG_REPO} is readable"),
         Check(
@@ -179,6 +189,13 @@ def check_config_contents_and_write(api_url: str, org: str, token: str) -> list[
             "permissions.push is true (regrade can push submit/* tags)"
             if push
             else "permissions.push is false — the token is read-only; regrade needs Contents: Read and write",
+        ),
+        Check(
+            "Administration: Write (config repo)",
+            admin,
+            "permissions.admin is true (collect can grant staff teams repo access)"
+            if admin
+            else "permissions.admin is false — collect grants staff teams (e.g. TAs) repo access, which needs Administration: Read and write",
         ),
     ]
 
@@ -399,8 +416,9 @@ def main() -> int:
         emit_error(
             f"service token probe FAILED: {len(failed)} scope check(s) did not pass "
             f"({', '.join(c.name for c in failed)}). Re-create the fine-grained PAT with "
-            f"Contents: Read and write, Actions: Read and write, and Organization -> "
-            f"Members: Read, then `gh teacher rotate-service-token {org}`."
+            f"Contents: Read and write, Actions: Read and write, Administration: Read and "
+            f"write, and Organization -> Members: Read, then "
+            f"`gh teacher rotate-service-token {org}`."
         )
         return 1
 
