@@ -23,22 +23,36 @@ async function lintMessageCount(source: string) {
     filePath: path.join(projectRoot, "Button.test.tsx"),
   })
   return result.messages.filter(
-    (message) => message.ruleId === "no-restricted-syntax" && message.message === BUTTON_FORM_MESSAGE,
+    (message) =>
+      message.ruleId === "no-restricted-syntax" &&
+      message.message === BUTTON_FORM_MESSAGE,
   ).length
 }
 
 describe("no-restricted-syntax <Button> form guard", () => {
   it("pins the configured selector and message", async () => {
     const config = await import(configPath)
-    const entries = Array.isArray(config.default) ? config.default : [config.default]
-    const ruleArrays = entries
-      .map((entry) => (entry as Record<string, unknown> | undefined)?.rules)
-      .filter((rules): rules is Record<string, unknown> => Boolean(rules))
+    type ConfigEntry = Record<string, unknown> | undefined
+    const entries = Array.isArray(config.default)
+      ? config.default
+      : [config.default]
+    const rulesArray: Array<Record<string, unknown> | undefined> = entries.map(
+      (entry: ConfigEntry) =>
+        (entry as Record<string, unknown> | undefined)?.rules as
+          Record<string, unknown> | undefined,
+    )
+    const definedRules = rulesArray.filter(
+      (rules): rules is Record<string, unknown> => Boolean(rules),
+    )
+    const ruleArrays = definedRules
       .map((rules) => rules["no-restricted-syntax"])
       .filter(Array.isArray) as Array<unknown[]>
     const ruleObjects = ruleArrays
       .flatMap((entry) => entry.slice(1))
-      .filter((entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null)
+      .filter(
+        (entry): entry is Record<string, unknown> =>
+          typeof entry === "object" && entry !== null,
+      )
     const buttonRule = ruleObjects.find(
       (entry) => entry.message === BUTTON_FORM_MESSAGE,
     )
@@ -57,7 +71,7 @@ describe("no-restricted-syntax <Button> form guard", () => {
     expect(await lintMessageCount(source)).toBe(1)
   })
 
-  it("warns for a typeless <Button> inside <Card as=\"form\">", async () => {
+  it('warns for a typeless <Button> inside <Card as="form">', async () => {
     const source = `
       import { Button } from "./Button"
       import { Card } from "./Card"
