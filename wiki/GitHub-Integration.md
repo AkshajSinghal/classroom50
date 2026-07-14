@@ -68,6 +68,7 @@ Same device flow as above, and — as of the scope unification — the **same sc
 | Repository access | **All repositories** ("Only select repositories" misses student repos, which `gh student accept` creates on demand after the token is minted) |
 | Repository → Contents | **Read and write** (Read: collect student repo releases; Write: regrade pushes `submit/*` tags — one shared token) |
 | Repository → Actions | **Read and write** (regrade re-runs each student repo's autograde workflow run via the Actions rerun API) |
+| Repository → **Administration** | **Read and write** (collect grants staff teams — e.g. TAs — read access to student repos and private templates via `PUT /orgs/{org}/teams/{slug}/repos/...`; **not** implied by Contents) |
 | Repository → Metadata | **Read** (mandatory — GitHub auto-includes it on every fine-grained PAT; this is what lets `collect-scores` read group-repo collaborators, so group assignments need no extra scope) |
 | Organization → **Members** | **Read** (collection is team-driven: it lists the classroom GitHub team's members to derive who is enrolled. This is a **separate section** from Repository permissions and only appears once the org is selected as Resource owner — it is **not** implied by any repository scope) |
 | Expiry | 1–366 days (fine-grained PATs support up to 1 year); set a calendar reminder to rotate before it expires |
@@ -145,7 +146,7 @@ After `gh teacher init` / `gh teacher rotate-service-token`, or whenever a colle
 gh workflow run probe-token.yaml --repo <org>/classroom50
 ```
 
-Or **Actions** tab → `probe-token.yaml` → **Run workflow**. A green run means the token has Contents Read+Write, Actions Read+Write, org Members: Read (including the per-classroom team read), and Metadata. A red run's log lists exactly which scope is missing and how to fix it — re-scope and `gh teacher rotate-service-token <org>`.
+Or **Actions** tab → `probe-token.yaml` → **Run workflow**. A green run means the token has Contents Read+Write, Actions Read+Write, Administration Read+Write, org Members: Read (including the per-classroom team read), and Metadata. A red run's log lists exactly which scope is missing and how to fix it — re-scope and `gh teacher rotate-service-token <org>`.
 
 ---
 
@@ -229,6 +230,7 @@ The CLIs call the GitHub REST API through [`go-gh`](https://github.com/cli/go-gh
 | GET | [`https://api.github.com/repos/{owner}/{repo}/releases`](https://docs.github.com/en/rest/releases/releases#list-releases) | Page through a student's assignment-repo releases to collect every `submit/*` submission | **Repository → Contents: Read** |
 | GET | [`https://api.github.com/repos/{owner}/{repo}/releases/assets/{asset_id}`](https://docs.github.com/en/rest/releases/assets#get-a-release-asset) | Download the `result.json` asset from a release | **Repository → Contents: Read** |
 | GET | [`https://api.github.com/repos/{owner}/{repo}/collaborators`](https://docs.github.com/en/rest/collaborators/collaborators#list-repository-collaborators) | List a group repo's collaborators to fan the score out to teammates on the classroom team | **Repository → Metadata: Read** (auto-included) |
+| GET / PUT | [`https://api.github.com/orgs/{org}/teams/{team_slug}/repos/{owner}/{repo}`](https://docs.github.com/en/rest/teams/teams#add-or-update-team-repository-permissions) | Grant a classroom staff team (e.g. TAs) its mapped permission on each existing student repo and private in-org template (idempotent GET pre-check, then PUT when missing) | **Repository → Administration: Read and write** |
 
 ### `probe_token.py` (runs inside GitHub Actions, uses `CLASSROOM50_SERVICE_TOKEN`)
 
@@ -238,7 +240,7 @@ Read-only. Exercises every scope the token needs so a teacher gets one green/red
 |--------|-----|---------|--------------|
 | GET | [`https://api.github.com/orgs/{org}/members`](https://docs.github.com/en/rest/orgs/members#list-organization-members) | Org-members proxy for the team read | **Organization → Members: Read** |
 | GET | [`https://api.github.com/orgs/{org}/teams/{team_slug}/members`](https://docs.github.com/en/rest/teams/members#list-team-members) | The exact per-classroom team read collect makes (also tests team visibility) | **Organization → Members: Read** |
-| GET | [`https://api.github.com/repos/{org}/classroom50`](https://docs.github.com/en/rest/repos/repos#get-a-repository) | Config repo readable + `permissions.push` | **Contents: Read** and **Contents: Write** (via `permissions.push`) |
+| GET | [`https://api.github.com/repos/{org}/classroom50`](https://docs.github.com/en/rest/repos/repos#get-a-repository) | Config repo readable + `permissions.push` + `permissions.admin` | **Contents: Read**, **Contents: Write** (via `permissions.push`), and **Administration: Write** (via `permissions.admin`) |
 | GET | [`https://api.github.com/repos/{org}/classroom50/actions/permissions`](https://docs.github.com/en/rest/actions/permissions#get-github-actions-permissions-for-a-repository) | Reachable only with the Actions permission | **Actions: Read and write** (regrade rerun) |
 | GET | [`https://api.github.com/repos/{org}/classroom50/collaborators`](https://docs.github.com/en/rest/collaborators/collaborators#list-repository-collaborators) | Metadata endpoint (group attribution) | **Metadata: Read** (auto-included) |
 

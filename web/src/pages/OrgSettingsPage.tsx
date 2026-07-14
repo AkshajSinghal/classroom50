@@ -186,6 +186,10 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
       expires_in: String(expiryValid ? parsedExpiry : DEFAULT_EXPIRY_DAYS),
       contents: "write",
       actions: "write",
+      // Repository Administration: write. Collection grants staff teams (e.g.
+      // TAs) read access to student repos and private templates via
+      // PUT /orgs/{org}/teams/{slug}/repos/... — NOT implied by Contents.
+      administration: "write",
       // Org-level Members: Read. Collection is team-driven (it lists the
       // classroom team's members), which needs this org permission and is NOT
       // implied by any repo scope. GitHub only honors the `members` prefill
@@ -389,6 +393,10 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
                 {", "}
                 <span className="font-semibold">
                   {t("orgSettings.serviceToken.permissions_actions")}
+                </span>
+                {", "}
+                <span className="font-semibold">
+                  {t("orgSettings.serviceToken.permissions_administration")}
                 </span>{" "}
                 {t("orgSettings.serviceToken.permissions_and")}{" "}
                 <span className="font-semibold">
