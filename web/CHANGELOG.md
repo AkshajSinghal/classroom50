@@ -17,6 +17,13 @@ classroom50.org (see `.github/workflows/web-release-please.yaml`). You no longer
 edit this file or tag by hand; write Conventional Commit messages and
 release-please compiles the notes.
 
+## [1.5.1](https://github.com/AkshajSinghal/classroom50/compare/web-v1.5.0...web-v1.5.1) (2026-07-15)
+
+
+### Bug Fixes
+
+* **web:** make buttonFormRule a .ts module so tsc typechecks the import ([502debf](https://github.com/AkshajSinghal/classroom50/commit/502debfe3497a39e0417c85acc4441da1132b4ad))
+
 ## [1.5.0](https://github.com/foundation50/classroom50/compare/web-v1.4.0...web-v1.5.0) (2026-07-14)
 
 
