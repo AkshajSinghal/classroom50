@@ -33,6 +33,11 @@ describe("no-restricted-syntax <Button> form guard", () => {
   // those values into the ESLint config and this test prevents accidental
   // drift between the rule and its tests.
 
+  it("keeps the shared button form selector wired to the expected Button pattern", () => {
+    expect(BUTTON_FORM_SELECTOR).toContain("JSXOpeningElement[name.name='Button']")
+    expect(BUTTON_FORM_SELECTOR).toContain("type|as|href")
+  })
+
   it("warns for a typeless <Button> inside a <form>", async () => {
     const source = `
       import { Button } from "./Button"
@@ -98,11 +103,49 @@ describe("no-restricted-syntax <Button> form guard", () => {
     expect(await lintMessageCount(source)).toBe(1)
   })
 
+  it("warns for a <Button> with a variant prop inside a <form>", async () => {
+    const source = `
+      import { Button } from "./Button"
+      export function App() {
+        return <form><Button variant="primary">Go</Button></form>
+      }
+    `
+    expect(await lintMessageCount(source)).toBe(1)
+  })
+
+  it("warns for a <Button> with a className prop inside a <form>", async () => {
+    const source = `
+      import { Button } from "./Button"
+      export function App() {
+        return <form><Button className="x">Go</Button></form>
+      }
+    `
+    expect(await lintMessageCount(source)).toBe(1)
+  })
+
+  it("does not warn for a <Button> with explicit type inside a <form>", async () => {
+    const source = `
+      import { Button } from "./Button"
+      export function App() {
+        return <form><Button type="submit">Go</Button></form>
+      }
+    `
+    expect(await lintMessageCount(source)).toBe(0)
+  })
+
+  it("does not warn for a <Button> with explicit href inside a <form>", async () => {
+    const source = `
+      import { Button } from "./Button"
+      export function App() {
+        return <form><Button href="/">Go</Button></form>
+      }
+    `
+    expect(await lintMessageCount(source)).toBe(0)
+  })
+
   it.each([
-    `<Button type="submit">Go</Button>`,
     `<Button type="button">Go</Button>`,
     `<Button as="a" href="/">Go</Button>`,
-    `<Button href="/">Go</Button>`,
     `<Card as="div"><Button>Go</Button></Card>`,
     `<form><Button as="div">Go</Button></form>`,
     `<Button>Go</Button>`,

@@ -1,7 +1,0 @@
-{
-  "name": "classroom50-root",
-  "private": true,
-  "scripts": {
-    "test": "cd web && pnpm test"
-  }
-}
