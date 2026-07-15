@@ -4,6 +4,7 @@ import reactHooks from "eslint-plugin-react-hooks"
 import reactRefresh from "eslint-plugin-react-refresh"
 import jsxA11y from "eslint-plugin-jsx-a11y"
 import { importX } from "eslint-plugin-import-x"
+import boundaries from "eslint-plugin-boundaries"
 import { createTypeScriptImportResolver } from "eslint-import-resolver-typescript"
 import tseslint from "typescript-eslint"
 import prettier from "eslint-config-prettier/flat"
@@ -198,6 +199,128 @@ export default defineConfig([
     files: ["src/lib/logger.ts", "src/main.tsx"],
     rules: {
       "no-console": "off",
+    },
+  },
+  // Enforce the layered architecture (features -> components -> domain ->
+  // github-core -> util/types, strictly downward) by disallowing the three
+  // load-bearing inversions. `default: allow` + explicit disallows (not
+  // deny-by-default) keeps benign lateral edges quiet; dependency-cruiser adds
+  // the CI-side holistic pass. Rationale for the policy shape and the deferred
+  // util/types leaf rule lives in the Tier-2E PR (#290).
+  //
+  // Adding a new src/<layer>/ dir needs THREE coordinated edits or it is
+  // silently unenforced: (1) a boundaries/elements entry below, (2) a disallow
+  // policy for its illegal edges, and (3) a matching .dependency-cruiser.cjs
+  // path rule. dependency-cruiser's path-regex rules are the CI backstop.
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/**/*.test.{ts,tsx}", "src/**/*.d.ts"],
+    plugins: { boundaries },
+    settings: {
+      // Classify all upward-reachable value edges, not just static `import`:
+      // a re-export (`export { X } from "@/pages/.."`), `require`, or dynamic
+      // `import()` is just as much a reach-up. `dependency.kind: "value"` on
+      // each disallow still scopes them to runtime edges, so type-only imports
+      // stay allowed (matching import-x/no-cycle).
+      "boundaries/dependency-nodes": [
+        "import",
+        "export",
+        "dynamic-import",
+        "require",
+      ],
+      // boundaries resolves each import to a file to classify its target
+      // element; without the `@/*` alias resolver it can't resolve the alias
+      // imports every layer uses and would treat targets as unknown (skipped).
+      "import/resolver": {
+        typescript: {
+          project: ["tsconfig.app.json", "tsconfig.node.json"],
+          alwaysTryTypes: true,
+        },
+      },
+      "boundaries/elements": [
+        { type: "pages", pattern: "src/pages/**", partialMatch: false },
+        { type: "routes", pattern: "src/routes/**", partialMatch: false },
+        {
+          type: "components",
+          pattern: "src/components/**",
+          partialMatch: false,
+        },
+        { type: "context", pattern: "src/context/**", partialMatch: false },
+        { type: "hooks", pattern: "src/hooks/**", partialMatch: false },
+        { type: "auth", pattern: "src/auth/**", partialMatch: false },
+        { type: "domain", pattern: "src/domain/**", partialMatch: false },
+        { type: "authz", pattern: "src/authz/**", partialMatch: false },
+        { type: "orgPolicy", pattern: "src/orgPolicy/**", partialMatch: false },
+        {
+          type: "githubCore",
+          pattern: "src/github-core/**",
+          partialMatch: false,
+        },
+        { type: "skeleton", pattern: "src/skeleton/**", partialMatch: false },
+        { type: "lib", pattern: "src/lib/**", partialMatch: false },
+        { type: "util", pattern: "src/util/**", partialMatch: false },
+        { type: "types", pattern: "src/types/**", partialMatch: false },
+        { type: "i18n", pattern: "src/i18n/**", partialMatch: false },
+        { type: "locales", pattern: "src/locales/**", partialMatch: false },
+      ],
+    },
+    rules: {
+      "boundaries/dependencies": [
+        "error",
+        {
+          default: "allow",
+          policies: [
+            {
+              // components are feature-agnostic and must never import a feature
+              // page (the reach-up P7/Tier-2E fixed).
+              from: { element: { type: "components" } },
+              disallow: {
+                to: { element: { type: "pages" } },
+                dependency: { kind: "value" },
+              },
+              message:
+                "components/ is a lower layer than pages/: a shared component must not import a feature page. Lift the shared piece into components/ (see Tier-2E).",
+            },
+            {
+              // domain is framework-free orchestration below the view layers.
+              from: { element: { type: "domain" } },
+              disallow: {
+                to: {
+                  element: {
+                    type: ["pages", "components", "hooks", "context", "routes"],
+                  },
+                },
+                dependency: { kind: "value" },
+              },
+              message:
+                "domain/ must not import view-layer code (pages/components/hooks/context/routes). Domain depends downward on github-core/util/types only.",
+            },
+            {
+              // github-core is the lowest data layer; it must not reach up into
+              // domain or any view layer at runtime (type-only input edges are
+              // left alone via dependency.kind: value).
+              from: { element: { type: "githubCore" } },
+              disallow: {
+                to: {
+                  element: {
+                    type: [
+                      "domain",
+                      "pages",
+                      "components",
+                      "hooks",
+                      "context",
+                      "routes",
+                    ],
+                  },
+                },
+                dependency: { kind: "value" },
+              },
+              message:
+                "github-core/ is the lowest data layer: it must not import domain or view code at runtime. Keep dependencies downward (util/types).",
+            },
+          ],
+        },
+      ],
     },
   },
   // Last: turn off ESLint rules that conflict with Prettier (formatting is
