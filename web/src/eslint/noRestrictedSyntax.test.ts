@@ -3,7 +3,7 @@ import path from "path"
 import { fileURLToPath } from "url"
 import { describe, expect, it } from "vitest"
 import { ESLint } from "eslint"
-import { buttonFormSelector, buttonFormMessage } from "./buttonFormRule.js"
+import { buttonFormSelector, buttonFormMessage } from "./buttonFormRule"
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -34,7 +34,9 @@ describe("no-restricted-syntax <Button> form guard", () => {
   // drift between the rule and its tests.
 
   it("keeps the shared button form selector wired to the expected Button pattern", () => {
-    expect(BUTTON_FORM_SELECTOR).toContain("JSXOpeningElement[name.name='Button']")
+    expect(BUTTON_FORM_SELECTOR).toContain(
+      "JSXOpeningElement[name.name='Button']",
+    )
     expect(BUTTON_FORM_SELECTOR).toContain("type|as|href")
   })
 
@@ -83,7 +85,7 @@ describe("no-restricted-syntax <Button> form guard", () => {
     expect(await lintMessageCount(source)).toBe(1)
   })
 
-  it('warns for a typeless <Button> inside a <form> with a non-safe attr', async () => {
+  it("warns for a typeless <Button> inside a <form> with a non-safe attr", async () => {
     const source = `
       import { Button } from "./Button"
       export function App() {
@@ -93,7 +95,7 @@ describe("no-restricted-syntax <Button> form guard", () => {
     expect(await lintMessageCount(source)).toBe(1)
   })
 
-  it('warns for a typeless <Button> inside a <form> with a look-alike attr', async () => {
+  it("warns for a typeless <Button> inside a <form> with a look-alike attr", async () => {
     const source = `
       import { Button } from "./Button"
       export function App() {

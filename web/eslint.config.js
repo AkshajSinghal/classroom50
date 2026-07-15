@@ -6,7 +6,10 @@ import jsxA11y from "eslint-plugin-jsx-a11y"
 import tseslint from "typescript-eslint"
 import prettier from "eslint-config-prettier/flat"
 import { defineConfig, globalIgnores } from "eslint/config"
-import { buttonFormSelector, buttonFormMessage } from "./src/eslint/buttonFormRule.js"
+import {
+  buttonFormSelector,
+  buttonFormMessage,
+} from "./src/eslint/buttonFormRule.ts"
 
 export default defineConfig([
   globalIgnores(["dist"]),
