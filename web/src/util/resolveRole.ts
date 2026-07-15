@@ -135,53 +135,19 @@ export function membershipFromQuery(
   return "unresolved"
 }
 
-// The repo-query state the coarse staff verdict depends on. Structural so the
-// verdict stays a pure, testable function (no React Query).
-export type TeacherVerdictInput = {
-  org: string | undefined
-  isSuccess: boolean
-  permissions?: {
-    admin?: boolean
-    maintain?: boolean
-    push?: boolean
-    pull?: boolean
-  }
-  error: unknown
-}
+// --- Org-level staff verdict (team-based) -----------------------------------
 
-export type TeacherVerdict = {
-  isTeacher: boolean
-  isStudent: boolean
-  isBlocked: boolean
+// The viewer's org-level staff standing for surfaces with NO classroom in scope
+// (Published page, "My Classes" nav, ClassesPage): staff = confirmed member of
+// >=1 classroom staff team in the org, derived from the viewer's own team
+// memberships (see useOrgStaff). Fail-closed tri-state: a transient/in-flight
+// read holds `unresolved` rather than demoting a real staffer. Deliberately
+// ignores org-owner status: an owner on no staff team is non-staff here and
+// recovers via ClaimInstructor (owner-scoped UI stays gated on can("manageOrg")).
+export type OrgStaffVerdict = {
+  isStaff: boolean
+  // Definitively-resolved AND not staff — the org-less "treat as a plain member/
+  // student" signal the footer + ClassesPage read. Never true while unresolved.
+  isNonStaff: boolean
   roleResolved: boolean
-  showTeacherUi: boolean
-}
-
-// Pure, fail-closed coarse role resolution against the org's `classroom50`
-// config repo: teacher = repo GET succeeded with a non-trivial permission,
-// student = 404, blocked = 403. Resolved only on a definitive verdict
-// (success/404/403) — a transient 5xx/429/network error must NOT resolve, or a
-// student during a blip would be promoted into teacher UI. Org-less routes have
-// no role.
-export function resolveTeacherVerdict(
-  input: TeacherVerdictInput,
-): TeacherVerdict {
-  const { org, isSuccess, permissions, error } = input
-
-  const isTeacher =
-    isSuccess &&
-    Boolean(
-      permissions?.admin ||
-      permissions?.maintain ||
-      permissions?.push ||
-      permissions?.pull,
-    )
-
-  const isStudent = error instanceof GitHubAPIError && error.isNotFound
-  const isBlocked = error instanceof GitHubAPIError && error.isForbidden
-
-  const roleResolved = !org || isSuccess || isStudent || isBlocked
-  const showTeacherUi = Boolean(org) && isTeacher
-
-  return { isTeacher, isStudent, isBlocked, roleResolved, showTeacherUi }
 }

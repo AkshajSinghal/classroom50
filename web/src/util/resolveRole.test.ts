@@ -6,7 +6,6 @@ import {
   applyViewAs,
   roleLabelKey,
   membershipFromQuery,
-  resolveTeacherVerdict,
   type ClassroomRoleInput,
 } from "./resolveRole"
 import { GitHubAPIError } from "@/github-core/errors"
@@ -239,67 +238,5 @@ describe("applyViewAs (downgrade-only preview)", () => {
 
   it("a preview equal to or above the actual role is a no-op", () => {
     expect(applyViewAs("ta", "ta")).toBe("ta")
-  })
-})
-
-describe("resolveTeacherVerdict", () => {
-  const success = (
-    permissions: Record<string, boolean>,
-    org: string | undefined = "acme",
-  ) => resolveTeacherVerdict({ org, isSuccess: true, permissions, error: null })
-
-  const failure = (error: unknown, org: string | undefined = "acme") =>
-    resolveTeacherVerdict({
-      org,
-      isSuccess: false,
-      permissions: undefined,
-      error,
-    })
-
-  for (const perm of ["admin", "maintain", "push", "pull"]) {
-    it(`treats ${perm} access as teacher`, () => {
-      const v = success({ [perm]: true })
-      expect(v.isTeacher).toBe(true)
-      expect(v.showTeacherUi).toBe(true)
-      expect(v.roleResolved).toBe(true)
-      expect(v.isStudent).toBe(false)
-      expect(v.isBlocked).toBe(false)
-    })
-  }
-
-  it("classifies a 404 as a resolved student, never teacher", () => {
-    const v = failure(apiError(404))
-    expect(v.isStudent).toBe(true)
-    expect(v.isTeacher).toBe(false)
-    expect(v.showTeacherUi).toBe(false)
-    expect(v.roleResolved).toBe(true)
-  })
-
-  it("classifies a 403 as a resolved blocked user, never teacher", () => {
-    const v = failure(apiError(403))
-    expect(v.isBlocked).toBe(true)
-    expect(v.isTeacher).toBe(false)
-    expect(v.roleResolved).toBe(true)
-  })
-
-  for (const status of [500, 502, 503, 429]) {
-    it(`leaves the role UNRESOLVED on a ${status} (fail-closed)`, () => {
-      const v = failure(apiError(status))
-      expect(v.roleResolved).toBe(false)
-      expect(v.showTeacherUi).toBe(false)
-      expect(v.isStudent).toBe(false)
-      expect(v.isBlocked).toBe(false)
-    })
-  }
-
-  it("org-less route resolves immediately with no role and no teacher UI", () => {
-    const v = resolveTeacherVerdict({
-      org: undefined,
-      isSuccess: false,
-      permissions: undefined,
-      error: null,
-    })
-    expect(v.roleResolved).toBe(true)
-    expect(v.showTeacherUi).toBe(false)
   })
 })
