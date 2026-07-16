@@ -9,7 +9,8 @@ import {
 
 import GitHub from "@/assets/github.svg?react"
 import { Spinner } from "@/components/Spinner"
-import { Alert, Button, Card } from "@/components/ui"
+import { Alert, Button, Card, Markdown } from "@/components/ui"
+import { assignmentDescription } from "@/types/classroom"
 import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import type { GitHubUser } from "@/github-core/types"
 import { Link, useParams, useSearch } from "@tanstack/react-router"
@@ -674,6 +675,8 @@ const AcceptAssignmentPage = () => {
     return <AssignmentNotFound user={user} assignment={assignment} />
   }
 
+  const description = assignmentDescription(assignmentData)
+
   return (
     <AcceptLayout>
       <AcceptCard>
@@ -703,6 +706,17 @@ const AcceptAssignmentPage = () => {
               ? t("accept.alreadyAcceptedHeading")
               : t("accept.acceptHeading")}
           </h2>
+
+          {description ? (
+            <details className="collapse collapse-arrow border border-base-300 bg-base-100">
+              <summary className="collapse-title min-h-0 px-4 py-3 text-sm font-medium">
+                {t("accept.descriptionLabel")}
+              </summary>
+              <div className="collapse-content max-h-80 overflow-y-auto">
+                <Markdown content={description} />
+              </div>
+            </details>
+          ) : null}
 
           <div className="divider my-0" />
 

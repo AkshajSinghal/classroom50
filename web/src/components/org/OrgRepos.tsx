@@ -1,16 +1,21 @@
 import { Link } from "@tanstack/react-router"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import {
   BookOpen,
   ExternalLink,
+  FileText,
+  FolderGit2,
   GraduationCap,
+  Link2,
   Pencil,
   UserRound,
   UsersRound,
 } from "lucide-react"
 
-import { Card } from "@/components/ui"
+import { Button, Card, Markdown, Modal } from "@/components/ui"
 import type { GitHubRepo } from "@/github-core/types"
+import { assignmentDescription } from "@/types/classroom"
 import useGetOrgRepos from "@/hooks/useGetMyOrgRepos"
 import useDotClassroom50 from "@/hooks/useDotClassroom50"
 import useGetPublicAssignment from "@/hooks/useGetPublicAssignment"
@@ -18,6 +23,7 @@ import { EnterDiv } from "@/lib/motionComponents"
 
 const RepoCard = ({ org, repo }: { org: string; repo: GitHubRepo }) => {
   const { t } = useTranslation()
+  const [descriptionOpen, setDescriptionOpen] = useState(false)
   const cl50Yaml = useDotClassroom50(org, repo.name)
   const { classroom, assignment, secret } = cl50Yaml
   const { assignment: assignmentData } = useGetPublicAssignment(
@@ -26,6 +32,11 @@ const RepoCard = ({ org, repo }: { org: string; repo: GitHubRepo }) => {
     assignment,
     secret,
   )
+
+  const description = assignmentDescription(assignmentData)
+  // Prefer the human assignment name; the repo name is the fallback identity
+  // (`<classroom>-<assignment>-<user>`) when assignment data hasn't resolved.
+  const title = assignmentData?.name || assignment || repo.name
 
   // Only group assignments have something a student can manage (collaborators);
   // for individual assignments the edit page is a dead-end, so no pencil.
@@ -53,67 +64,58 @@ const RepoCard = ({ org, repo }: { org: string; repo: GitHubRepo }) => {
       )}
 
       <Card.Body className="gap-4">
-        <div className="flex items-start justify-between gap-4 pr-8">
+        <div className="flex items-center gap-3 pr-8">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <BookOpen aria-hidden="true" className="size-5" />
+          </div>
           <div className="min-w-0">
-            <div className="mb-2 flex items-center gap-2">
-              <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                <BookOpen aria-hidden="true" className="size-5" />
-              </div>
-
-              <div className="min-w-0">
-                <h3 className="truncate text-base font-semibold leading-tight">
-                  {repo.name}
+            {classroom && assignment ? (
+              <Link
+                to="/$org/$classroom/assignments/$assignment"
+                params={{ org, classroom, assignment }}
+                className="group inline-flex max-w-full items-center gap-1.5 transition-colors hover:text-primary"
+              >
+                <h3 className="truncate text-base font-semibold leading-tight underline decoration-base-content/30 underline-offset-2 group-hover:decoration-primary">
+                  {title}
                 </h3>
-                <p className="truncate text-xs text-base-content/70">
-                  {repo.owner?.login}
-                </p>
-              </div>
+                <Link2
+                  aria-hidden="true"
+                  className="size-3.5 shrink-0 text-base-content/40 group-hover:text-primary"
+                />
+              </Link>
+            ) : (
+              <h3 className="truncate text-base font-semibold leading-tight">
+                {title}
+              </h3>
+            )}
+            <div className="mt-1 flex flex-col gap-0.5 text-xs text-base-content/70">
+              {classroom ? (
+                <span className="inline-flex max-w-full items-center gap-1.5">
+                  <GraduationCap
+                    aria-hidden="true"
+                    className="size-3.5 shrink-0 text-base-content/50"
+                  />
+                  <span className="truncate">
+                    {t("classes.repo.classroomLabel")}{" "}
+                    <span className="font-medium text-base-content/80">
+                      {classroom}
+                    </span>
+                  </span>
+                </span>
+              ) : null}
+              <span className="inline-flex max-w-full items-center gap-1.5">
+                <FolderGit2
+                  aria-hidden="true"
+                  className="size-3.5 shrink-0 text-base-content/50"
+                />
+                <span className="truncate font-mono">{repo.name}</span>
+              </span>
             </div>
           </div>
         </div>
 
-        <p className="line-clamp-2 min-h-10 text-sm text-base-content/70">
-          {repo.description || t("classes.repo.noDescription")}
-        </p>
-
-        {(classroom || assignment) && (
-          <div className="alert alert-outline flex flex-col items-start">
-            {classroom && (
-              <Link
-                to="/$org/$classroom"
-                params={{ org, classroom }}
-                className="max-w-full truncate group inline-flex w-fit gap-1.5 text-sm text-base-content/70 transition hover:text-primary"
-              >
-                <GraduationCap aria-hidden="true" className="size-4" />
-                <span className="truncate">
-                  {t("classes.repo.classroomLabel")}{" "}
-                  <span className="font-medium text-base-content/80 group-hover:text-primary">
-                    {classroom}
-                  </span>
-                </span>
-              </Link>
-            )}
-
-            {classroom && assignment && (
-              <Link
-                to="/$org/$classroom/assignments/$assignment"
-                params={{ org, classroom, assignment }}
-                className="max-w-full truncate group inline-flex w-fit gap-1.5 text-sm text-base-content/70 transition hover:text-primary"
-              >
-                <BookOpen aria-hidden="true" className="size-4" />
-                <span className="truncate">
-                  {t("classes.repo.assignmentLabel")}{" "}
-                  <span className="font-medium text-base-content/80 group-hover:text-primary">
-                    {assignment}
-                  </span>
-                </span>
-              </Link>
-            )}
-          </div>
-        )}
-
-        <Card.Actions className="items-center justify-between pt-1">
-          <div className="flex flex-wrap items-end gap-2">
+        <Card.Actions className="items-center justify-between gap-2 pt-1">
+          <div className="flex items-center gap-2">
             {assignmentData?.mode === "individual" && (
               <div className="badge badge-ghost badge-sm py-3">
                 <UserRound aria-hidden="true" className="size-4" />{" "}
@@ -121,24 +123,61 @@ const RepoCard = ({ org, repo }: { org: string; repo: GitHubRepo }) => {
               </div>
             )}
             {assignmentData?.mode === "group" && (
-              <div className="badge badge-ghost badge-sm">
+              <div className="badge badge-ghost badge-sm py-3">
                 <UsersRound aria-hidden="true" className="size-4" />{" "}
                 {t("classes.repo.group")}
               </div>
             )}
           </div>
 
-          <a
-            href={repo.html_url}
-            target="_blank"
-            rel="noreferrer"
-            className="btn btn-sm btn-primary"
-          >
-            {t("classes.repo.openRepo")}
-            <ExternalLink aria-hidden="true" className="size-4" />
-          </a>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {description ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setDescriptionOpen(true)}
+              >
+                <FileText aria-hidden="true" className="size-4" />
+                {t("classes.repo.details")}
+              </Button>
+            ) : null}
+            <Button
+              as="a"
+              variant="primary"
+              size="sm"
+              href={repo.html_url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {t("classes.repo.openRepo")}
+              <ExternalLink aria-hidden="true" className="size-4" />
+            </Button>
+          </div>
         </Card.Actions>
       </Card.Body>
+
+      {/* Always mount the Modal so its open/close effect can run; gating the
+          whole element on `description` would tear the open dialog out on a
+          background refetch without firing onClose, stranding descriptionOpen. */}
+      <Modal
+        open={descriptionOpen && Boolean(description)}
+        onClose={() => setDescriptionOpen(false)}
+        size="2xl"
+        aria-label={t("classes.repo.descriptionModalTitle")}
+      >
+        <div className="mb-4 pr-8">
+          <p className="text-xs font-medium uppercase tracking-wide text-base-content/50">
+            {t("classes.repo.descriptionModalTitle")}
+          </p>
+          <h3 className="text-lg font-bold">{title}</h3>
+        </div>
+        {description ? (
+          <Markdown
+            content={description}
+            className="max-h-[70vh] overflow-y-auto pr-1"
+          />
+        ) : null}
+      </Modal>
     </Card>
   )
 }
