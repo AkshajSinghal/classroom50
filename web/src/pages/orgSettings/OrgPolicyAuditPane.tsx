@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import {
@@ -10,9 +10,9 @@ import {
   XCircle,
 } from "lucide-react"
 
-import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { githubKeys } from "@/github-core/queries"
-import { renameConfigRepoToMain } from "@/github-core/mutations"
+import useRenameConfigRepoToMain from "@/hooks/mutations/useRenameConfigRepoToMain"
+import useRepairOrgPolicyConcern from "@/hooks/mutations/useRepairOrgPolicyConcern"
 import { Badge, Button, Spinner, type BadgeTone } from "@/components/ui"
 import { ConfirmModal } from "@/components/modals"
 import PlanBadge from "@/components/PlanBadge"
@@ -26,7 +26,7 @@ import type {
   OrgAuditReport,
   OrgRecommendation,
 } from "@/orgPolicy/audit"
-import { REPAIRABLE_CONCERNS, repairConcern } from "@/orgPolicy/repair"
+import { REPAIRABLE_CONCERNS } from "@/orgPolicy/repair"
 import type { RepairResult } from "@/orgPolicy/repair"
 import { mergeUnresolved, readUnresolved } from "@/orgPolicy/unresolvedStore"
 import type { CheckState } from "@/github-core/orgChecks"
@@ -453,7 +453,6 @@ function AuditBody({
 
 const OrgPolicyAuditPane = ({ org }: { org: string }) => {
   const { t } = useTranslation()
-  const client = useGitHubClient()
   const queryClient = useQueryClient()
   const runFix = useSafeSubmit()
   const { data: planDetails } = useGetOrgPlanDetails(org)
@@ -486,51 +485,57 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
     isError,
   } = useGetOrgAudit(org, planDetails?.plan?.name)
 
-  const fixMutation = useMutation({
-    mutationFn: (id: ConcernId) =>
-      repairConcern(client, org, id, planDetails?.plan?.name),
-    onSuccess: (result, id) => {
-      const outcome = classifyRepairOutcome(result)
-      setTransientNotice(outcome.transientNotice)
-      if (outcome.pinnedFields.length > 0) {
-        setEnterprisePinned((prev) => {
-          const next = new Set(prev)
-          for (const f of outcome.pinnedFields) next.add(f)
-          return next
-        })
-        mergeUnresolved(org, { fields: outcome.pinnedFields })
-      }
-      if (outcome.unresolvedConcern !== null) {
-        const message = outcome.unresolvedConcern
-        setUnresolvedConcerns((prev) => {
-          const next = new Map(prev)
-          next.set(id, message)
-          return next
-        })
-        mergeUnresolved(org, { concerns: [id] })
-      }
-      void queryClient.invalidateQueries({
-        queryKey: githubKeys.orgAuditPrefix(org),
-      })
-    },
-  })
+  // Persist the classified Fix-it outcome to the per-org store — a DURABLE
+  // write, so it runs in the hook's onSuccess (via onRepaired below), NOT the
+  // call site, to survive a mid-repair unmount.
+  const persistRepairOutcome = (result: RepairResult, id: ConcernId) => {
+    const outcome = classifyRepairOutcome(result)
+    if (outcome.pinnedFields.length > 0) {
+      mergeUnresolved(org, { fields: outcome.pinnedFields })
+    }
+    if (outcome.unresolvedConcern !== null) {
+      mergeUnresolved(org, { concerns: [id] })
+    }
+  }
+
+  const fixMutation = useRepairOrgPolicyConcern(
+    org,
+    planDetails?.plan?.name,
+    persistRepairOutcome,
+  )
   // The concern currently being repaired, so only its button shows a spinner.
   const fixingId = fixMutation.isPending
     ? (fixMutation.variables ?? null)
     : null
 
+  // Reflect a Fix-it result in component state (pins, unresolved concerns,
+  // transient-notice). Pure UI, so it stays at the call site (skipped on
+  // unmount); the durable store write is persistRepairOutcome above.
+  const applyRepairOutcomeUi = (result: RepairResult, id: ConcernId) => {
+    const outcome = classifyRepairOutcome(result)
+    setTransientNotice(outcome.transientNotice)
+    if (outcome.pinnedFields.length > 0) {
+      setEnterprisePinned((prev) => {
+        const next = new Set(prev)
+        for (const f of outcome.pinnedFields) next.add(f)
+        return next
+      })
+    }
+    if (outcome.unresolvedConcern !== null) {
+      const message = outcome.unresolvedConcern
+      setUnresolvedConcerns((prev) => {
+        const next = new Map(prev)
+        next.set(id, message)
+        return next
+      })
+    }
+  }
+
   // Renaming the config repo to `main` is a separate flow: it's a recommendation
   // (not a concern) and destructive to already-accepted student shims, so it's
   // gated behind a confirm modal rather than an inline Fix-it.
   const [confirmRename, setConfirmRename] = useState(false)
-  const renameMutation = useMutation({
-    mutationFn: () => renameConfigRepoToMain(client, org),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: githubKeys.orgAuditPrefix(org),
-      })
-    },
-  })
+  const renameMutation = useRenameConfigRepoToMain(org)
 
   return (
     <SettingsSection
@@ -583,6 +588,16 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
         </div>
       )}
 
+      {renameMutation.isError && (
+        <div className="mt-4 flex items-start gap-2 rounded-lg border border-error/30 bg-error/10 p-3 text-sm text-error">
+          <TriangleAlert
+            aria-hidden="true"
+            className="mt-0.5 size-4 shrink-0"
+          />
+          <span>{t("orgSettings.audit.renameError")}</span>
+        </div>
+      )}
+
       {transientNotice && (
         <div className="mt-4 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
           <TriangleAlert
@@ -605,7 +620,11 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
           unresolvedConcerns={unresolvedConcerns}
           onFix={(id) => {
             if (!fixMutation.isPending)
-              void runFix(() => fixMutation.mutateAsync(id))
+              void runFix(() =>
+                fixMutation.mutateAsync(id, {
+                  onSuccess: (result) => applyRepairOutcomeUi(result, id),
+                }),
+              )
           }}
           onRenameConfigRepo={() => setConfirmRename(true)}
         />
@@ -618,7 +637,7 @@ const OrgPolicyAuditPane = ({ org }: { org: string }) => {
         confirmLabel={t("orgSettings.audit.renameToMain")}
         dangerous
         needsConfirm={false}
-        onConfirm={() => renameMutation.mutateAsync().then(() => undefined)}
+        onConfirm={() => runFix(() => renameMutation.mutateAsync())}
         onClose={() => setConfirmRename(false)}
       />
     </SettingsSection>
