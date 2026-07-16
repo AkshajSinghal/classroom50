@@ -776,9 +776,7 @@
       "deleteConfirm": "Delete assignment",
       "deleteCancel": "Keep assignment",
       "reuseTitle": "Reuse in another classroom",
-      "reuseAria": "Reuse assignment in another classroom",
-      "sourceRepoTitle": "View source repository",
-      "sourceRepoAria": "View source repository for {{name}}"
+      "reuseAria": "Reuse assignment in another classroom"
     },
     "toolbar": {
       "searchPlaceholder": "Search assignments…",
@@ -839,7 +837,32 @@
       "noBranch_1": "{{owner}}/{{repo}} has no default branch. Push a commit, or add",
       "noBranch_2": ".",
       "rateLimited": "GitHub rate limit hit. Try again shortly.",
-      "policyLink": "Check {{owner}}'s OAuth app policy"
+      "policyLink": "Check {{owner}}'s OAuth app policy",
+      "reconcile": {
+        "action": "Fix template access",
+        "pending": "Granting…",
+        "success": "Classroom team read on the template is confirmed.",
+        "failed": "Couldn't grant template access:"
+      },
+      "accessModal": {
+        "triggerTitle": "Template access",
+        "triggerAria": "Review template access for {{name}}",
+        "title": "Template access",
+        "description": "Review which template repository this assignment uses and which GitHub teams can read it.",
+        "templateHeading": "Template repository",
+        "branchLabel": "branch",
+        "openOnGitHub": "Open on GitHub",
+        "teamsHeading": "Teams with access",
+        "teamsLoading": "Loading teams…",
+        "teamsEmpty": "No teams have access to this template yet.",
+        "teamsUnavailable": "Couldn't list this repository's teams — you may only see teams visible to your account.",
+        "permissionLabel": "{{permission}} access",
+        "fixAction": "Fix permissions",
+        "fixHint": "Grants the classroom student and TA teams read access so students can accept.",
+        "fixSatisfied": "The classroom team already has read access — nothing to fix.",
+        "ownerOnlyNote": "Only an organization owner can grant team access. Ask an owner to run this, or grant the teams read on the template in GitHub.",
+        "close": "Close"
+      }
     }
   },
   "published": {
