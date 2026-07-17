@@ -9,9 +9,11 @@ import type { TeamRosterRow, TeamRosterRowState } from "@/util/teamRoster"
 // re-exported here so UI callers have one import for all role presentation.
 export { ROLE_RANK, sortRolesByRank }
 
-// i18n key per role for row badges and filter labels.
+// i18n key per role for row badges and filter labels. `teacher` and its legacy
+// `instructor` alias share the label key.
 export const ROLE_LABEL_KEY: Record<ClassroomRole, string> = {
-  instructor: "students.roleInstructor",
+  teacher: "students.roleTeacher",
+  instructor: "students.roleTeacher",
   ta: "students.roleTa",
   student: "students.roleStudent",
 }
@@ -20,6 +22,7 @@ export const ROLE_LABEL_KEY: Record<ClassroomRole, string> = {
 // enrollment state read as separate facets. `student` uses the neutral ghost
 // chip (rendered with the Badge `ghost` prop), so it maps to "neutral" here.
 export const ROLE_BADGE_TONE: Record<ClassroomRole, BadgeTone> = {
+  teacher: "primary",
   instructor: "primary",
   ta: "secondary",
   student: "neutral",
@@ -49,7 +52,7 @@ export const STATE_LABEL_KEY: Record<TeamRosterRowState, string> = {
 // enrollment (CSV row + student-team membership), leaving any staff role intact,
 // so it applies to anyone with a student role — shared by the row modal's
 // unenroll gate and the bulk-select gate so the two can't diverge (a
-// student+instructor must be offered unenroll in BOTH surfaces, never one).
+// student+teacher must be offered unenroll in BOTH surfaces, never one).
 export function hasStudentEnrollment(
   row: Pick<TeamRosterRow, "roles">,
 ): boolean {
@@ -58,13 +61,13 @@ export function hasStudentEnrollment(
 
 // Per-role head counts across the roster. `student` counts every row carrying
 // the student role (a student who is also staff still counts as a student);
-// `instructor`/`ta` count every row holding that staff role. A person on two
+// `teacher`/`ta` count every row holding that staff role. A person on two
 // teams contributes to each of their roles — these are role tallies, not a
 // partition, so they can sum to more than the row count.
 export type RoleCounts = Record<ClassroomRole, number>
 
 export function countByRole(rows: TeamRosterRow[]): RoleCounts {
-  const counts: RoleCounts = { instructor: 0, ta: 0, student: 0 }
+  const counts: RoleCounts = { teacher: 0, instructor: 0, ta: 0, student: 0 }
   for (const row of rows) {
     for (const role of row.roles) counts[role] += 1
   }

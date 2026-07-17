@@ -16,6 +16,13 @@ vi.mock("@/hooks/useClassroomRole", async (importOriginal) => {
 vi.mock("@/auth/useGithubAuth", () => ({
   useGithubAuth: () => ({ user: { login: "prof" } }),
 }))
+// The provider mounts the best-effort teacher-team self-heal migration; it
+// needs the GitHub client + query client and is orthogonal to role resolution,
+// so stub it out here (its own behavior is covered in
+// useTeacherTeamMigration.test.tsx).
+vi.mock("@/hooks/useTeacherTeamMigration", () => ({
+  useTeacherTeamMigration: () => {},
+}))
 
 import {
   ClassroomRoleProvider,
@@ -49,13 +56,13 @@ afterEach(() => {
 describe("ClassroomRoleProvider", () => {
   it("supplies role/actualRole to children", () => {
     classroomRoleMock.mockReturnValue({
-      role: "instructor",
-      actualRole: "instructor",
+      role: "teacher",
+      actualRole: "teacher",
       isLoading: false,
     })
     renderProvider()
-    expect(screen.getByTestId("role").textContent).toBe("instructor")
-    expect(screen.getByTestId("actualRole").textContent).toBe("instructor")
+    expect(screen.getByTestId("role").textContent).toBe("teacher")
+    expect(screen.getByTestId("actualRole").textContent).toBe("teacher")
     expect(screen.getByTestId("roleResolved").textContent).toBe("true")
   })
 
@@ -75,12 +82,12 @@ describe("ClassroomRoleProvider", () => {
     // on `actualRole`.
     classroomRoleMock.mockReturnValue({
       role: "student",
-      actualRole: "instructor",
+      actualRole: "teacher",
       isLoading: false,
     })
     renderProvider()
     expect(screen.getByTestId("role").textContent).toBe("student")
-    expect(screen.getByTestId("actualRole").textContent).toBe("instructor")
+    expect(screen.getByTestId("actualRole").textContent).toBe("teacher")
     expect(screen.getByTestId("roleResolved").textContent).toBe("true")
   })
 

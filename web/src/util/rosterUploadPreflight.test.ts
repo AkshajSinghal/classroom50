@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   classifyRosterUpload,
   membershipLookup,
-  hasInstructorPromotion,
+  hasTeacherPromotion,
   type CurrentMembership,
   type PreflightRow,
   type ResolvedMembership,
@@ -144,11 +144,13 @@ describe("membershipLookup", () => {
     orgMemberLogins: new Set(["ada"]),
     teamIdsByRole: {
       student: new Set(["101"]),
+      teacher: new Set<string>(),
       instructor: new Set<string>(),
       ta: new Set<string>(),
     },
     teamLoginsByRole: {
       student: new Set(["ada"]),
+      teacher: new Set<string>(),
       instructor: new Set<string>(),
       ta: new Set(["helper"]),
     },
@@ -179,10 +181,10 @@ describe("membershipLookup", () => {
   })
 })
 
-describe("hasInstructorPromotion", () => {
-  it("is true only when a change targets instructor", () => {
+describe("hasTeacherPromotion", () => {
+  it("is true only when a change targets teacher", () => {
     expect(
-      hasInstructorPromotion([
+      hasTeacherPromotion([
         {
           kind: "role_change",
           username: "a",
@@ -193,11 +195,11 @@ describe("hasInstructorPromotion", () => {
       ]),
     ).toBe(false)
     expect(
-      hasInstructorPromotion([
+      hasTeacherPromotion([
         {
           kind: "role_change",
           username: "b",
-          role: "instructor",
+          role: "teacher",
           currentRole: "student",
           currentRoles: ["student"],
         },

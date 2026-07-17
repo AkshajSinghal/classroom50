@@ -21,6 +21,7 @@ import {
 } from "@/github-core/errors"
 import { rosterPath, legacyRosterPath } from "@/util/rosterPath"
 import { ROLE_RANK, type ClassroomRole } from "@/util/teamRoster"
+import { isTeacherRole } from "@/authz"
 import { classroomTeamSlug } from "@/util/teamSlug"
 import { STAFF_ROLES, type StaffRole, type Student } from "@/types/classroom"
 import type { StudentCsvRow } from "@/util/rosterCsv"
@@ -292,7 +293,7 @@ export class NoNewStudentsError extends Error {
 }
 
 // A single classroom member unioned across the student + staff teams, tagged
-// with their highest-precedence role (instructor > ta > student).
+// with their highest-precedence role (teacher > ta > student).
 export type MemberWithRole = {
   id: number
   login: string
@@ -323,6 +324,12 @@ export async function resolveClassroomTeamSlugs(
   return {
     student: json?.team?.slug || classroomTeamSlug(classroom),
     staff: {
+      // Prefer the canonical teacher team; fall back to a not-yet-migrated
+      // classroom's legacy instructor team, then the derived teacher slug.
+      teacher:
+        json?.teams?.teacher?.slug ||
+        json?.teams?.instructor?.slug ||
+        classroomTeamSlug(classroom, "teacher"),
       instructor:
         json?.teams?.instructor?.slug ||
         classroomTeamSlug(classroom, "instructor"),
@@ -402,7 +409,7 @@ export async function listClassroomMembersWithRoles(
   ) => {
     const existing = byId.get(member.id)
     // Keep the highest-precedence role when a person is on several teams
-    // (e.g. an instructor also on the student team records "instructor").
+    // (e.g. a teacher also on the student team records "teacher").
     if (existing && ROLE_RANK[existing.role] >= ROLE_RANK[role]) return
     byId.set(member.id, {
       id: member.id,
@@ -499,11 +506,11 @@ export async function retryDeferred<T>(opts: {
 }
 
 // Resolve the team id for each role present in the invite batch: student ->
-// classroom team, instructor/ta -> the staff team (created if missing, mirroring
-// the Settings staff flow so an instructor/ta invite lands them on the right
+// classroom team, teacher/ta -> the staff team (created if missing, mirroring
+// the Settings staff flow so a teacher/ta invite lands them on the right
 // team on acceptance). Only ensures a staff team when that role is actually
 // being invited — a students-only upload must not create (and grant config-repo
-// write to) empty instructor/ta teams as a side effect. A failed resolve leaves
+// write to) empty teacher/ta teams as a side effect. A failed resolve leaves
 // that role's id undefined — the invite still sends teamless.
 export async function resolveTeamIdByRole(
   client: GitHubClient,
@@ -513,6 +520,7 @@ export async function resolveTeamIdByRole(
 ): Promise<Record<ClassroomRole, number | undefined>> {
   const result: Record<ClassroomRole, number | undefined> = {
     student: undefined,
+    teacher: undefined,
     instructor: undefined,
     ta: undefined,
   }
@@ -522,17 +530,21 @@ export async function resolveTeamIdByRole(
     // so no catch here: a blip must surface, not be mistaken for "no team".
     result.student = (await resolveClassroomTeam(client, org, classroom)).id
   }
+  // A legacy `instructor` role in the batch resolves to the canonical teacher
+  // team (both map to org-owner). Treat it as teacher for team provisioning.
+  const wantsTeacher = [...rolesPresent].some(isTeacherRole)
   for (const role of STAFF_ROLES) {
-    if (!rolesPresent.has(role)) continue
+    if (role === "teacher" ? !wantsTeacher : !rolesPresent.has(role)) continue
     try {
       const team = await ensureClassroomRoleTeam(client, org, classroom, role)
       await grantTeamConfigRepoWrite(client, org, team.slug)
       result[role] = team.id
+      if (role === "teacher") result.instructor = team.id
     } catch (err) {
       // Only a DEFINITIVE failure (e.g. 403 no permission to create/grant the
       // staff team) degrades to a teamless invite. A transient 5xx/429/network
-      // error must propagate — sending an instructor an org-OWNER invite while
-      // silently dropping them off the instructor team is worse than retrying.
+      // error must propagate — sending a teacher an org-OWNER invite while
+      // silently dropping them off the teacher team is worse than retrying.
       if (
         err instanceof GitHubAPIError &&
         isDefinitiveGitHubStatus(err.status)

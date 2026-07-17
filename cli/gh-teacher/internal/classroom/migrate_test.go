@@ -242,11 +242,11 @@ func TestRunMigrate_NonDryRun_HappyPath(t *testing.T) {
 		t.Errorf("classroom.json missing migrated_from.classroom_id=95884, got %+v", classroom.MigratedFrom)
 	}
 	// The migrate path seeds + records the staff teams, same as add.
-	if classroom.Teams == nil || classroom.Teams.Instructor == nil || classroom.Teams.TA == nil {
-		t.Errorf("classroom.json missing teams.{instructor,ta}, got %+v", classroom.Teams)
+	if classroom.Teams == nil || classroom.Teams.Teacher == nil || classroom.Teams.TA == nil {
+		t.Errorf("classroom.json missing teams.{teacher,ta}, got %+v", classroom.Teams)
 	} else {
-		if classroom.Teams.Instructor.Slug != "classroom50-classroom50test-instructor" {
-			t.Errorf("instructor team slug = %q, want classroom50-classroom50test-instructor", classroom.Teams.Instructor.Slug)
+		if classroom.Teams.Teacher.Slug != "classroom50-classroom50test-teacher" {
+			t.Errorf("teacher team slug = %q, want classroom50-classroom50test-teacher", classroom.Teams.Teacher.Slug)
 		}
 		if classroom.Teams.TA.Slug != "classroom50-classroom50test-ta" {
 			t.Errorf("ta team slug = %q, want classroom50-classroom50test-ta", classroom.Teams.TA.Slug)
@@ -263,17 +263,17 @@ func TestRunMigrate_NonDryRun_HappyPath(t *testing.T) {
 		t.Errorf("TA team template grant = %q, want cs50-fall-2026/readability", got)
 	}
 	// Only the TA staff team is eagerly granted (StaffTeamRepoPermissions gate);
-	// the instructor team must NOT get template read.
-	if got, ok := state.templateGrants["classroom50-classroom50test-instructor"]; ok {
-		t.Errorf("instructor team must not be granted template read, got %q", got)
+	// the teacher team must NOT get template read.
+	if got, ok := state.templateGrants["classroom50-classroom50test-teacher"]; ok {
+		t.Errorf("teacher team must not be granted template read, got %q", got)
 	}
 
 	// The creator is dropped from the students + TA teams (mixed roles aren't
-	// allowed) but NEVER the instructor team — the owner's only role.
+	// allowed) but NEVER the teacher team — the owner's only role.
 	sort.Strings(state.membershipDeleted)
 	wantDropped := []string{"classroom50-classroom50test", "classroom50-classroom50test-ta"}
 	if !reflect.DeepEqual(state.membershipDeleted, wantDropped) {
-		t.Errorf("membership DELETEs = %v, want %v (students + ta, never instructor)", state.membershipDeleted, wantDropped)
+		t.Errorf("membership DELETEs = %v, want %v (students + ta, never teacher)", state.membershipDeleted, wantDropped)
 	}
 
 	// Final stdout line is parseable; commit SHA appears.

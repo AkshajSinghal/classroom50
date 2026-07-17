@@ -33,6 +33,7 @@ import {
 } from "@/util/rosterCsv"
 import { rosterPath, legacyRosterPath } from "@/util/rosterPath"
 import { type ClassroomRole } from "@/util/teamRoster"
+import { isTeacherRole } from "@/authz"
 import { memberIdentitySets } from "@/util/identity"
 import {
   classifyRosterUpload,
@@ -156,17 +157,17 @@ export async function resolveRosterUploadPreflight(
   const { org, classroom, rows } = input
   const slugs = await resolveClassroomTeamSlugs(client, org, classroom)
 
-  const [orgMembers, studentMembers, instructorMembers, taMembers] =
+  const [orgMembers, studentMembers, teacherMembers, taMembers] =
     await Promise.all([
       listAllOrgMembers(client, org),
       listTeamMembers(client, org, slugs.student),
-      listTeamMembers(client, org, slugs.staff.instructor),
+      listTeamMembers(client, org, slugs.staff.teacher),
       listTeamMembers(client, org, slugs.staff.ta),
     ])
 
   const orgSets = memberIdentitySets(orgMembers)
   const studentSets = memberIdentitySets(studentMembers)
-  const instructorSets = memberIdentitySets(instructorMembers)
+  const teacherSets = memberIdentitySets(teacherMembers)
   const taSets = memberIdentitySets(taMembers)
 
   const resolved: ResolvedMembership = {
@@ -174,12 +175,14 @@ export async function resolveRosterUploadPreflight(
     orgMemberLogins: orgSets.logins,
     teamIdsByRole: {
       student: studentSets.ids,
-      instructor: instructorSets.ids,
+      teacher: teacherSets.ids,
+      instructor: teacherSets.ids,
       ta: taSets.ids,
     },
     teamLoginsByRole: {
       student: studentSets.logins,
-      instructor: instructorSets.logins,
+      teacher: teacherSets.logins,
+      instructor: teacherSets.logins,
       ta: taSets.logins,
     },
   }
@@ -210,26 +213,26 @@ export type ApplyClassroomRoleChangeResult = {
 // Apply a CONFIRMED role change (or an additive enroll) for an active org
 // member: move them onto the CSV role's team and off every other classroom
 // team. The caller must only invoke this for a member the preflight classified
-// as `role_change` or `enroll` and — for an instructor target or a demotion off
-// instructor — the teacher confirmed, since it grants/revokes org-OWNER.
+// as `role_change` or `enroll` and — for a teacher target or a demotion off
+// teacher — the teacher confirmed, since it grants/revokes org-OWNER.
 //
 // Ordering is chosen so a mid-sequence failure never leaves ELEVATED access
 // dangling:
 //  0) Before any change, refuse an org-OWNER revocation that would be
 //     self-inflicted or strip the last owner (self-demotion / sole-owner
 //     demotion) — both are unrecoverable-in-place, so they're blocked outright.
-//  1) Demote org owner -> member FIRST when leaving instructor for a
-//     non-instructor role. Done before any team change, so if it throws we abort
-//     with the member unchanged (still instructor + owner) rather than
+//  1) Demote org owner -> member FIRST when leaving teacher for a
+//     non-teacher role. Done before any team change, so if it throws we abort
+//     with the member unchanged (still teacher + owner) rather than
 //     half-moved-but-still-owner. If a LATER step fails after this committed,
 //     the error explicitly says the owner was revoked so the caller re-runs.
-//  2) Add to the target team (student -> classroom team; ta/instructor -> the
+//  2) Add to the target team (student -> classroom team; ta/teacher -> the
 //     staff team, created + granted config-repo write if missing), then promote
-//     to org owner when the target is instructor.
+//     to org owner when the target is teacher.
 //  3) Remove from EVERY currently-held classroom team that isn't the target
 //     (best-effort — a failed drop is a warning, since the target add + any
 //     owner change already landed). Dropping all non-target teams (not just the
-//     primary) means a member on both the instructor and TA teams moved to
+//     primary) means a member on both the teacher and TA teams moved to
 //     student leaves neither staff team behind.
 //
 // NEVER team-adds a non-member (that would create a stray team invitation); the
@@ -261,8 +264,10 @@ export async function applyClassroomRoleChange(
   const slugForRole = (role: ClassroomRole): string =>
     role === "student" ? slugs.student : slugs.staff[role]
 
-  const wasInstructor = fromRoles.includes("instructor")
-  const demotesOwner = wasInstructor && toRole !== "instructor"
+  // Teacher (and its legacy `instructor` alias) is the org-owner role.
+  const wasTeacher = fromRoles.some(isTeacherRole)
+  const toIsTeacher = isTeacherRole(toRole)
+  const demotesOwner = wasTeacher && !toIsTeacher
 
   // Guard the org-OWNER revocation before touching anything. Demoting yourself
   // strips your own admin mid-operation (you may then lose permission to finish
@@ -275,7 +280,7 @@ export async function applyClassroomRoleChange(
     const viewer = await getAuthenticatedUser(client)
     if (isSameGitHubUser(viewer, { github_id: input.github_id, username })) {
       throw new Error(
-        `You can't demote yourself from instructor here — it would revoke ` +
+        `You can't demote yourself from teacher here — it would revoke ` +
           `your own organization-owner access mid-change. Ask another owner ` +
           `to change your role.`,
       )
@@ -287,12 +292,12 @@ export async function applyClassroomRoleChange(
     if (soleOwner) {
       throw new Error(
         `${username} is the only organization owner, so they can't be demoted ` +
-          `from instructor — promote another owner first.`,
+          `from teacher — promote another owner first.`,
       )
     }
   }
 
-  // 1) Demote org owner FIRST when leaving instructor for a non-instructor role.
+  // 1) Demote org owner FIRST when leaving teacher for a non-teacher role.
   // Doing this before any team mutation guarantees a failure here leaves the
   // member fully unchanged (still owner) rather than partially moved but still
   // an owner — the dangerous partial state.
@@ -304,7 +309,7 @@ export async function applyClassroomRoleChange(
     }
 
     // 2) Add to the target team (ensure a staff team exists + config write),
-    // then promote to org owner for an instructor target.
+    // then promote to org owner for a teacher target.
     if (toRole === "student") {
       await addUserToTeam(client, {
         org,
@@ -322,7 +327,7 @@ export async function applyClassroomRoleChange(
         role: "member",
       })
     }
-    if (toRole === "instructor") {
+    if (toIsTeacher) {
       await setOrgMembershipRole(client, { org, username, role: "admin" })
     }
   } catch (err) {

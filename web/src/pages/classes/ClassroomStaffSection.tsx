@@ -19,15 +19,17 @@ import type { GitHubUser, GitHubOrgInvitation } from "@/github-core/types"
 import { Button, Badge, Card, FormField, Input, Select } from "@/components/ui"
 
 // i18n key for each role's singular label. A map (not inline t()) so it works in
-// module scope; components translate via t(ROLE_LABEL_KEY[role]).
+// module scope; components translate via t(ROLE_LABEL_KEY[role]). `teacher` and
+// its legacy `instructor` alias share the label key.
 const ROLE_LABEL_KEY: Record<StaffRole, string> = {
-  instructor: "classes.staff.roleInstructor",
+  teacher: "classes.staff.roleTeacher",
+  instructor: "classes.staff.roleTeacher",
   ta: "classes.staff.roleTa",
 }
 
-// Manage a classroom's staff (instructor / TA), backed by the per-classroom
+// Manage a classroom's staff (teacher / TA), backed by the per-classroom
 // GitHub teams `classroom50-<classroom>-<role>`. The route already gates; the
-// actions assume instructor/owner.
+// actions assume teacher/owner.
 const ClassroomStaffSection = ({
   org,
   classroom,
@@ -212,8 +214,8 @@ const StaffRoleList = ({
   const pendingInvites = invitesQuery.data ?? []
 
   const rolePlural =
-    role === "instructor"
-      ? t("classes.staff.roleInstructorPlural")
+    role === "teacher"
+      ? t("classes.staff.roleTeacherPlural")
       : t("classes.staff.roleTaPlural")
 
   return (
@@ -279,8 +281,8 @@ const StaffMemberRow = ({
 
   const roleLabel = t(ROLE_LABEL_KEY[role])
   const rolePlural =
-    role === "instructor"
-      ? t("classes.staff.roleInstructorPlural")
+    role === "teacher"
+      ? t("classes.staff.roleTeacherPlural")
       : t("classes.staff.roleTaPlural")
 
   const removeMutation = useRemoveStaffMember(org, classroom, teamSlug)
@@ -301,7 +303,7 @@ const StaffMemberRow = ({
         <span className="truncate text-sm">@{member.login}</span>
         <Badge
           size="xs"
-          tone={role === "instructor" ? "primary" : "secondary"}
+          tone={role === "teacher" ? "primary" : "secondary"}
           className="shrink-0"
         >
           {roleLabel}

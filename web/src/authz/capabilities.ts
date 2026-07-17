@@ -1,4 +1,5 @@
 import type { ResolvedRole, GitHubOrgRole } from "./resolveRole"
+import { isTeacherRole } from "./roles"
 
 // The capability vocabulary — WHAT a viewer can do, decoupled from WHICH role
 // they hold. Consumers ask `can("editClassroomSettings")` instead of comparing
@@ -11,10 +12,10 @@ export type Capability =
   // signal (member of >=1 classroom staff team).
   | "viewOrgStaffContent"
   // Classroom-scoped.
-  | "viewClassroomStaffContent" // roster / authoring / submissions (instructor|ta)
-  | "editClassroomSettings" // instructor only
-  | "previewAsRole" // the "view as" offer — instructor only
-  | "claimInstructor" // org owner who currently resolves to student here
+  | "viewClassroomStaffContent" // roster / authoring / submissions (teacher|ta)
+  | "editClassroomSettings" // teacher only
+  | "previewAsRole" // the "view as" offer — teacher only
+  | "claimTeacher" // org owner who currently resolves to student here
 
 // The resolved signals a capability decision draws on. All optional: a
 // classroom-scoped capability doesn't need `githubOrgRole`, an org-scoped one
@@ -41,12 +42,12 @@ export function can(cap: Capability, input: CapabilityInput): boolean {
     case "viewOrgStaffContent":
       return orgStaff === true
     case "viewClassroomStaffContent":
-      return classroomRole === "instructor" || classroomRole === "ta"
+      return isTeacherRole(classroomRole) || classroomRole === "ta"
     case "editClassroomSettings":
-      return classroomRole === "instructor"
+      return isTeacherRole(classroomRole)
     case "previewAsRole":
-      return classroomRole === "instructor"
-    case "claimInstructor":
+      return isTeacherRole(classroomRole)
+    case "claimTeacher":
       return githubOrgRole === "owner" && classroomRole === "student"
   }
 }

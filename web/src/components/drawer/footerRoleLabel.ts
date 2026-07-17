@@ -13,7 +13,7 @@ export type OrgFooterLabelInput = {
   isOwner: boolean
   ownerPending: boolean
   // Owner read settled in a transient error (retries exhausted). The verdict is
-  // not trustworthy, so it neither grants "Instructor" nor falls back to
+  // not trustworthy, so it neither grants "Teacher" nor falls back to
   // "Student".
   ownerError: boolean
   isNonStaff: boolean
@@ -22,7 +22,7 @@ export type OrgFooterLabelInput = {
 
 export type OrgFooterLabel = {
   // Translation key, or null for no label. Callers pass through t().
-  labelKey: "nav.roleInstructor" | "nav.roleStudent" | null
+  labelKey: "nav.roleTeacher" | "nav.roleStudent" | null
   pending: boolean
 }
 
@@ -41,7 +41,7 @@ export function orgFooterRoleLabel(input: OrgFooterLabelInput): OrgFooterLabel {
 
   let labelKey: OrgFooterLabel["labelKey"] = null
   if (isOrgSetup || isOwner) {
-    labelKey = "nav.roleInstructor"
+    labelKey = "nav.roleTeacher"
   } else if (!ownerUnsettled && !roleLoading && isNonStaff) {
     labelKey = "nav.roleStudent"
   }

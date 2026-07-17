@@ -19,6 +19,7 @@ export type {
 export {
   ROLE_RANK,
   sortRolesByRank,
+  isTeacherRole,
   githubOrgRoleForRole,
   roleForGitHubOrgRole,
   isOwnerGitHubOrgRole,

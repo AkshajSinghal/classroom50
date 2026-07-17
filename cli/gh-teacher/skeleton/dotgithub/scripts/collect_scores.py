@@ -76,7 +76,7 @@ SUBMIT_TAG_PREFIX = "submit/"
 # The TA-team template read is granted eagerly at assignment add/reuse and
 # classroom migrate (Go side, which hardcodes read there); this collect-time
 # grant reads the value below and is the idempotent re-affirm. A role absent
-# here gets nothing (the instructor team is granted at classroom setup, so only
+# here gets nothing (the teacher team is granted at classroom setup, so only
 # TA needs a grant today).
 STAFF_TEAM_PERMISSIONS = {"ta": "pull"}
 
@@ -96,7 +96,7 @@ MAX_RESULT_BYTES = 10 * 1024 * 1024
 # Required roster columns written by `gh teacher classroom add`. Mirrors
 # RosterColumns in cli/gh-teacher/internal/configrepo/students_csv.go and the
 # web app's STUDENT_CSV_FIELDS. Identity/metadata columns; `role`
-# (instructor/ta/student, or "") is best-effort recorded metadata refreshed from
+# (teacher/ta/student, or "") is best-effort recorded metadata refreshed from
 # the classroom's GitHub teams — the teams, not this column, remain the
 # enrollment authority. A pre-role file (ending at github_id) still reads fine:
 # DictReader is header-keyed and a missing column just yields "".
@@ -1482,7 +1482,7 @@ def list_repo_collaborator_logins(
     `role_name == "admin"` here was a bug: a group teammate who is also an org
     owner (admin on every repo), or a founder kept as repo `admin` to invite
     teammates, is `admin` yet a legitimate student — the old filter dropped
-    them, crediting only the owner. Non-student instructors/TAs/org-owners are
+    them, crediting only the owner. Non-student teachers/TAs/org-owners are
     excluded downstream because they're not on the roster, so dropping the admin
     filter here loses no protection.
 
@@ -1536,7 +1536,7 @@ def group_member_usernames(
     sorted and deduped, owner guaranteed present. Crediting is gated on team
     membership, NOT collaborator permission: a teammate on the classroom team is
     credited whether push or admin (an org owner is admin everywhere; a founder
-    is kept admin to invite). A collaborator not on the team (instructor, TA,
+    is kept admin to invite). A collaborator not on the team (teacher, TA,
     non-student org owner, or an account added out-of-band) is never credited.
     Raises on the underlying HTTP/parse error so the caller can fall back to
     owner-only.

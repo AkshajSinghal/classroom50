@@ -17,29 +17,29 @@ afterEach(() => {
 })
 
 describe("RoleBadges", () => {
-  it("renders a chip per role for a mixed-team member (instructor + student)", () => {
-    render(<RoleBadges roles={["student", "instructor"]} />)
-    expect(screen.getByText("students.roleInstructor")).toBeTruthy()
+  it("renders a chip per role for a mixed-team member (teacher + student)", () => {
+    render(<RoleBadges roles={["student", "teacher"]} />)
+    expect(screen.getByText("students.roleTeacher")).toBeTruthy()
     expect(screen.getByText("students.roleStudent")).toBeTruthy()
   })
 
   it("renders exactly one chip for a single-role member", () => {
     const { container } = render(<RoleBadges roles={["student"]} />)
     expect(screen.getByText("students.roleStudent")).toBeTruthy()
-    expect(screen.queryByText("students.roleInstructor")).toBeNull()
+    expect(screen.queryByText("students.roleTeacher")).toBeNull()
     // One badge element, not a collapsed-then-duplicated render.
     expect(container.querySelectorAll(".badge")).toHaveLength(1)
   })
 
-  it("orders chips by precedence (instructor before ta before student)", () => {
+  it("orders chips by precedence (teacher before ta before student)", () => {
     const { container } = render(
-      <RoleBadges roles={["student", "ta", "instructor"]} />,
+      <RoleBadges roles={["student", "ta", "teacher"]} />,
     )
     const labels = [...container.querySelectorAll(".badge")].map(
       (el) => el.textContent,
     )
     expect(labels).toEqual([
-      "students.roleInstructor",
+      "students.roleTeacher",
       "students.roleTa",
       "students.roleStudent",
     ])
