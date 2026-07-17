@@ -208,6 +208,35 @@ export function readGitHubRateLimitHeaders(res: Response): GitHubRateLimit {
   }
 }
 
+// A 2xx whose body isn't JSON: the response never reached GitHub's app layer
+// (an edge/proxy served HTML — a known REST-outage shape). Modeled as a
+// synthetic 5xx GitHubAPIError so it classifies as an outage (isDefiniteOutage
+// Error, retryTransientGitHubError) and carries a short, non-HTML message rather
+// than leaking a raw JSON `SyntaxError`. The raw body is deliberately dropped;
+// the X-GitHub-Request-Id is kept (non-sensitive) so a real edge outage stays
+// correlatable in support/audit just like a normal non-OK GitHubAPIError.
+export function githubNonJsonResponseError(
+  url: string,
+  status: number,
+  requestId: string | null = null,
+): GitHubAPIError {
+  return new GitHubAPIError({
+    status: 502,
+    url,
+    message: `GitHub returned a non-JSON response (HTTP ${status}) — this usually means GitHub is having trouble. Try again shortly.`,
+    body: null,
+    rateLimit: {
+      limit: null,
+      remaining: null,
+      used: null,
+      reset: null,
+      resource: null,
+      retryAfter: null,
+    },
+    requestId,
+  })
+}
+
 // Run a GitHub read/write, swallowing a tolerated error into `fallback` instead
 // of throwing — the "absent reads as empty/none" idiom, unified so call sites
 // stop re-spelling the `instanceof GitHubAPIError && status === 404` guard.

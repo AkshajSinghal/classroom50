@@ -16,6 +16,8 @@ import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
 import useEmptyRosterWarning from "@/hooks/useEmptyRosterWarning"
 import { logger } from "@/lib/logger"
 import { logWriteFailure } from "@/lib/logWriteFailure"
+import { useOutageHint } from "@/lib/githubHealth"
+import { GitHubStatusNote } from "@/components/GitHubStatusNote"
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -28,8 +30,19 @@ const CreateAssignmentPage = () => {
   const { org, classroom } = useParams({ strict: false })
   const { notify } = useToast()
   const trackPublishDeploy = useTrackPublishDeploy()
-  const [errorMessage, setErrorMessage] = useState("")
+  // The error alert's content and its visibility are tracked separately so the
+  // AnimatePresence exit animation keeps rendering the last content while it
+  // collapses. Clearing the content on hide (a single `errorMessage` string)
+  // would blank the alert mid-collapse; instead we only flip `errorShown` off
+  // and leave `errorContent` frozen until the next failure replaces it.
+  const [errorContent, setErrorContent] = useState<
+    { kind: "message"; message: string } | { kind: "outage" }
+  >({ kind: "message", message: "" })
+  const [errorShown, setErrorShown] = useState(false)
   const [warningMessage, setWarningMessage] = useState("")
+
+  const outageHint = useOutageHint()
+  const outageStatusDescription = outageHint.statusDescription
 
   const { data: assignmentsData } = useGetClassroomAssignments(org, classroom)
   const takenSlugs = (assignmentsData?.assignments ?? []).map((a) => a.slug)
@@ -63,8 +76,12 @@ const CreateAssignmentPage = () => {
             hasRosterRows={emptyRoster.hasRosterRows}
           />
         ) : null}
-        <AnimatedAlert tone="error" show={!!errorMessage}>
-          {errorMessage}
+        <AnimatedAlert tone="error" show={errorShown}>
+          {errorContent.kind === "outage" ? (
+            <GitHubStatusNote statusDescription={outageStatusDescription} />
+          ) : (
+            errorContent.message
+          )}
         </AnimatedAlert>
         <AnimatedAlert
           tone="warning"
@@ -90,7 +107,9 @@ const CreateAssignmentPage = () => {
           classroom={classroom}
           takenSlugs={takenSlugs}
           onSubmit={(values) => {
-            setErrorMessage("")
+            // Hide the alert but keep its content frozen for the exit collapse;
+            // the next failure (if any) replaces the content when it re-shows.
+            setErrorShown(false)
             setWarningMessage("")
             createAssignmentMutation.mutateAsync(
               {
@@ -124,7 +143,16 @@ const CreateAssignmentPage = () => {
               {
                 onError: (err) => {
                   logWriteFailure(log, err, "create assignment failed")
-                  setErrorMessage(err.message)
+                  // A transient outage-shaped failure during save reads as a
+                  // local "fetch failed" — swap in the outage hint (the strict
+                  // classifier keeps a definitive 4xx / rate limit reading as
+                  // the real message), so the teacher knows to retry.
+                  setErrorContent(
+                    outageHint.isOutage(err)
+                      ? { kind: "outage" }
+                      : { kind: "message", message: err.message },
+                  )
+                  setErrorShown(true)
                   window.scrollTo({ top: 0, behavior: "smooth" })
                 },
                 onSuccess: (result, variables) => {

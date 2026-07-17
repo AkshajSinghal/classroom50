@@ -30,7 +30,7 @@ vi.mock("./githubStatusApi", () => ({
 import {
   __resetGitHubHealthForTest,
   getGitHubHealthSnapshot,
-  isOutageShapedError,
+  isDefiniteOutageError,
   recordGitHubFailure,
   recordGitHubSuccess,
 } from "./githubHealthStore"
@@ -45,32 +45,70 @@ afterEach(() => {
   __resetGitHubHealthForTest()
 })
 
-describe("isOutageShapedError", () => {
-  it("treats a 5xx GitHubAPIError as outage-shaped", () => {
-    expect(isOutageShapedError(apiError(500))).toBe(true)
-    expect(isOutageShapedError(apiError(503))).toBe(true)
+describe("isDefiniteOutageError", () => {
+  class Wrapper extends Error {
+    constructor(cause?: unknown) {
+      super("wrapped")
+      if (cause !== undefined) this.cause = cause
+    }
+  }
+
+  it("is true for a 5xx GitHubAPIError, unwrapping `.cause`", () => {
+    expect(isDefiniteOutageError(apiError(500))).toBe(true)
+    expect(isDefiniteOutageError(apiError(503))).toBe(true)
+    expect(isDefiniteOutageError(new Wrapper(apiError(502)))).toBe(true)
   })
 
-  it("treats a bare network/timeout error as outage-shaped", () => {
-    expect(isOutageShapedError(new TypeError("Failed to fetch"))).toBe(true)
+  it("is true for a network-failure TypeError across browser engines, unwrapping `.cause`", () => {
+    expect(isDefiniteOutageError(new TypeError("Failed to fetch"))).toBe(true)
+    expect(
+      isDefiniteOutageError(
+        new TypeError("NetworkError when attempting to fetch resource"),
+      ),
+    ).toBe(true)
+    expect(isDefiniteOutageError(new TypeError("Load failed"))).toBe(true)
+    expect(
+      isDefiniteOutageError(new Wrapper(new TypeError("Failed to fetch"))),
+    ).toBe(true)
   })
 
-  it("does NOT treat definitive 4xx (401/403/404) as outage-shaped", () => {
-    expect(isOutageShapedError(apiError(401))).toBe(false)
-    expect(isOutageShapedError(apiError(403))).toBe(false)
-    expect(isOutageShapedError(apiError(404))).toBe(false)
+  it("is true for a non-abort timeout DOMException", () => {
+    expect(
+      isDefiniteOutageError(new DOMException("timed out", "TimeoutError")),
+    ).toBe(true)
   })
 
-  it("does NOT treat a rate limit as outage-shaped (429, or 403 with retry-after/remaining 0)", () => {
-    expect(isOutageShapedError(apiError(429))).toBe(false)
-    expect(isOutageShapedError(apiError(403, { retryAfter: 60 }))).toBe(false)
-    expect(isOutageShapedError(apiError(403, { remaining: 0 }))).toBe(false)
+  it("is false for a non-network TypeError (an ordinary local app bug)", () => {
+    // A property-access-on-undefined bug throws TypeError too; it must never
+    // read as a GitHub outage (that would mislabel the failure and hide it).
+    expect(
+      isDefiniteOutageError(
+        new TypeError("Cannot read properties of undefined (reading 'x')"),
+      ),
+    ).toBe(false)
   })
 
-  it("does NOT treat a caller/timeout abort as outage-shaped", () => {
-    expect(isOutageShapedError(new DOMException("aborted", "AbortError"))).toBe(
-      false,
-    )
+  it("is false for definitive 4xx, rate limit, abort — even wrapped", () => {
+    expect(isDefiniteOutageError(apiError(401))).toBe(false)
+    expect(isDefiniteOutageError(apiError(403))).toBe(false)
+    expect(isDefiniteOutageError(apiError(404))).toBe(false)
+    expect(isDefiniteOutageError(apiError(429))).toBe(false)
+    expect(isDefiniteOutageError(apiError(403, { retryAfter: 60 }))).toBe(false)
+    expect(isDefiniteOutageError(apiError(403, { remaining: 0 }))).toBe(false)
+    expect(
+      isDefiniteOutageError(new DOMException("aborted", "AbortError")),
+    ).toBe(false)
+    expect(isDefiniteOutageError(new Wrapper(apiError(404)))).toBe(false)
+    expect(isDefiniteOutageError(new Wrapper(apiError(429)))).toBe(false)
+  })
+
+  it("is false for a plain/unknown error with no outage cause (no false positive)", () => {
+    // A TemplateAccessError-like plain Error must never read as an outage.
+    expect(isDefiniteOutageError(new Error("ask your instructor"))).toBe(false)
+    expect(isDefiniteOutageError(new Wrapper())).toBe(false)
+    expect(isDefiniteOutageError("string")).toBe(false)
+    expect(isDefiniteOutageError(undefined)).toBe(false)
+    expect(isDefiniteOutageError(null)).toBe(false)
   })
 })
 
@@ -101,6 +139,20 @@ describe("suspicion threshold", () => {
     recordGitHubFailure(apiError(404), 1100)
     recordGitHubFailure(apiError(404), 1200)
     recordGitHubFailure(apiError(429), 1300)
+    expect(getGitHubHealthSnapshot().suspected).toBe(false)
+  })
+
+  it("ignores local app errors so unrelated non-GitHub throws never trip the banner", () => {
+    // These reach React Query's global onError (which feeds recordGitHubFailure
+    // unfiltered), but none is a positively-identified outage, so 3+ in-window
+    // must NOT suspect — a local bug is not "GitHub is down".
+    recordGitHubFailure(new Error("something local broke"), 1000)
+    recordGitHubFailure(
+      new TypeError("Cannot read properties of undefined"),
+      1100,
+    )
+    recordGitHubFailure("rejected with a string", 1200)
+    recordGitHubFailure(new Error("another local failure"), 1300)
     expect(getGitHubHealthSnapshot().suspected).toBe(false)
   })
 })
