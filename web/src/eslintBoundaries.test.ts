@@ -23,6 +23,8 @@ import { fileURLToPath } from "node:url"
 const COMPONENTS_DIR = fileURLToPath(new URL("./components", import.meta.url))
 const GITHUB_CORE_DIR = fileURLToPath(new URL("./github-core", import.meta.url))
 const DOMAIN_DIR = fileURLToPath(new URL("./domain", import.meta.url))
+const UTIL_DIR = fileURLToPath(new URL("./util", import.meta.url))
+const ESLINT_TOOLING_DIR = fileURLToPath(new URL("./eslint", import.meta.url))
 const WEB_ROOT = fileURLToPath(new URL("../", import.meta.url))
 const ESLINT_BIN = fileURLToPath(
   new URL("../node_modules/.bin/eslint", import.meta.url),
@@ -65,6 +67,10 @@ describe("layered-architecture boundary guard is live", () => {
       const compDir = mkdtempSync(`${COMPONENTS_DIR}/__boundaries_probe_`)
       const coreDir = mkdtempSync(`${GITHUB_CORE_DIR}/__boundaries_probe_`)
       const domainDir = mkdtempSync(`${DOMAIN_DIR}/__boundaries_probe_`)
+      const utilDir = mkdtempSync(`${UTIL_DIR}/__boundaries_probe_`)
+      const eslintToolingDir = mkdtempSync(
+        `${ESLINT_TOOLING_DIR}/__boundaries_probe_`,
+      )
       try {
         // components -> pages: an upward reach-up. Must be flagged.
         writeFileSync(
@@ -100,6 +106,35 @@ describe("layered-architecture boundary guard is live", () => {
           `${compDir}/compDynamic.ts`,
           `export const load = () => import("@/pages/ClassesPage")\n`,
         )
+        // util -> components (value): a leaf reaching into the view layer. Must
+        // fire — this is the Tier-3 leaf-layer policy.
+        writeFileSync(
+          `${utilDir}/leafUpwardValue.ts`,
+          `import { Badge } from "@/components/ui"\nexport const e = Badge\n`,
+        )
+        // util -> components (TYPE-only): the leaf policy omits dependency.kind,
+        // so it must block even a type edge (unlike the value-scoped policies).
+        // This is what caught the BadgeTone reach-up the Tier-3 move fixed.
+        writeFileSync(
+          `${utilDir}/leafUpwardType.ts`,
+          `import type { BadgeTone } from "@/components/ui"\nexport type F = BadgeTone\n`,
+        )
+        // util -> github-core (value): a legal downward leaf import (util
+        // already depends on github-core). Must NOT fire — proves the leaf
+        // policy deliberately allows the github-core edge.
+        writeFileSync(
+          `${utilDir}/leafDownward.ts`,
+          `import { GitHubAPIError } from "@/github-core/errors"\nexport const g = GitHubAPIError\n`,
+        )
+        // eslintTooling -> components: the eslintTooling element shares the leaf
+        // policy's `from`-set, but src/eslint/** imports no app code today, so
+        // only this probe proves it's actually classified and enforced — without
+        // it, dropping eslintTooling (or lib/types) from the `from`-set would
+        // pass green since util alone still trips the rule.
+        writeFileSync(
+          `${eslintToolingDir}/toolingUpward.ts`,
+          `import { Badge } from "@/components/ui"\nexport const h = Badge\n`,
+        )
 
         const byFile = ruleIdsByFile([
           `${compDir}/compUpward.ts`,
@@ -108,6 +143,10 @@ describe("layered-architecture boundary guard is live", () => {
           `${domainDir}/domainUpward.ts`,
           `${compDir}/compReexport.ts`,
           `${compDir}/compDynamic.ts`,
+          `${utilDir}/leafUpwardValue.ts`,
+          `${utilDir}/leafUpwardType.ts`,
+          `${utilDir}/leafDownward.ts`,
+          `${eslintToolingDir}/toolingUpward.ts`,
         ])
 
         expect(
@@ -140,10 +179,32 @@ describe("layered-architecture boundary guard is live", () => {
           byFile["compDynamic.ts"],
           "boundaries/dependencies did not fire on a components->pages dynamic import() — `dynamic-import` is missing from boundaries/dependency-nodes, so lazy-loaded reach-ups are invisible.",
         ).toContain("boundaries/dependencies")
+        expect(
+          byFile["leafUpwardValue.ts"],
+          "boundaries/dependencies did not fire on a util->components value import — the Tier-3 leaf-layer policy has gone inert (check the util/lib/types policy + the eslintTooling/leaf elements in eslint.config.js).",
+        ).toContain("boundaries/dependencies")
+        expect(
+          byFile["leafUpwardType.ts"],
+          "boundaries/dependencies did not fire on a util->components TYPE-only import — the leaf policy must omit dependency.kind so it blocks type edges too (this is the BadgeTone reach-up class).",
+        ).toContain("boundaries/dependencies")
+        expect(
+          byFile["leafDownward.ts"],
+          "leafDownward.ts was not linted at all — the leaf negative control is meaningless.",
+        ).toBeDefined()
+        expect(
+          byFile["leafDownward.ts"],
+          "boundaries/dependencies fired on a legal util->util downward import — the leaf policy is too strict.",
+        ).not.toContain("boundaries/dependencies")
+        expect(
+          byFile["toolingUpward.ts"],
+          "boundaries/dependencies did not fire on a src/eslint (eslintTooling) -> components import — eslintTooling was dropped from the leaf policy `from`-set or its boundaries/elements entry is missing (eslint.config.js).",
+        ).toContain("boundaries/dependencies")
       } finally {
         rmSync(compDir, { recursive: true, force: true })
         rmSync(coreDir, { recursive: true, force: true })
         rmSync(domainDir, { recursive: true, force: true })
+        rmSync(utilDir, { recursive: true, force: true })
+        rmSync(eslintToolingDir, { recursive: true, force: true })
       }
     },
   )
