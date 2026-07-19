@@ -9,7 +9,7 @@ import { AnimatedAlert, Card, Spinner, Button } from "@/components/ui"
 import PageShell from "@/components/PageShell"
 import PageHeader from "@/components/PageHeader"
 import { EmptyState } from "@/components/list"
-import RequireTeacher from "@/components/RequireTeacher"
+import RequireRole from "@/components/RequireRole"
 import { DiagnosticsDialog } from "@/components/DiagnosticsDialog"
 import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import useGetOrgPlanDetails from "@/hooks/useGetOrgPlanDetails"
@@ -33,14 +33,7 @@ import {
   type ActivityFilterState,
 } from "./orgActivity/ActivityToolbar"
 import { TimelineRow } from "./orgActivity/TimelineRow"
-
-// Workflow file -> i18n label key, reused from the actions banner. Module-level
-// so the map isn't reallocated per render / per run item.
-const WORKFLOW_LABEL_KEY: Record<string, string> = {
-  "publish-pages.yaml": "actionsBanner.workflow.publishPages",
-  "collect-scores.yaml": "actionsBanner.workflow.collectScores",
-  "regrade.yaml": "actionsBanner.workflow.regrade",
-}
+import { WORKFLOW_LABEL_KEY } from "@/util/actionActivity"
 
 // Unified, owner-only org Activity view. Merges three sources into one filterable,
 // newest-first timeline:
@@ -131,7 +124,7 @@ const OrgActivityPage = () => {
 
   return (
     <PageShell page="classes" selected="activity">
-      <RequireTeacher allow="owner">
+      <RequireRole allow="owner">
         <PageHeader
           title={t("orgActivity.heading")}
           subtitle={t("orgActivity.subtitle")}
@@ -216,7 +209,7 @@ const OrgActivityPage = () => {
             )}
           </>
         )}
-      </RequireTeacher>
+      </RequireRole>
     </PageShell>
   )
 }

@@ -2,6 +2,7 @@ import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import {
   MutationCache,
+  QueryCache,
   QueryClient,
   QueryClientProvider,
 } from "@tanstack/react-query"
@@ -20,18 +21,48 @@ import App from "./App"
 import { appVersion, formatAppVersion } from "./version"
 import { installDiagnosticsHandlers } from "./lib/diagnostics/globalHandlers"
 import { recordError } from "./lib/activity/activityStore"
+import { retryTransientGitHubError } from "./github-core/errors"
+import { recordGitHubFailure, recordGitHubSuccess } from "./lib/githubHealth"
 import { RateLimitOverlay } from "./components/dev/RateLimitOverlay"
 
-// Record every failed mutation as session activity. Mutations are the app's
-// real write operations (create/delete/dispatch/enroll), so a rejection here is
-// a genuine, user-affecting failure — unlike the benign existence-check 404s on
-// the read path, which are caught and turned into verdicts and so never reach
-// this cache. The mutationId dedups against a matching error toast.
+// Safe query defaults so a new `useQuery` can't silently inherit React Query's
+// aggressive built-ins (staleTime:0 + refetchOnWindowFocus:true + retry:3). Every
+// read here hits the GitHub API, where those defaults are hazards: focus-refetch
+// storms and 3x-retrying a definitive 4xx (a 403 blocked / 404 not-a-member reads
+// as a role verdict, not a transient error). This makes the app's convention
+// (each hook sets its own staleTime; nothing wants focus-refetch; fail-closed
+// retry) the enforced baseline. Per-query options still override — polling hooks
+// (useActionActivity) set their own refetchInterval/retry and are unaffected.
 const client = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      retry: retryTransientGitHubError,
+      // A small floor, not a cache: enough to dedupe a burst of mounts without
+      // holding stale data. Hooks that want longer freshness set their own.
+      staleTime: 30_000,
+    },
+  },
+  // Feed the GitHub-health detector from the read path: onError sees every
+  // rejected query — including the network/timeout failures that throw before
+  // the client's onResponse (see client.ts) — and onSuccess is proof GitHub is
+  // reachable, which clears any suspicion. The detector ignores non-outage
+  // errors (4xx/rate-limit), so this is safe to feed unfiltered.
+  queryCache: new QueryCache({
+    onError: (error) => recordGitHubFailure(error),
+    onSuccess: () => recordGitHubSuccess(),
+  }),
+  // Record every failed mutation as session activity. Mutations are the app's
+  // real write operations (create/delete/dispatch/enroll), so a rejection here is
+  // a genuine, user-affecting failure — unlike the benign existence-check 404s on
+  // the read path, which are caught and turned into verdicts and so never reach
+  // this cache. The mutationId dedups against a matching error toast.
   mutationCache: new MutationCache({
     onError: (error, _variables, _context, mutation) => {
       recordError(error, { dedupKey: `mutation-${mutation.mutationId}` })
+      recordGitHubFailure(error)
     },
+    onSuccess: () => recordGitHubSuccess(),
   }),
 })
 

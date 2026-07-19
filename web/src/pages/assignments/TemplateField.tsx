@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import type { ReactNode } from "react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import {
   AlertTriangle,
@@ -17,13 +18,16 @@ import {
   type TemplateAccessVerification,
 } from "@/domain/assignments"
 import { teamHasRepoAccess } from "@/github-core/queries"
+import { useGitHubHealth } from "@/lib/githubHealth"
+import { GitHubStatusNote } from "@/components/GitHubStatusNote"
+import { useReconcileTemplateAccess } from "@/hooks/mutations/useReconcileTemplateAccess"
 import {
   useDebouncedValue,
   normalizeOnBlur,
   type StringField,
 } from "./formFieldHelpers"
 import { InlineNote, InlineCode as Code } from "@/components/InlineNote"
-import { FormField, Input } from "@/components/ui"
+import { Button, FormField, Input } from "@/components/ui"
 import {
   templateForkNoteView,
   templateRestrictedNoteView,
@@ -36,10 +40,14 @@ export const TemplateField = ({
   field,
   org,
   classroom,
+  slug,
 }: {
   field: StringField
   org?: string
   classroom?: string
+  // Edit-only: enables the inline "Fix template access" recovery button. Absent
+  // on the create form (there's no assignment yet to reconcile).
+  slug?: string
 }) => {
   const { t } = useTranslation()
   const client = useOptionalGitHubClient()
@@ -78,7 +86,11 @@ export const TemplateField = ({
     verification?.kind === "ok" &&
     verification.inOrg &&
     verification.visibility === "private"
-      ? { owner: verification.owner, repo: verification.repo }
+      ? {
+          owner: verification.owner,
+          repo: verification.repo,
+          branch: verification.branch,
+        }
       : null
   const teamAccessEnabled = Boolean(
     client && org && classroom && inOrgPrivateTemplate,
@@ -147,8 +159,69 @@ export const TemplateField = ({
         pending={pending}
         org={org}
         teamHasAccess={teamHasAccess}
+        reconcile={
+          slug && org && classroom && inOrgPrivateTemplate ? (
+            <ReconcileTemplateAccessInline
+              org={org}
+              classroom={classroom}
+              slug={slug}
+              template={{
+                owner: inOrgPrivateTemplate.owner,
+                repo: inOrgPrivateTemplate.repo,
+                branch: inOrgPrivateTemplate.branch,
+              }}
+            />
+          ) : undefined
+        }
       />
     </>
+  )
+}
+
+// The inline "Fix template access" recovery button rendered inside the
+// "team doesn't have access yet" note. One-click, no confirmation (idempotent,
+// additive-only). On a clean grant the hook seeds the team-access query true, so
+// the surrounding verdict re-renders as "already has access"; a warning is shown
+// inline and the button returns to idle for a retry.
+const ReconcileTemplateAccessInline = ({
+  org,
+  classroom,
+  slug,
+  template,
+}: {
+  org: string
+  classroom: string
+  slug: string
+  template: { owner: string; repo: string; branch: string }
+}) => {
+  const { t } = useTranslation()
+  const reconcile = useReconcileTemplateAccess()
+  const [warning, setWarning] = useState<string | undefined>(undefined)
+
+  return (
+    <span className="mt-1.5 block">
+      <Button
+        variant="ghost"
+        size="sm"
+        loading={reconcile.isPending}
+        loadingLabel={t("assignments.template.reconcile.pending")}
+        disabled={reconcile.isPending}
+        onClick={() => {
+          setWarning(undefined)
+          reconcile.mutate(
+            { org, classroom, slug, template },
+            { onSuccess: (result) => setWarning(result.warning) },
+          )
+        }}
+      >
+        {t("assignments.template.reconcile.action")}
+      </Button>
+      {warning && (
+        <span className="mt-1 block text-xs text-error">
+          {t("assignments.template.reconcile.failed")} {warning}
+        </span>
+      )}
+    </span>
   )
 }
 
@@ -157,6 +230,7 @@ const TemplateVerificationNote = ({
   pending,
   org,
   teamHasAccess,
+  reconcile,
 }: {
   verification: TemplateAccessVerification | null
   pending: boolean
@@ -164,8 +238,12 @@ const TemplateVerificationNote = ({
   // For an in-org private template: true if the classroom team already has
   // read, false if granted on create, undefined if N/A or unresolved.
   teamHasAccess?: boolean
+  // Inline recovery button, rendered inside the "no access yet" verdict (edit
+  // form only). Undefined on create or when the verdict isn't in-org-private.
+  reconcile?: ReactNode
 }) => {
   const { t } = useTranslation()
+  const { suspected, statusDescription } = useGitHubHealth()
   if (pending) {
     return (
       <p className="mt-1.5 flex items-center gap-1.5 text-sm text-base-content/70">
@@ -198,6 +276,9 @@ const TemplateVerificationNote = ({
     t,
     fallbackOrg,
     teamHasAccess,
+    reconcile,
+    outageSuspected: suspected,
+    statusDescription,
   })
 
   if (!nonMainNote) return verdict
@@ -214,12 +295,31 @@ function renderTemplateVerdict({
   t,
   fallbackOrg,
   teamHasAccess,
+  reconcile,
+  outageSuspected,
+  statusDescription,
 }: {
   verification: Exclude<TemplateAccessVerification, { kind: "empty" }>
   t: ReturnType<typeof useTranslation>["t"]
   fallbackOrg: string
   teamHasAccess?: boolean
+  reconcile?: ReactNode
+  // When the app suspects a GitHub outage, the inconclusive verdicts (unknown /
+  // rate-limited) get an outage hint so a transient degradation doesn't read as
+  // a broken template. No effect on definitive verdicts.
+  outageSuspected: boolean
+  statusDescription: string | null
 }): ReactNode {
+  // The inconclusive verdicts hint at an outage when either the global suspicion
+  // is up OR this verify itself failed with an outage — the latter matters
+  // because the verify query resolves-successfully, clearing the global flag.
+  const outageHintNote = (verdictIsOutage: boolean) =>
+    verdictIsOutage || outageSuspected ? (
+      <span className="mt-1 block text-xs text-base-content/70">
+        <GitHubStatusNote statusDescription={statusDescription} />
+      </span>
+    ) : null
+
   switch (verification.kind) {
     case "ok": {
       // Students can't read an in-org private template directly; the classroom
@@ -244,6 +344,7 @@ function renderTemplateVerdict({
             })}{" "}
             <Code>{verification.branch}</Code>
             {t("assignments.template.privateWillGrant_2")}
+            {reconcile}
           </Note>
         )
       }
@@ -352,6 +453,7 @@ function renderTemplateVerdict({
             owner: verification.owner,
             repo: verification.repo,
           })}
+          {outageHintNote(verification.outage)}
         </Note>
       )
 
@@ -382,6 +484,7 @@ function renderTemplateVerdict({
       return (
         <Note tone="neutral" icon={HelpCircle}>
           {t("assignments.template.rateLimited")}
+          {outageHintNote(verification.outage)}
         </Note>
       )
 

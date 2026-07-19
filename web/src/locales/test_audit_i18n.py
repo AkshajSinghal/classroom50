@@ -231,6 +231,94 @@ class TestStrictFlag:
 
 
 # --------------------------------------------------------------------------
+# HARDCODED exemptions: dev-only paths and an allowlist of format examples are
+# skipped, but real prose in a shipping file still fails --strict. These guard
+# the exemption mechanism so it can't silently swallow a genuine hardcoded
+# string.
+# --------------------------------------------------------------------------
+
+
+class TestHardcodedExemptions:
+    def test_real_hardcoded_prose_fails_strict(self, monkeypatch, tmp_path):
+        code = _run(
+            monkeypatch,
+            tmp_path,
+            en={"nav": {"home": "Home"}},
+            sources={
+                "App.tsx": 't("nav.home"); const x = <div aria-label="Dismiss notification" />'
+            },
+            strict=True,
+        )
+        assert code == 1
+
+    def test_dev_only_path_is_exempt(self, monkeypatch, tmp_path):
+        # Same prose under components/dev/ must NOT fail — dev-only UI.
+        code = _run(
+            monkeypatch,
+            tmp_path,
+            en={"nav": {"home": "Home"}},
+            sources={
+                "components/dev/Overlay.tsx": 't("nav.home"); const x = <div aria-label="Some dev label here" />'
+            },
+            strict=True,
+        )
+        assert code == 0
+
+    def test_allowlisted_value_is_exempt(self, monkeypatch, tmp_path):
+        # The PAT-format placeholder is a format hint, not translatable prose.
+        code = _run(
+            monkeypatch,
+            tmp_path,
+            en={"nav": {"home": "Home"}},
+            sources={
+                "auth/Prompt.tsx": 't("nav.home"); const x = <input placeholder="ghp_…" />'
+            },
+            strict=True,
+        )
+        assert code == 0
+
+    def test_allowlisted_value_exempt_in_userfacing_call(self, monkeypatch, tmp_path):
+        # The allowlist must apply to the toast/setError/failDeviceFlow branch
+        # too, not only JSX attributes.
+        code = _run(
+            monkeypatch,
+            tmp_path,
+            en={"nav": {"home": "Home"}},
+            sources={"auth/Prompt.tsx": 't("nav.home"); setError("ghp_…")'},
+            strict=True,
+        )
+        assert code == 0
+
+    def test_allowlisted_value_outside_scope_still_fails(self, monkeypatch, tmp_path):
+        # ghp_… is only exempt under web/src/auth/; the same value elsewhere is
+        # a genuine hardcoded string and must fail --strict.
+        code = _run(
+            monkeypatch,
+            tmp_path,
+            en={"nav": {"home": "Home"}},
+            sources={
+                "pages/Dashboard.tsx": 't("nav.home"); const x = <input placeholder="ghp_…" />'
+            },
+            strict=True,
+        )
+        assert code == 1
+
+    def test_allowlist_is_byte_exact(self, monkeypatch, tmp_path):
+        # A near-miss (ASCII "..." instead of the U+2026 ellipsis) is NOT the
+        # allowlisted value, so it must still fail even in the scoped path.
+        code = _run(
+            monkeypatch,
+            tmp_path,
+            en={"nav": {"home": "Home"}},
+            sources={
+                "auth/Prompt.tsx": 't("nav.home"); const x = <input placeholder="ghp_..." />'
+            },
+            strict=True,
+        )
+        assert code == 1
+
+
+# --------------------------------------------------------------------------
 # flatten() / PLURAL_SUFFIXES parity with the sibling verify_locale.py.
 # The two copies are intentionally duplicated (both scripts are standalone,
 # zero-import), so guard against silent drift the way translate_locales does.

@@ -9,6 +9,7 @@ import { Spinner } from "@/components/Spinner"
 import { Alert, AnimatedAlert, Button, Card } from "@/components/ui"
 import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import { useClassroomRoleContext } from "@/context/classroomRole/ClassroomRoleProvider"
+import { can } from "@/authz"
 import useGetAssignmentRepo from "@/hooks/useGetAssignmentRepo"
 import useGetPublicAssignment from "@/hooks/useGetPublicAssignment"
 import useDotClassroom50 from "@/hooks/useDotClassroom50"
@@ -138,7 +139,6 @@ const EditAssignmentFormStudent = ({
               variant="primary"
               onClick={() => setCollaboratorsOpen(true)}
             >
-              <UsersRound aria-hidden="true" className="size-4" />
               {t("assignmentSettings.manageCollaborators")}
             </Button>
           </Card.Actions>
@@ -166,7 +166,9 @@ const EditAssignmentPage = () => {
   useDocumentTitle(t("documentTitle.assignmentSettings"))
   const { org, classroom, assignment } = useParams({ strict: false })
   const router = useRouter()
-  const { isTeacher, isStudent } = useClassroomRoleContext()
+  const { role } = useClassroomRoleContext()
+  const isStaff = can("viewClassroomStaffContent", { classroomRole: role })
+  const isStudent = role === "student"
   const { data: assignments } = useGetClassroomAssignments(org, classroom)
   const { data: classroomData } = useGetClassroom(org, classroom)
   const archived = isClassroomArchived(classroomData ?? {})
@@ -191,7 +193,7 @@ const EditAssignmentPage = () => {
         {editWarning}
       </AnimatedAlert>
       <PageHeader title={t("assignmentSettings.heading")} />
-      {isTeacher && archived && (
+      {isStaff && archived && (
         <ArchivedClassroomNotice>
           {t("assignmentSettings.archivedNotice_prefix")}{" "}
           <Link
@@ -204,7 +206,7 @@ const EditAssignmentPage = () => {
           {t("assignmentSettings.archivedNotice_suffix")}
         </ArchivedClassroomNotice>
       )}
-      {isTeacher && org && classroom && assignment && (
+      {isStaff && org && classroom && assignment && (
         <EditAssignmentForm
           org={org}
           classroom={classroom}

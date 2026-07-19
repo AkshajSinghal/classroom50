@@ -71,10 +71,13 @@ RESULT_SCHEMA_V1 = "classroom50/result/v1"
 # (created by autograde-runner.yaml on push to the repo's default branch).
 SUBMIT_TAG_PREFIX = "submit/"
 
-# Repo permission the collect-time grant gives each staff role's team. Hand-
-# mirrored from Go StaffTeamRepoPermissions (source of truth; parity-tested) —
-# keep in lockstep. A role absent here gets nothing (the instructor team is
-# granted at classroom setup, so only TA needs a collect-time grant today).
+# Repo permission the grant gives each staff role's team. Hand-mirrored from Go
+# StaffTeamRepoPermissions (source of truth; parity-tested) — keep in lockstep.
+# The TA-team template read is granted eagerly at assignment add/reuse and
+# classroom migrate (Go side, which hardcodes read there); this collect-time
+# grant reads the value below and is the idempotent re-affirm. A role absent
+# here gets nothing (the teacher team is granted at classroom setup, so only
+# TA needs a grant today).
 STAFF_TEAM_PERMISSIONS = {"ta": "pull"}
 
 RFC3339_RE = re.compile(
@@ -93,7 +96,7 @@ MAX_RESULT_BYTES = 10 * 1024 * 1024
 # Required roster columns written by `gh teacher classroom add`. Mirrors
 # RosterColumns in cli/gh-teacher/internal/configrepo/students_csv.go and the
 # web app's STUDENT_CSV_FIELDS. Identity/metadata columns; `role`
-# (instructor/ta/student, or "") is best-effort recorded metadata refreshed from
+# (teacher/ta/student, or "") is best-effort recorded metadata refreshed from
 # the classroom's GitHub teams — the teams, not this column, remain the
 # enrollment authority. A pre-role file (ending at github_id) still reads fine:
 # DictReader is header-keyed and a missing column just yields "".
@@ -360,11 +363,33 @@ def load_roster_metadata(classroom_dir: pathlib.Path) -> dict[str, dict[str, str
 # Per-classroom collection ----------------------------------------------------
 
 
+def is_empty_repo(entry: dict[str, Any]) -> bool:
+    """True only when empty_repo is the boolean `true`. The wire contract is a
+    JSON boolean (schema type "boolean"; Go decodes into a strict `bool`), so a
+    non-boolean value from a hand-edited manifest is not empty_repo — matching
+    the Go and TypeScript readers (TS uses `=== true`). Every Python reader
+    (collect/regrade/runner) MUST use this predicate so all tools agree."""
+    return entry.get("empty_repo") is True
+
+
 def valid_assignment_slugs(assignments: dict[str, Any]) -> list[str]:
-    """Slugs worth collecting: non-empty strings, in manifest order. main()'s
-    zero-submission guard counts these; the collect loop applies the same
-    predicate inline (it also needs each entry's `due`), so both agree on what
-    counts as collectable."""
+    """Slugs worth collecting: non-empty strings, in manifest order, excluding
+    empty_repo assignments (their bare repos never autograde, so polling them
+    would only produce dead gradebook rows). main()'s zero-submission guard
+    counts these; the collect loop applies the same predicate inline (it also
+    needs each entry's `due`), so both agree on what counts as collectable."""
+    slugs: list[str] = []
+    for entry in assignments.get("assignments") or []:
+        slug = entry.get("slug")
+        if isinstance(slug, str) and slug and not is_empty_repo(entry):
+            slugs.append(slug)
+    return slugs
+
+
+def all_assignment_slugs(assignments: dict[str, Any]) -> list[str]:
+    """Every valid slug including empty_repo assignments. Staff access grants
+    use this instead of valid_assignment_slugs: a bare repo never autogrades,
+    but TAs still need read on it to review the student-built work."""
     slugs: list[str] = []
     for entry in assignments.get("assignments") or []:
         slug = entry.get("slug")
@@ -447,6 +472,14 @@ def collect_classroom(
     for entry in assignments.get("assignments") or []:
         slug = entry.get("slug")
         if not isinstance(slug, str) or not slug:
+            continue
+        # empty_repo assignments never autograde — same predicate as
+        # valid_assignment_slugs, kept in lockstep.
+        if is_empty_repo(entry):
+            print(
+                f"{classroom_short}/{slug}: empty_repo assignment — autograding "
+                f"is disabled; skipping collection"
+            )
             continue
 
         due_raw = entry.get("due")
@@ -646,9 +679,9 @@ def collect_classroom(
 
 
 def assignment_repo_name(classroom: str, assignment: str, username: str) -> str:
-    """Canonical student-repo name. Cross-binary contract — mirrors
-    `assignmentRepoName` in cli/gh-student/accept.go; changing the shape here
-    without updating Go silently breaks the collect loop."""
+    """Canonical student-repo name. Mirrors the formula single-sourced in
+    cli/shared/contract (AssignmentRepoName); keep byte-identical or the
+    collect loop misidentifies submissions."""
     return f"{classroom.lower()}-{assignment.lower()}-{username.lower()}"
 
 
@@ -744,7 +777,10 @@ def grant_classroom_team_access(
     if not grant_slugs:
         return
 
-    slugs = valid_assignment_slugs(assignments)
+    # ALL slugs, not just the collectable subset: empty_repo assignments are
+    # skipped by collection but their student repos still exist and staff
+    # still need access to review them.
+    slugs = all_assignment_slugs(assignments)
     if not slugs:
         return
 
@@ -1446,7 +1482,7 @@ def list_repo_collaborator_logins(
     `role_name == "admin"` here was a bug: a group teammate who is also an org
     owner (admin on every repo), or a founder kept as repo `admin` to invite
     teammates, is `admin` yet a legitimate student — the old filter dropped
-    them, crediting only the owner. Non-student instructors/TAs/org-owners are
+    them, crediting only the owner. Non-student teachers/TAs/org-owners are
     excluded downstream because they're not on the roster, so dropping the admin
     filter here loses no protection.
 
@@ -1500,7 +1536,7 @@ def group_member_usernames(
     sorted and deduped, owner guaranteed present. Crediting is gated on team
     membership, NOT collaborator permission: a teammate on the classroom team is
     credited whether push or admin (an org owner is admin everywhere; a founder
-    is kept admin to invite). A collaborator not on the team (instructor, TA,
+    is kept admin to invite). A collaborator not on the team (teacher, TA,
     non-student org owner, or an account added out-of-band) is never credited.
     Raises on the underlying HTTP/parse error so the caller can fall back to
     owner-only.

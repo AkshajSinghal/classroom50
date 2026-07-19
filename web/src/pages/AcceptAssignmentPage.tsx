@@ -9,22 +9,17 @@ import {
 
 import GitHub from "@/assets/github.svg?react"
 import { Spinner } from "@/components/Spinner"
-import { Alert, Button, Card } from "@/components/ui"
+import { Alert, Button, Card, Markdown } from "@/components/ui"
+import { assignmentDescription } from "@/types/classroom"
 import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import type { GitHubUser } from "@/github-core/types"
-import { githubKeys } from "@/github-core/queries"
 import { Link, useParams, useSearch } from "@tanstack/react-router"
-import { useGitHubClient } from "@/context/github/GitHubProvider"
+import { useAcceptAssignment } from "@/hooks/mutations/useAcceptAssignment"
 import { useGithubAuth } from "@/auth/useGithubAuth"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useId, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import confetti from "canvas-confetti"
-import {
-  acceptAssignment,
-  type AcceptStepId,
-  type AcceptStepStatus,
-} from "@/domain/assignments"
+import { type AcceptStepId, type AcceptStepStatus } from "@/domain/assignments"
 import { useAcceptAndVerifyMembership } from "@/hooks/mutations/useAcceptAndVerifyMembership"
 import {
   classifyMembershipError,
@@ -38,6 +33,8 @@ import useGetRepo from "@/hooks/useGetRepo"
 import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
 import { GroupCollaboratorsModal } from "@/components/modals/GroupCollaboratorsModal"
 import { LanguageDialog } from "@/components/LanguageDialog"
+import { GitHubStatusNote } from "@/components/GitHubStatusNote"
+import { useOutageHint } from "@/lib/githubHealth"
 import { EnterDiv } from "@/lib/motionComponents"
 import { collapseVariants } from "@/lib/motion"
 import { AnimatePresence, motion } from "motion/react"
@@ -525,8 +522,6 @@ const AcceptAssignmentPage = () => {
   // loosely so the page works if mounted without the typed route in tests.
   const search = useSearch({ strict: false }) as { k?: string }
   const secret = typeof search.k === "string" ? search.k : undefined
-  const client = useGitHubClient()
-  const queryClient = useQueryClient()
 
   const { user } = useGithubAuth()
   const username = user?.login
@@ -562,6 +557,7 @@ const AcceptAssignmentPage = () => {
   const [collaboratorsOpen, setCollaboratorsOpen] = useState(false)
   const [repairOpen, setRepairOpen] = useState(false)
   const runAccept = useSafeSubmit()
+  const outageHint = useOutageHint()
 
   // A pending invitee opened the accept link before becoming an active member.
   // Rather than bouncing to /onboard, accept + verify membership inline (shared
@@ -572,42 +568,36 @@ const AcceptAssignmentPage = () => {
     enabled: Boolean(isPending && org),
   })
 
-  const acceptMutation = useMutation({
-    mutationFn: () => {
-      setSteps(initialStepState)
-      return acceptAssignment({
-        client,
-        org: org ?? "",
-        classroom: classroom ?? "",
-        assignmentSlug: assignment ?? "",
-        secret,
-        onStepUpdate: (update) =>
-          setSteps((prev) => ({
-            ...prev,
-            [update.id]: {
-              status: update.status,
-              message: update.message,
-              error: update.error,
-            },
-          })),
-      })
-    },
-    onSuccess: (result) => {
-      // Celebrate a freshly created repo; an already-accepted repo isn't a new
-      // milestone, so skip the confetti.
-      if (result.status === "created") {
-        fireConfetti()
-      }
-
-      if (org) {
-        void queryClient.invalidateQueries({
-          queryKey: githubKeys.orgRepos(org),
-          exact: true,
-          refetchType: "all",
-        })
-      }
-    },
+  const acceptMutation = useAcceptAssignment({
+    org: org ?? "",
+    classroom: classroom ?? "",
+    assignmentSlug: assignment ?? "",
+    secret,
+    onStepUpdate: (update) =>
+      setSteps((prev) => ({
+        ...prev,
+        [update.id]: {
+          status: update.status,
+          message: update.message,
+          error: update.error,
+        },
+      })),
   })
+
+  // Reset the per-step progress UI, run the accept, and celebrate a freshly
+  // created repo. Step-reset + confetti are UI effects, so they live at the
+  // call site; the hook owns the org-repos invalidation. Both accept buttons
+  // (initial + repair rerun) go through this.
+  const runAcceptFlow = () => {
+    setSteps(initialStepState)
+    return acceptMutation.mutateAsync(undefined, {
+      onSuccess: (result) => {
+        if (result.status === "created") {
+          fireConfetti()
+        }
+      },
+    })
+  }
 
   if (loadingAssignments || isLoadingRepo || loadingOrgMembership) {
     return (
@@ -688,6 +678,8 @@ const AcceptAssignmentPage = () => {
     return <AssignmentNotFound user={user} assignment={assignment} />
   }
 
+  const description = assignmentDescription(assignmentData)
+
   return (
     <AcceptLayout>
       <AcceptCard>
@@ -717,6 +709,17 @@ const AcceptAssignmentPage = () => {
               ? t("accept.alreadyAcceptedHeading")
               : t("accept.acceptHeading")}
           </h2>
+
+          {description ? (
+            <details className="collapse collapse-arrow border border-base-300 bg-base-100">
+              <summary className="collapse-title min-h-0 px-4 py-3 text-sm font-medium">
+                {t("accept.descriptionLabel")}
+              </summary>
+              <div className="collapse-content max-h-80 overflow-y-auto">
+                <Markdown content={description} />
+              </div>
+            </details>
+          ) : null}
 
           <div className="divider my-0" />
 
@@ -753,6 +756,13 @@ const AcceptAssignmentPage = () => {
                       ? acceptMutation.error.message
                       : t("accept.errorGeneric")}
                   </div>
+                  {outageHint.isOutage(acceptMutation.error) && (
+                    <div className="mt-2 text-sm">
+                      <GitHubStatusNote
+                        statusDescription={outageHint.statusDescription}
+                      />
+                    </div>
+                  )}
                   <div className="mt-2 text-xs opacity-80">
                     {t("accept.errorRetryHint")}
                   </div>
@@ -814,9 +824,7 @@ const AcceptAssignmentPage = () => {
                   variant="primary"
                   className="w-full text-lg p-5"
                   disabled={!username || acceptMutation.isPending}
-                  onClick={() =>
-                    void runAccept(() => acceptMutation.mutateAsync())
-                  }
+                  onClick={() => void runAccept(() => runAcceptFlow())}
                 >
                   {t("accept.acceptButton")}
                 </Button>
@@ -829,7 +837,7 @@ const AcceptAssignmentPage = () => {
                   disabled={!username || acceptMutation.isPending}
                   onRerun={() => {
                     setRepairOpen(false)
-                    void runAccept(() => acceptMutation.mutateAsync())
+                    void runAccept(() => runAcceptFlow())
                   }}
                   open={repairOpen}
                   onToggle={setRepairOpen}

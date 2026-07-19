@@ -203,14 +203,21 @@ func addClassroom(client githubapi.Client, out, errOut io.Writer, org, shortName
 
 	// Create (or adopt) the per-classroom team before scaffolding so its
 	// id/slug can be recorded in classroom.json. This team later lets rostered
-	// students read private org-owned templates.
-	team, err := configrepo.EnsureClassroomTeam(client, org, shortName)
+	// students read private org-owned templates. Its description carries the
+	// classroom50/team/v1 bootstrap record so a plain student can enumerate
+	// their classrooms (and read the capability secret) without config-repo
+	// access — safe because the team is secret.
+	teamDesc, err := configrepo.MarshalTeamDescription(name, term, secret, true)
+	if err != nil {
+		return err
+	}
+	team, err := configrepo.EnsureClassroomTeam(client, org, shortName, teamDesc)
 	if err != nil {
 		return fmt.Errorf("create classroom team: %w", err)
 	}
 
-	// Create (or adopt) the staff teams (instructor, ta), grant each write on
-	// the config repo, and seed the acting teacher as instructor maintainer,
+	// Create (or adopt) the staff teams (teacher, ta), grant each write on
+	// the config repo, and seed the acting teacher as teacher-team maintainer,
 	// mirroring the web.
 	staffTeams, login, err := seedStaffTeams(client, errOut, org, shortName)
 	if err != nil {
@@ -224,7 +231,7 @@ func addClassroom(client githubapi.Client, out, errOut io.Writer, org, shortName
 	// teams unconditionally (not gated on created-vs-adopted: an owner on an
 	// adopted students/TA team is the same mixed-role state we clear). Best-effort,
 	// mirroring the web.
-	dropCreatorFromNonInstructorTeams(client, errOut, org, login, team.Slug, staffTeams)
+	dropCreatorFromNonTeacherTeams(client, errOut, org, login, team.Slug, staffTeams)
 
 	files, err := classroomScaffold(org, shortName, name, term, secret, nil, nil, &team, staffTeams)
 	if err != nil {
@@ -254,8 +261,8 @@ func addClassroom(client githubapi.Client, out, errOut io.Writer, org, shortName
 	// stdout: parseable confirmation lines. stderr: advisory hints.
 	_, _ = fmt.Fprintf(out, "%s/%s: added classroom %s (%d files)\n", org, configrepo.ConfigRepoName, shortName, len(files))
 	_, _ = fmt.Fprintf(out, "%s: classroom team %s ready\n", org, team.Slug)
-	if staffTeams != nil && staffTeams.Instructor != nil && staffTeams.TA != nil {
-		_, _ = fmt.Fprintf(out, "%s: staff teams %s, %s ready\n", org, staffTeams.Instructor.Slug, staffTeams.TA.Slug)
+	if staffTeams != nil && staffTeams.Teacher != nil && staffTeams.TA != nil {
+		_, _ = fmt.Fprintf(out, "%s: staff teams %s, %s ready\n", org, staffTeams.Teacher.Slug, staffTeams.TA.Slug)
 	}
 	if secret != "" {
 		_, _ = fmt.Fprintf(out, "%s: resources published at an unlisted URL (key %q); share the accept link/command from the assignment page\n", org, secret)
@@ -265,11 +272,11 @@ func addClassroom(client githubapi.Client, out, errOut io.Writer, org, shortName
 	return nil
 }
 
-// seedStaffTeams creates (or adopts) the instructor + ta teams, grants each
-// write on the config repo, and adds the acting teacher as instructor
+// seedStaffTeams creates (or adopts) the teacher + ta teams, grants each
+// write on the config repo, and adds the acting teacher as teacher-team
 // maintainer — shared by `classroom add` and `classroom migrate`. Returns the
 // resolved acting login (empty when it couldn't be read) so the caller can drop
-// that same user from the non-instructor teams. The maintainer add is
+// that same user from the non-teacher teams. The maintainer add is
 // best-effort: a CurrentUser/membership failure warns but doesn't fail creation
 // (the teacher can self-add via the web).
 func seedStaffTeams(client githubapi.Client, errOut io.Writer, org, shortName string) (*configrepo.StaffTeamsRef, string, error) {
@@ -277,32 +284,32 @@ func seedStaffTeams(client githubapi.Client, errOut io.Writer, org, shortName st
 	if err != nil {
 		return nil, "", fmt.Errorf("create staff teams: %w", err)
 	}
-	if staffTeams.Instructor == nil {
+	if staffTeams.Teacher == nil {
 		return staffTeams, "", nil
 	}
 	login, _, uerr := githubapi.CurrentUser(client)
 	if uerr != nil || login == "" {
 		// Surface the skip so a silent CurrentUser failure isn't invisible.
-		_, _ = fmt.Fprintf(errOut, "Warning: created the instructor team but couldn't resolve your GitHub login to add you (%v); add yourself at https://github.com/orgs/%s/teams/%s.\n",
-			uerr, org, staffTeams.Instructor.Slug)
+		_, _ = fmt.Fprintf(errOut, "Warning: created the teacher team but couldn't resolve your GitHub login to add you (%v); add yourself at https://github.com/orgs/%s/teams/%s.\n",
+			uerr, org, staffTeams.Teacher.Slug)
 		return staffTeams, "", nil
 	}
-	if merr := configrepo.AddTeamMembershipWithRole(client, org, staffTeams.Instructor.Slug, login, configrepo.TeamMaintainer); merr != nil {
-		_, _ = fmt.Fprintf(errOut, "Warning: created the instructor team but couldn't add you (%s) to it (%v); add yourself at https://github.com/orgs/%s/teams/%s.\n",
-			login, merr, org, staffTeams.Instructor.Slug)
+	if merr := configrepo.AddTeamMembershipWithRole(client, org, staffTeams.Teacher.Slug, login, configrepo.TeamMaintainer); merr != nil {
+		_, _ = fmt.Fprintf(errOut, "Warning: created the teacher team but couldn't add you (%s) to it (%v); add yourself at https://github.com/orgs/%s/teams/%s.\n",
+			login, merr, org, staffTeams.Teacher.Slug)
 	}
 	return staffTeams, login, nil
 }
 
-// dropCreatorFromNonInstructorTeams removes the acting teacher from the students
-// team and the TA team so the owner's only role is instructor — mixed roles
+// dropCreatorFromNonTeacherTeams removes the acting teacher from the students
+// team and the TA team so the owner's only role is teacher — mixed roles
 // aren't allowed. Unconditional by design: GitHub auto-adds the creator on teams
 // it creates, and an owner already sitting on an adopted students/TA team is the
 // same mixed-role state we clear, so neither case should be preserved.
 // Best-effort and idempotent (RemoveTeamMembership treats 404 as success): a
 // failure warns but leaves the owner on the team, where the roster's per-role
 // badges surface it. A no-op when the login couldn't be resolved.
-func dropCreatorFromNonInstructorTeams(client githubapi.Client, errOut io.Writer, org, login, studentsSlug string, staffTeams *configrepo.StaffTeamsRef) {
+func dropCreatorFromNonTeacherTeams(client githubapi.Client, errOut io.Writer, org, login, studentsSlug string, staffTeams *configrepo.StaffTeamsRef) {
 	if login == "" {
 		return
 	}
@@ -555,6 +562,13 @@ func editClassroom(client githubapi.Client, out, errOut io.Writer, org, shortNam
 		_, _ = fmt.Fprintf(out, "%s/%s: classroom %s already up to date (no changes)\n", org, configrepo.ConfigRepoName, shortName)
 		return nil
 	}
+	// Re-project the classroom50/team/v1 record onto the student team so a
+	// renamed/re-termed classroom isn't left showing a stale title in a
+	// student's "My Classrooms". Best-effort: a reconcile failure must not fail
+	// the edit (the config write already landed); a later add/migrate converges.
+	if _, rErr := configrepo.ReconcileClassroomTeamDescription(client, org, shortName, branch); rErr != nil {
+		_, _ = fmt.Fprintf(errOut, "Note: couldn't refresh the student team's classroom record: %v\n", rErr)
+	}
 	_, _ = fmt.Fprintf(out, "%s/%s: updated classroom %s\n", org, configrepo.ConfigRepoName, shortName)
 	_, _ = fmt.Fprintf(errOut, "View at https://github.com/%s/%s/tree/%s/%s\n", org, configrepo.ConfigRepoName, branch, shortName)
 	return nil
@@ -669,6 +683,12 @@ func setClassroomActive(client githubapi.Client, out, errOut io.Writer, org, sho
 		_, _ = fmt.Fprintf(out, "%s/%s: classroom %s already %s (no changes)\n", org, configrepo.ConfigRepoName, shortName, state)
 		return nil
 	}
+	// The `active` flag is mirrored into the classroom50/team/v1 record, so
+	// re-project it onto the student team (best-effort; a failure doesn't undo
+	// the archive/unarchive that already committed).
+	if _, rErr := configrepo.ReconcileClassroomTeamDescription(client, org, shortName, branch); rErr != nil {
+		_, _ = fmt.Fprintf(errOut, "Note: couldn't refresh the student team's classroom record: %v\n", rErr)
+	}
 	if active {
 		_, _ = fmt.Fprintf(out, "%s/%s: unarchived classroom %s (now active)\n", org, configrepo.ConfigRepoName, shortName)
 	} else {
@@ -755,6 +775,15 @@ func removeClassroom(client githubapi.Client, in io.Reader, out, errOut io.Write
 		} else if ok {
 			staffTeams = append(staffTeams, t)
 		}
+	}
+	// Also sweep the legacy instructor team when a partially-migrated
+	// classroom still records both `teacher` and `instructor` refs — the
+	// RoleTeacher resolve above prefers `teacher`, so the stale instructor
+	// team would otherwise be orphaned.
+	if t, ok, terr := configrepo.ResolveLegacyInstructorTeam(client, org, shortName, branch); terr != nil {
+		return terr
+	} else if ok {
+		staffTeams = append(staffTeams, t)
 	}
 
 	var deleted int

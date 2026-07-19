@@ -19,7 +19,7 @@ import PageHeader from "@/components/PageHeader"
 import PageShell from "@/components/PageShell"
 import { ArchivedClassroomNotice } from "@/components/ArchivedClassroomNotice"
 import { EmptyRosterNotice } from "@/components/EmptyRosterNotice"
-import { ClaimInstructorNotice } from "./classes/ClaimInstructorNotice"
+import { ClaimTeacherNotice } from "./classes/ClaimTeacherNotice"
 import { useDocumentTitle } from "@/hooks/useDocumentTitle"
 import { ReuseFromClassroomModal } from "@/components/modals/ReuseFromClassroomModal"
 import useGetClassroomAssignments from "@/hooks/useGetClassAssignments"
@@ -27,9 +27,9 @@ import useStudentCount from "@/hooks/useStudentCount"
 import useGetClassroom from "@/hooks/useGetClassroom"
 import useEmptyRosterWarning from "@/hooks/useEmptyRosterWarning"
 import { useClassroomRoleContext } from "@/context/classroomRole/ClassroomRoleProvider"
-import { roleLabelKey } from "@/util/resolveRole"
+import { roleLabelKey, can } from "@/authz"
 import { isClassroomArchived } from "@/types/classroom"
-import { OrgRepos } from "./ClassesPage"
+import StudentAssignmentList from "@/components/org/StudentAssignmentList"
 
 // Split button: primary "Assignment" creates; the caret reveals "Reuse
 // assignment", pulling one from another classroom into this one.
@@ -107,7 +107,7 @@ export const TeacherAssignmentsView = ({
   const { data: classData, isLoading: assignmentsLoading } =
     useGetClassroomAssignments(org, classroom)
   // Authoritative student-role count for the header and the table denominator,
-  // so neither counts instructors/TAs. The count comes from team membership
+  // so neither counts teachers/TAs. The count comes from team membership
   // (one source); roster.csv identity is fetched by useStudentCount internally.
   const {
     studentCount,
@@ -248,7 +248,7 @@ const StudentAssignmentsView = ({
           </>
         }
       />
-      <OrgRepos org={org} classroom={classroom} />
+      <StudentAssignmentList org={org} classroom={classroom} />
     </div>
   )
 }
@@ -257,13 +257,15 @@ const AssignmentsPage = () => {
   const { t } = useTranslation()
   useDocumentTitle(t("documentTitle.assignments"))
   const { org, classroom } = useParams({ strict: false })
-  const { isTeacher, isStudent, roleResolved } = useClassroomRoleContext()
+  const { role, roleResolved } = useClassroomRoleContext()
+  const isStaff = can("viewClassroomStaffContent", { classroomRole: role })
+  const isStudent = role === "student"
 
   return (
     <PageShell selected="assignments">
       <Breadcrumb endpoint={t("nav.assignments")} />
       {org && classroom && (
-        <ClaimInstructorNotice org={org} classroom={classroom} />
+        <ClaimTeacherNotice org={org} classroom={classroom} />
       )}
       {!roleResolved && (
         <div className="space-y-4">
@@ -272,7 +274,7 @@ const AssignmentsPage = () => {
           <div className="skeleton skeleton-shimmer h-64 w-full rounded-box" />
         </div>
       )}
-      {roleResolved && isTeacher && org && classroom && (
+      {roleResolved && isStaff && org && classroom && (
         <TeacherAssignmentsView org={org} classroom={classroom} />
       )}
       {roleResolved && isStudent && org && classroom && (

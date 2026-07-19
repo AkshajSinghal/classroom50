@@ -3,7 +3,7 @@ import { inviteRosterStudents, bulkInviteByEmail } from "@/domain/students"
 import { cancelOrgInvitation } from "@/github-core/mutations"
 import { invalidateInviteQueries } from "@/github-core/queries"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
-import { roleForOrgRole } from "@/util/teamRoster"
+import { roleForGitHubOrgRole } from "@/util/teamRoster"
 import type { GitHubOrgInvitation } from "@/github-core/types"
 
 // The invite mutations bucket a rate-limited/failed target rather than throwing,
@@ -28,7 +28,7 @@ function assertInviteSent(
 }
 
 // Re-invite a failed/expired invitation: dismiss the dead one, then re-issue an
-// equivalent fresh invite — same classroom role (instructor -> org OWNER), by
+// equivalent fresh invite — same classroom role (teacher -> org OWNER), by
 // username when known (carries the team) else by email. A login-less,
 // email-less invite can't be re-issued (dismiss-only). Hook owns the
 // invite-query invalidation; the error toast stays at the call site (see
@@ -51,7 +51,7 @@ export function useReinviteFailedInvite(
     mutationFn: async (inv: GitHubOrgInvitation) => {
       const who = inv.login || inv.email || String(inv.id)
       await cancelOrgInvitation(client, { org, invitationId: inv.id })
-      const role = roleForOrgRole(inv.role)
+      const role = roleForGitHubOrgRole(inv.role)
       const sent = {
         rateLimited: messages.rateLimited(who),
         notSent: messages.notSent(who),

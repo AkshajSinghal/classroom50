@@ -242,23 +242,38 @@ func TestRunMigrate_NonDryRun_HappyPath(t *testing.T) {
 		t.Errorf("classroom.json missing migrated_from.classroom_id=95884, got %+v", classroom.MigratedFrom)
 	}
 	// The migrate path seeds + records the staff teams, same as add.
-	if classroom.Teams == nil || classroom.Teams.Instructor == nil || classroom.Teams.TA == nil {
-		t.Errorf("classroom.json missing teams.{instructor,ta}, got %+v", classroom.Teams)
+	if classroom.Teams == nil || classroom.Teams.Teacher == nil || classroom.Teams.TA == nil {
+		t.Errorf("classroom.json missing teams.{teacher,ta}, got %+v", classroom.Teams)
 	} else {
-		if classroom.Teams.Instructor.Slug != "classroom50-classroom50test-instructor" {
-			t.Errorf("instructor team slug = %q, want classroom50-classroom50test-instructor", classroom.Teams.Instructor.Slug)
+		if classroom.Teams.Teacher.Slug != "classroom50-classroom50test-teacher" {
+			t.Errorf("teacher team slug = %q, want classroom50-classroom50test-teacher", classroom.Teams.Teacher.Slug)
 		}
 		if classroom.Teams.TA.Slug != "classroom50-classroom50test-ta" {
 			t.Errorf("ta team slug = %q, want classroom50-classroom50test-ta", classroom.Teams.TA.Slug)
 		}
 	}
 
+	// The private migrated template grants read to BOTH the student classroom
+	// team and the TA staff team (eager grant at migrate, not only at
+	// collect-scores).
+	if got := state.templateGrants["classroom50-classroom50test"]; got != "cs50-fall-2026/readability" {
+		t.Errorf("student team template grant = %q, want cs50-fall-2026/readability", got)
+	}
+	if got := state.templateGrants["classroom50-classroom50test-ta"]; got != "cs50-fall-2026/readability" {
+		t.Errorf("TA team template grant = %q, want cs50-fall-2026/readability", got)
+	}
+	// Only the TA staff team is eagerly granted (StaffTeamRepoPermissions gate);
+	// the teacher team must NOT get template read.
+	if got, ok := state.templateGrants["classroom50-classroom50test-teacher"]; ok {
+		t.Errorf("teacher team must not be granted template read, got %q", got)
+	}
+
 	// The creator is dropped from the students + TA teams (mixed roles aren't
-	// allowed) but NEVER the instructor team — the owner's only role.
+	// allowed) but NEVER the teacher team — the owner's only role.
 	sort.Strings(state.membershipDeleted)
 	wantDropped := []string{"classroom50-classroom50test", "classroom50-classroom50test-ta"}
 	if !reflect.DeepEqual(state.membershipDeleted, wantDropped) {
-		t.Errorf("membership DELETEs = %v, want %v (students + ta, never instructor)", state.membershipDeleted, wantDropped)
+		t.Errorf("membership DELETEs = %v, want %v (students + ta, never teacher)", state.membershipDeleted, wantDropped)
 	}
 
 	// Final stdout line is parseable; commit SHA appears.
@@ -267,6 +282,37 @@ func TestRunMigrate_NonDryRun_HappyPath(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "1 generated, 0 reused, 0 skipped") {
 		t.Errorf("stdout missing action counts:\n%s", stdout.String())
+	}
+}
+
+// TestRunMigrate_NonDryRun_TAGrantFailureIsNonFatal: when the student grant
+// succeeds but the TA staff-team grant PUT fails, migrate still succeeds
+// (student success stands) and only warns — the TA failure must never add to
+// grantFailures or flip the exit code. Mirrors the reuse/web non-blocking tests.
+func TestRunMigrate_NonDryRun_TAGrantFailureIsNonFatal(t *testing.T) {
+	state := newMigrateE2EState(realExportClassroom(), []classroomAssignmentDetail{realExportReadabilityAssignment()})
+	state.failTAGrant = true
+	server := httptest.NewServer(state.handler(t))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	err := runMigrate(githubtest.NewTestClient(t, server), &stdout, &stderr, migrateOptions{
+		Source: "95884",
+		Target: "cs50-fall-2026",
+		DryRun: false,
+	})
+	if err != nil {
+		t.Fatalf("runMigrate must not fail on a TA-grant error: %v\nstderr:\n%s", err, stderr.String())
+	}
+	// Student grant still landed; migration completed.
+	if got := state.templateGrants["classroom50-classroom50test"]; got != "cs50-fall-2026/readability" {
+		t.Errorf("student team grant = %q, want cs50-fall-2026/readability", got)
+	}
+	if state.commitsCreated != 1 {
+		t.Errorf("commits created = %d, want 1 (migration still completes)", state.commitsCreated)
+	}
+	if !strings.Contains(stderr.String(), "could not grant TA staff team") {
+		t.Errorf("expected a TA-grant warning on stderr, got:\n%s", stderr.String())
 	}
 }
 
@@ -397,6 +443,9 @@ type migrateE2EState struct {
 	// flip these before handing the state to httptest.
 	sourceIsTemplate map[string]bool // "owner/repo" → is_template (default true)
 	existingDirs     map[string]bool // <short-name> → already exists in target classroom50 (default false)
+	// failTAGrant, when true, makes the TA staff-team template-grant PUT return
+	// 500 so a test can assert the failure is non-blocking (warns, no exit change).
+	failTAGrant bool
 
 	// Captured side-effects.
 	generated         map[string]bool   // "owner/repo" → was generated
@@ -405,6 +454,9 @@ type migrateE2EState struct {
 	commitsCreated    int
 	teamsCreated      int      // count of POST /orgs/{org}/teams (students + staff)
 	membershipDeleted []string // slugs that received a DELETE .../memberships/{user}
+	// templateGrants records team-slug → repo grants (PUT .../teams/{slug}/repos/{owner}/{repo})
+	// so a test can assert which teams got read on a private migrated template.
+	templateGrants map[string]string
 
 	parentSHA     string
 	parentTreeSHA string
@@ -420,6 +472,7 @@ func newMigrateE2EState(classroom classroomDetail, assignments []classroomAssign
 		generated:        map[string]bool{},
 		markedAsTemplate: map[string]bool{},
 		uploadedFiles:    map[string]string{},
+		templateGrants:   map[string]string{},
 		parentSHA:        "parent-sha-1",
 		parentTreeSHA:    "parent-tree-1",
 		commitSHA:        "new-commit-sha",
@@ -595,6 +648,7 @@ func (s *migrateE2EState) dispatch(t *testing.T, w http.ResponseWriter, r *http.
 		case http.MethodGet:
 			w.WriteHeader(http.StatusNotFound)
 		case http.MethodPut:
+			s.templateGrants["classroom50-classroom50test"] = strings.TrimPrefix(path, "/orgs/"+s.targetOrg()+"/teams/classroom50-classroom50test/repos/")
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			t.Errorf("unexpected method %s on %s", r.Method, path)
@@ -608,11 +662,23 @@ func (s *migrateE2EState) dispatch(t *testing.T, w http.ResponseWriter, r *http.
 
 	// Target-side: staff-team config-repo grant probe/PUT and membership
 	// PUT (add instructor maintainer). Both live under a staff-team slug.
+	// A staff-team grant on the private template repo (readability) is the
+	// eager TA-team template read; record it so a test can assert it fired.
 	case strings.HasPrefix(path, "/orgs/"+s.targetOrg()+"/teams/") && strings.Contains(path, "/repos/"):
 		switch r.Method {
 		case http.MethodGet:
 			w.WriteHeader(http.StatusNotFound)
 		case http.MethodPut:
+			rest := strings.TrimPrefix(path, "/orgs/"+s.targetOrg()+"/teams/")
+			if slug, repoPath, ok := strings.Cut(rest, "/repos/"); ok && strings.HasSuffix(repoPath, "/readability") {
+				// The `-ta` suffix is how the mock tells the TA staff team's
+				// template grant from the student team's.
+				if s.failTAGrant && strings.HasSuffix(slug, "-ta") {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				s.templateGrants[slug] = repoPath
+			}
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			t.Errorf("unexpected method %s on %s", r.Method, path)

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen, cleanup } from "@testing-library/react"
+import { render, screen, cleanup, fireEvent } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 
@@ -24,6 +24,14 @@ vi.mock("@/context/github/GitHubProvider", () => ({
   useGitHubClient: () => ({}),
 }))
 
+// The modal is exercised in its own test; here we stub it to a marker so the
+// table test asserts only that the trigger renders and opens it.
+vi.mock("@/components/modals/TemplateAccessModal", () => ({
+  TemplateAccessModal: ({ assignment }: { assignment: { slug: string } }) => (
+    <div data-testid="template-access-modal">{assignment.slug}</div>
+  ),
+}))
+
 const scores = vi.fn()
 vi.mock("@/hooks/useGetScores", () => ({
   default: (...a: unknown[]) => scores(...a),
@@ -41,6 +49,9 @@ const wrap = (ui: ReactNode) => {
 const assignment = (over: Partial<Assignment> = {}): Assignment =>
   ({ slug: "hw1", name: "HW 1", mode: "individual", ...over }) as Assignment
 
+const inOrgTemplate = { owner: "acme", repo: "tmpl", branch: "main" }
+const ACCESS_ARIA = "assignments.template.accessModal.triggerAria"
+
 // The submission cell renders "<submitted> / <denominator>" as sibling text
 // nodes; read the row's textContent to assert the rendered ratio.
 const ratioText = () =>
@@ -49,6 +60,7 @@ const ratioText = () =>
 
 beforeEach(() => {
   scores.mockReset()
+  scores.mockReturnValue({ data: { submissions: {} } })
 })
 
 afterEach(cleanup)
@@ -110,5 +122,72 @@ describe("AssignmentsTable submission denominator", () => {
     )
     expect(ratioText()).toContain("assignments.table.groupsSubmitted")
     expect(ratioText()).not.toContain("/ 11")
+  })
+})
+
+describe("AssignmentsTable — Template access button", () => {
+  it("renders the trigger for an in-org templated assignment", () => {
+    wrap(
+      <AssignmentsTable
+        org="acme"
+        classroom="cs101"
+        assignments={[assignment({ template: inOrgTemplate })]}
+        studentCount={0}
+      />,
+    )
+    expect(screen.queryByLabelText(ACCESS_ARIA)).toBeTruthy()
+  })
+
+  it("renders the trigger for an out-of-org template too (review + link)", () => {
+    wrap(
+      <AssignmentsTable
+        org="acme"
+        classroom="cs101"
+        assignments={[
+          assignment({ template: { ...inOrgTemplate, owner: "other" } }),
+        ]}
+        studentCount={0}
+      />,
+    )
+    expect(screen.queryByLabelText(ACCESS_ARIA)).toBeTruthy()
+  })
+
+  it("does not render it for a template-less assignment", () => {
+    wrap(
+      <AssignmentsTable
+        org="acme"
+        classroom="cs101"
+        assignments={[assignment()]}
+        studentCount={0}
+      />,
+    )
+    expect(screen.queryByLabelText(ACCESS_ARIA)).toBeNull()
+  })
+
+  it("still renders it when archived (viewing stays available)", () => {
+    wrap(
+      <AssignmentsTable
+        org="acme"
+        classroom="cs101"
+        assignments={[assignment({ template: inOrgTemplate })]}
+        studentCount={0}
+        archived
+      />,
+    )
+    expect(screen.queryByLabelText(ACCESS_ARIA)).toBeTruthy()
+  })
+
+  it("opens the template-access modal on click", () => {
+    wrap(
+      <AssignmentsTable
+        org="acme"
+        classroom="cs101"
+        assignments={[assignment({ template: inOrgTemplate })]}
+        studentCount={0}
+      />,
+    )
+    expect(screen.queryByTestId("template-access-modal")).toBeNull()
+    fireEvent.click(screen.getByLabelText(ACCESS_ARIA))
+    expect(screen.getByTestId("template-access-modal").textContent).toBe("hw1")
   })
 })

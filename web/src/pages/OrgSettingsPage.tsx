@@ -8,7 +8,7 @@ import { useParams } from "@tanstack/react-router"
 import { useSafeSubmit } from "@/hooks/useSafeSubmit"
 import { useSaveServiceToken } from "@/hooks/mutations/useSaveServiceToken"
 import useGetServiceTokenStatus from "@/hooks/useGetServiceTokenStatus"
-import RequireTeacher from "@/components/RequireTeacher"
+import RequireRole from "@/components/RequireRole"
 import OrgPolicyAuditPane from "@/pages/orgSettings/OrgPolicyAuditPane"
 import RerunOrgSetup from "@/pages/orgSettings/RerunOrgSetup"
 import TeardownSection from "@/pages/orgSettings/TeardownSection"
@@ -138,7 +138,7 @@ export function ServiceTokenInfo() {
   )
 }
 
-export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
+export const OrgSettingsPane = () => {
   const { t } = useTranslation()
   const runPat = useSafeSubmit()
   const { org } = useParams({ strict: false })
@@ -404,7 +404,6 @@ export const OrgSettingsPane = ({ onSubmit }: { onSubmit?: () => void }) => {
                     onSuccess: () => {
                       setServiceToken("")
                       setSavedKind(tokenAlreadySet ? "updated" : "saved")
-                      onSubmit?.()
                     },
                   }),
                 )
@@ -489,7 +488,7 @@ const OrgSettingsPage = () => {
 
   return (
     <PageShell page="classes" settings selected="settings">
-      <RequireTeacher allow="owner">
+      <RequireRole allow="owner">
         <PageHeader
           title={t("orgSettings.page.heading")}
           subtitle={
@@ -510,7 +509,7 @@ const OrgSettingsPage = () => {
           {org && <RerunOrgSetup org={org} />}
           {org && <TeardownSection org={org} />}
         </div>
-      </RequireTeacher>
+      </RequireRole>
     </PageShell>
   )
 }

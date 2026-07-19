@@ -81,7 +81,7 @@ func acceptCmd() *cobra.Command {
 			"<org>/<classroom>-<assignment>-<username> (lowercased). The\n" +
 			"assignment is looked up in the published assignments.json on the\n" +
 			"classroom's GitHub Pages site (no token required).\n\n" +
-			"If the classroom uses an unlisted URL, your instructor will give\n" +
+			"If the classroom uses an unlisted URL, your teacher will give\n" +
 			"you an access key; pass it with `--key <key>`. The key is part\n" +
 			"of the published URL (`<classroom>/<key>/...`); without it the\n" +
 			"classroom's assignments can't be found. Normal classrooms need\n" +
@@ -152,6 +152,11 @@ func acceptCmd() *cobra.Command {
 				return err
 			}
 
+			// An org owner who creates the repo holds admin and can't
+			// self-downgrade to the push we grant; tolerate that residual admin
+			// at the founder read-back so an owner can still accept.
+			isOwner := status.Role == "admin"
+
 			switch status.StatusCode {
 			case http.StatusOK:
 				// Auto-accept a pending org invite first.
@@ -162,7 +167,7 @@ func acceptCmd() *cobra.Command {
 					}
 					switch acceptStatus.StatusCode {
 					case http.StatusOK:
-						return acceptAssignment(cmd, client, u, out, org, classroom, assignment, secret)
+						return acceptAssignment(cmd, client, u, out, org, classroom, assignment, secret, isOwner)
 					case http.StatusNotFound:
 						return fmt.Errorf("%s: no membership found for accept", org)
 					case http.StatusForbidden:
@@ -181,16 +186,17 @@ func acceptCmd() *cobra.Command {
 				return fmt.Errorf("%s: unknown status received (%d)", org, status.StatusCode)
 			}
 
-			return acceptAssignment(cmd, client, u, out, org, classroom, assignment, secret)
+			return acceptAssignment(cmd, client, u, out, org, classroom, assignment, secret, isOwner)
 		},
 	}
 
-	cmd.Flags().StringVar(&key, "key", "", "Access key for a classroom that uses an unlisted URL (provided by your instructor); omit for normal classrooms")
+	cmd.Flags().StringVar(&key, "key", "", "Access key for a classroom that uses an unlisted URL (provided by your teacher); omit for normal classrooms")
 	return cmd
 }
 
 type OrgStatus struct {
 	State      string
+	Role       string
 	StatusCode int
 }
 
@@ -199,6 +205,7 @@ func checkOrgStatus(client githubapi.Client, org string) (OrgStatus, error) {
 	path := fmt.Sprintf("user/memberships/orgs/%s", url.PathEscape(org))
 	var resp struct {
 		State string `json:"state"`
+		Role  string `json:"role"`
 	}
 	if err := client.Get(path, &resp); err != nil {
 		if httpErr, ok := errors.AsType[*githubapi.HTTPError](err); ok {
@@ -212,6 +219,7 @@ func checkOrgStatus(client githubapi.Client, org string) (OrgStatus, error) {
 
 	return OrgStatus{
 		State:      resp.State,
+		Role:       resp.Role,
 		StatusCode: http.StatusOK,
 	}, nil
 }
@@ -256,13 +264,13 @@ func checkAcceptableMode(assignment, mode string) error {
 // still reconcile even if a later-published entry drifted incoherent.
 func assertModeCoherentForCreate(assignment, mode string, maxGroupSize int) error {
 	if maxGroupSize > 0 && mode != contract.ModeGroup {
-		return fmt.Errorf("assignment %q has max_group_size %d but mode %q (want %q) — its published metadata is inconsistent; ask your instructor to re-run `gh teacher assignment add`",
+		return fmt.Errorf("assignment %q has max_group_size %d but mode %q (want %q) — its published metadata is inconsistent; ask your teacher to re-run `gh teacher assignment add`",
 			assignment, maxGroupSize, mode, contract.ModeGroup)
 	}
 	return nil
 }
 
-func acceptAssignment(cmd *cobra.Command, client githubapi.Client, u *ui.UI, out io.Writer, org, classroom, assignment, secret string) error {
+func acceptAssignment(cmd *cobra.Command, client githubapi.Client, u *ui.UI, out io.Writer, org, classroom, assignment, secret string, isOwner bool) error {
 	verbose, _ := cmd.Flags().GetBool("verbose")
 
 	// The acceptor owns the repo, so capture their immutable id and the
@@ -297,8 +305,16 @@ func acceptAssignment(cmd *cobra.Command, client githubapi.Client, u *ui.UI, out
 	// autograder shim — see the hasTemplate fork below.
 	hasTemplate := entry.HasTemplate()
 	if entry.Template != nil && !hasTemplate {
-		return fmt.Errorf("assignment %q has an incomplete template ref (owner=%q repo=%q branch=%q) — ask your instructor to re-run `gh teacher assignment add`",
+		return fmt.Errorf("assignment %q has an incomplete template ref (owner=%q repo=%q branch=%q) — ask your teacher to re-run `gh teacher assignment add`",
 			assignment, entry.Template.Owner, entry.Template.Repo, entry.Template.Branch)
+	}
+	// empty_repo and template are mutually exclusive at write time, but
+	// publish-pages publishes assignments.json verbatim, so a hand-edited
+	// entry can carry both. Fail closed rather than half-apply (the template
+	// fork would generate starter content, then the bare fork would skip every
+	// control file — a templated repo the grading pipeline ignores).
+	if entry.EmptyRepo && entry.Template != nil {
+		return fmt.Errorf("assignment %q sets both empty_repo and a template — the entry is invalid; ask your teacher to re-run `gh teacher assignment add`", assignment)
 	}
 
 	// 2) Resolve the autograder shim. A non-default (Pages-fetched) autograder
@@ -306,11 +322,13 @@ func acceptAssignment(cmd *cobra.Command, client githubapi.Client, u *ui.UI, out
 	//    leave a half-baked repo. The default (embedded) shim is rendered AFTER
 	//    the repo is created, because its `on: push: branches` must match the
 	//    assignment repo's actual default branch (which GitHub, not the template,
-	//    decides) and its `uses:` ref must match the config repo's branch.
+	//    decides) and its `uses:` ref must match the config repo's branch. An
+	//    empty_repo assignment never carries the shim (nothing is committed at
+	//    all), so skip resolution entirely.
 	autograderName := entry.ResolveAutograder()
 	useDefaultShim := autograderName == contract.DefaultAutograderName
 	var shim string
-	if !useDefaultShim {
+	if !useDefaultShim && !entry.EmptyRepo {
 		workflow, err := assignments.FetchAutograderWorkflow(cmd.Context(), org, classroom, secret, autograderName)
 		if err != nil {
 			return err
@@ -319,11 +337,12 @@ func acceptAssignment(cmd *cobra.Command, client githubapi.Client, u *ui.UI, out
 	}
 
 	// 3) Create the assignment repo (templated → generate; template-less →
-	//    empty auto-init'd). Already-exists is NOT a terminal short-circuit: a
-	//    prior accept may have created the repo but died before landing the
-	//    control files (seeding lag, transient 5xx, Ctrl-C), leaving a repo
-	//    that looks accepted but never autogrades. The probe below heals that.
-	//    Mirrors the GUI's accept.
+	//    empty auto-init'd; empty_repo → bare, no initial commit).
+	//    Already-exists is NOT a terminal short-circuit: a prior accept may
+	//    have created the repo but died before landing the control files
+	//    (seeding lag, transient 5xx, Ctrl-C), leaving a repo that looks
+	//    accepted but never autogrades. The probe below heals that. Mirrors
+	//    the GUI's accept.
 	var (
 		htmlURL        string
 		fullName       string
@@ -341,7 +360,7 @@ func acceptAssignment(cmd *cobra.Command, client githubapi.Client, u *ui.UI, out
 		// is where control files land and what the shim must trigger on.
 		commitBranch = genBranch
 		// Resolve the template owner's immutable id best-effort so a rename
-		// of the template org/user doesn't break submit's instructor-file
+		// of the template org/user doesn't break submit's teacher-file
 		// re-fetch. A failed lookup is non-fatal — leave owner_id null.
 		templateOwnerID := lookupUserID(client, entry.Template.Owner)
 		if templateOwnerID == nil && verbose {
@@ -355,7 +374,7 @@ func acceptAssignment(cmd *cobra.Command, client githubapi.Client, u *ui.UI, out
 		}
 	} else {
 		var defaultBranch string
-		htmlURL, fullName, defaultBranch, alreadyExisted, err = createEmptyPrivateAssignmentRepoInOrg(client, u, verbose, username, classroom, assignment, org)
+		htmlURL, fullName, defaultBranch, alreadyExisted, err = createEmptyPrivateAssignmentRepoInOrg(client, u, verbose, username, classroom, assignment, org, !entry.EmptyRepo)
 		commitBranch = defaultBranch
 	}
 	if err != nil {
@@ -368,8 +387,9 @@ func acceptAssignment(cmd *cobra.Command, client githubapi.Client, u *ui.UI, out
 	// `uses:` ref targets the config repo's actual default branch. On a read
 	// failure, fall back to the assignment repo's own branch (commitBranch), not
 	// a hardcoded `main` — a wrong `@main` ref would 404 the runner and silently
-	// skip grading on a master-default org.
-	if useDefaultShim {
+	// skip grading on a master-default org. An empty_repo assignment commits no
+	// shim at all, so skip the render (and its config-branch read).
+	if useDefaultShim && !entry.EmptyRepo {
 		configBranch, cbErr := resolveConfigRepoBranch(client, org)
 		if cbErr != nil {
 			if verbose {
@@ -396,9 +416,11 @@ func acceptAssignment(cmd *cobra.Command, client githubapi.Client, u *ui.UI, out
 		source:         cfgSource,
 		shim:           shim,
 		autograderName: autograderName,
+		emptyRepo:      entry.EmptyRepo,
 		fullName:       fullName,
 		htmlURL:        htmlURL,
 		alreadyExisted: alreadyExisted,
+		isOwner:        isOwner,
 		createSp:       createSp,
 		createMsg:      createMsg,
 	})
@@ -418,10 +440,16 @@ type acceptRepoParams struct {
 	acceptedAt                 string
 	source                     *classroomcfg.Source
 	shim, autograderName       string
-	fullName, htmlURL          string
-	alreadyExisted             bool
-	createSp                   *ghui.Spinner
-	createMsg                  string
+	// emptyRepo selects the bare path: no control files are committed and no
+	// marker probe runs — the only provisioning is the idempotent admin grant.
+	emptyRepo         bool
+	fullName, htmlURL string
+	alreadyExisted    bool
+	// isOwner tolerates an org owner's unavoidable residual admin at the
+	// founder read-back (they can't self-downgrade to push).
+	isOwner   bool
+	createSp  *ghui.Spinner
+	createMsg string
 }
 
 // acceptIntoRepo decides whether a just-created-or-existing repo needs
@@ -434,6 +462,14 @@ type acceptRepoParams struct {
 //     the idempotent provisioning to repair it.
 //   - freshly created → provision normally.
 func acceptIntoRepo(client githubapi.Client, u *ui.UI, verbose bool, out io.Writer, p acceptRepoParams) error {
+	// The bare (empty_repo) path never commits control files, so the marker
+	// probe below is meaningless: an existing repo IS an accepted repo. The
+	// only provisioning is the founder grant — an idempotent upsert, so re-run
+	// it unconditionally to heal a prior accept that died between create and
+	// grant.
+	if p.emptyRepo {
+		return acceptIntoBareRepo(client, u, verbose, out, p)
+	}
 	if p.alreadyExisted {
 		provisioned, perr := repoFileExists(client, p.org, p.repoName, classroomcfg.MetadataPath)
 		if perr != nil {
@@ -444,7 +480,7 @@ func acceptIntoRepo(client githubapi.Client, u *ui.UI, verbose bool, out io.Writ
 			// Already accepted: reconcile the role best-effort. The repo is
 			// already healthy, so a transient/SSO-403/left-org failure must not
 			// fail a re-run that previously always succeeded — warn and report.
-			if err := inviteFounder(client, u, verbose, p.username, p.org, p.repoName, founderPermission(p.mode)); err != nil && verbose {
+			if err := inviteFounder(client, u, verbose, p.username, p.org, p.repoName, founderPermission(p.mode), p.isOwner); err != nil && verbose {
 				u.Detail("could not reconcile %s's role on %s/%s (repo already accepted; leaving as-is): %v", p.username, p.org, p.repoName, err)
 			}
 			p.createSp.Stop(fmt.Sprintf("Repo already exists: %s", p.fullName))
@@ -489,6 +525,43 @@ func acceptIntoRepo(client githubapi.Client, u *ui.UI, verbose bool, out io.Writ
 	return reportAccepted(u, out, p.fullName, p.htmlURL)
 }
 
+// acceptIntoBareRepo is acceptIntoRepo's empty_repo twin: no control files, no
+// marker probe, no read-back of a marker. The repo has no commits (auto_init
+// false), so the sole provisioning step is the founder role grant — the same
+// least-privilege rule as the normal path (`push` for individual, `admin` for
+// group). It splits on alreadyExisted like the templated path: a healthy
+// already-accepted repo reconciles the grant best-effort (a transient failure
+// must not fail a re-run), while a fresh create hard-fails the grant and first
+// asserts mode/size coherence.
+func acceptIntoBareRepo(client githubapi.Client, u *ui.UI, verbose bool, out io.Writer, p acceptRepoParams) error {
+	if p.alreadyExisted {
+		p.createSp.Stop(fmt.Sprintf("Repo already exists: %s", p.fullName))
+
+		// Already accepted: reconcile the role best-effort, matching the
+		// templated already-accepted path. The bare repo is already healthy
+		// (its only provisioning is this grant), so a transient/SSO-403/
+		// left-org failure must not fail a re-run that previously succeeded.
+		if err := inviteFounder(client, u, verbose, p.username, p.org, p.repoName, founderPermission(p.mode), p.isOwner); err != nil && verbose {
+			u.Detail("could not reconcile %s's role on %s/%s (repo already accepted; leaving as-is): %v", p.username, p.org, p.repoName, err)
+		}
+		return reportAlreadyAccepted(u, out, p.fullName, p.htmlURL)
+	}
+	p.createSp.Stop(fmt.Sprintf("Created %s", p.fullName))
+
+	// Fresh create: a group-shaped entry whose mode isn't group would found
+	// the repo under-privileged, so reject incoherent metadata before the
+	// grant — same guard the templated fresh-create path runs.
+	if err := assertModeCoherentForCreate(p.assignment, p.mode, p.maxGroupSize); err != nil {
+		return err
+	}
+
+	if err := inviteFounder(client, u, verbose, p.username, p.org, p.repoName, founderPermission(p.mode), p.isOwner); err != nil {
+		return err
+	}
+
+	return reportBareAccepted(u, out, p.fullName, p.htmlURL)
+}
+
 // provisionAcceptedRepo brings a just-created (or partially-provisioned)
 // student repo to a healthy, autogradable state and is safe to re-run:
 //
@@ -506,7 +579,7 @@ func provisionAcceptedRepo(client githubapi.Client, u *ui.UI, verbose bool, p ac
 	// Individual founders get least-privilege `push` (enough to push and
 	// trigger autograding); group founders get `admin` (needed to manage
 	// collaborators for `gh student invite`). See founderPermission.
-	if err := inviteFounder(client, u, verbose, p.username, p.org, p.repoName, founderPermission(p.mode)); err != nil {
+	if err := inviteFounder(client, u, verbose, p.username, p.org, p.repoName, founderPermission(p.mode), p.isOwner); err != nil {
 		return err
 	}
 
@@ -616,6 +689,18 @@ func reportAccepted(u *ui.UI, out io.Writer, fullName, htmlURL string) error {
 	return printCloneInstructions(u, out, htmlURL)
 }
 
+// reportBareAccepted is reportAccepted's empty_repo variant: the repo has no
+// commits, so cloning yields an empty checkout and there is no autograding to
+// mention. Says so explicitly, since a student expecting starter code (or a
+// grade) would otherwise read the emptiness as a broken accept.
+func reportBareAccepted(u *ui.UI, out io.Writer, fullName, htmlURL string) error {
+	_, _ = fmt.Fprintf(out, "Assignment accepted: %s\n\n", fullName)
+	_, _ = fmt.Fprintln(out, "This assignment uses an empty repository: it has no starter files, and")
+	_, _ = fmt.Fprintln(out, "autograding is disabled. Clone it, then create and push your own work.")
+	_, _ = fmt.Fprintln(out)
+	return printCloneInstructions(u, out, htmlURL)
+}
+
 // reportAlreadyAccepted writes the re-run message; the existing repo is never
 // touched.
 func reportAlreadyAccepted(u *ui.UI, out io.Writer, fullName, htmlURL string) error {
@@ -701,7 +786,7 @@ func createTemplatedPrivateAssignmentRepoInOrg(client githubapi.Client, u *ui.UI
 					return created.HTMLURL, created.FullName, defaultBranchOrMain(created.DefaultBranch), true, nil
 				}
 			case http.StatusNotFound:
-				return "", "", "", false, fmt.Errorf("template `%s/%s` is not accessible to you — ask your instructor to make it public or grant your account access",
+				return "", "", "", false, fmt.Errorf("template `%s/%s` is not accessible to you — ask your teacher to make it public or grant your account access",
 					tmpl.Owner, tmpl.Repo)
 			}
 		}
@@ -747,20 +832,23 @@ func createTemplatedPrivateAssignmentRepoInOrg(client githubapi.Client, u *ui.UI
 }
 
 // createEmptyPrivateAssignmentRepoInOrg creates an empty private repo for a
-// template-less assignment via POST /orgs/{org}/repos with auto_init:true
-// (mirroring gh-teacher's ensureConfigRepo). auto_init is load-bearing: it
+// template-less assignment via POST /orgs/{org}/repos (mirroring gh-teacher's
+// ensureConfigRepo). autoInit true (the shim-only path) is load-bearing: it
 // gives the repo an initial commit + default branch so the shared
 // WaitForStableBranch poll and the fresh-repo Tree-commit retry both work
-// unchanged. Returns the repo's default_branch so the caller commits the shim
-// onto the right ref. issues/projects/wiki are disabled like the templated
-// path. 422-already-exists → alreadyExisted=true and the PATCH is skipped so
-// re-runs don't disturb an existing repo.
-func createEmptyPrivateAssignmentRepoInOrg(client githubapi.Client, u *ui.UI, verbose bool, username, classroom, assignment, org string) (htmlURL, fullName, defaultBranch string, alreadyExisted bool, err error) {
+// unchanged. autoInit false (the empty_repo path) leaves the repo with no
+// commits and no branches at all — the caller must not attempt any commit.
+// Returns the repo's default_branch so the shim caller commits onto the right
+// ref (for a no-auto_init repo it is only GitHub's configured default, which
+// materializes on the student's first push). issues/projects/wiki are disabled
+// like the templated path. 422-already-exists → alreadyExisted=true and the
+// PATCH is skipped so re-runs don't disturb an existing repo.
+func createEmptyPrivateAssignmentRepoInOrg(client githubapi.Client, u *ui.UI, verbose bool, username, classroom, assignment, org string, autoInit bool) (htmlURL, fullName, defaultBranch string, alreadyExisted bool, err error) {
 	newRepoName := reponame.Name(classroom, assignment, username)
 	createBody, err := json.Marshal(map[string]any{
 		"name":      newRepoName,
 		"private":   true,
-		"auto_init": true,
+		"auto_init": autoInit,
 	})
 	if err != nil {
 		return "", "", "", false, fmt.Errorf("error encoding json for empty repo: %w", err)
@@ -797,8 +885,12 @@ func createEmptyPrivateAssignmentRepoInOrg(client githubapi.Client, u *ui.UI, ve
 	}
 
 	if verbose {
-		u.Detail("created empty private repo %s (template-less), with issues/projects/wiki disabled: %s",
-			updated.FullName, updated.HTMLURL)
+		kind := "empty private repo (template-less)"
+		if !autoInit {
+			kind = "bare private repo (empty_repo, no initial commit)"
+		}
+		u.Detail("created %s %s, with issues/projects/wiki disabled: %s",
+			kind, updated.FullName, updated.HTMLURL)
 	}
 
 	return updated.HTMLURL, updated.FullName, defaultBranchOrMain(updated.DefaultBranch), false, nil
@@ -843,13 +935,14 @@ func founderPermission(mode string) string {
 
 // inviteFounder sets username's collaborator role and verifies it took effect.
 // A repo creator holds admin, so an individual self-downgrade GitHub silently
-// ignores would otherwise look identical to success.
-func inviteFounder(client githubapi.Client, u *ui.UI, verbose bool, username, org, repoName, permission string) error {
+// ignores would otherwise look identical to success. isOwner tolerates an
+// org owner's unavoidable residual admin (admin already covers push).
+func inviteFounder(client githubapi.Client, u *ui.UI, verbose bool, username, org, repoName, permission string, isOwner bool) error {
 	if _, err := githubapi.SetCollaborator(client, org, repoName, username, permission); err != nil {
 		return err
 	}
 
-	if err := verifyFounderPermission(client, org, repoName, username, permission); err != nil {
+	if err := verifyFounderPermission(client, org, repoName, username, permission, isOwner); err != nil {
 		return err
 	}
 
@@ -863,7 +956,7 @@ func inviteFounder(client githubapi.Client, u *ui.UI, verbose bool, username, or
 // verifyFounderPermission reads the effective permission back and errors if it
 // doesn't match the role we set (permissionSatisfies handles GitHub's legacy
 // role collapse), so a silently-ignored downgrade fails loud instead.
-func verifyFounderPermission(client githubapi.Client, org, repoName, username, want string) error {
+func verifyFounderPermission(client githubapi.Client, org, repoName, username, want string, isOwner bool) error {
 	path := fmt.Sprintf("repos/%s/%s/collaborators/%s/permission",
 		url.PathEscape(org), url.PathEscape(repoName), url.PathEscape(username))
 	var got struct {
@@ -873,23 +966,28 @@ func verifyFounderPermission(client githubapi.Client, org, repoName, username, w
 	if err := client.Get(path, &got); err != nil {
 		return fmt.Errorf("verifying %s's permission on %s/%s: %w", username, org, repoName, err)
 	}
-	if permissionSatisfies(got.Permission, got.RoleName, want) {
+	if permissionSatisfies(got.Permission, got.RoleName, want, isOwner) {
 		return nil
 	}
-	return fmt.Errorf("expected %s to have %q access on %s/%s after setup, but GitHub reports %q (role %q) — a repo creator holds admin and a self-downgrade may be blocked by org policy; ask your instructor to set your access to %q",
+	return fmt.Errorf("expected %s to have %q access on %s/%s after setup, but GitHub reports %q (role %q) — a repo creator holds admin and a self-downgrade may be blocked by org policy; ask your teacher to set your access to %q",
 		username, want, org, repoName, got.Permission, got.RoleName, want)
 }
 
 // permissionSatisfies reports whether the read-back matches the role we set.
 // role_name is authoritative when present: a push target accepts push/write
 // but must reject the more-privileged maintain/admin, which the legacy field
-// would otherwise hide (GitHub collapses maintain→write, admin→admin).
-func permissionSatisfies(legacy, roleName, want string) bool {
+// would otherwise hide (GitHub collapses maintain→write, admin→admin). isOwner
+// relaxes a push want to also accept admin: an org owner who created the repo
+// can't self-downgrade, and admin is a superset of push.
+func permissionSatisfies(legacy, roleName, want string, isOwner bool) bool {
 	if roleName != "" {
 		switch want {
 		case "admin":
 			return roleName == "admin"
 		case "push":
+			if isOwner && roleName == "admin" {
+				return true
+			}
 			return roleName == "push" || roleName == "write"
 		default:
 			return roleName == want
@@ -899,6 +997,9 @@ func permissionSatisfies(legacy, roleName, want string) bool {
 	case "admin":
 		return legacy == "admin"
 	case "push":
+		if isOwner && legacy == "admin" {
+			return true
+		}
 		return legacy == "write"
 	default:
 		return legacy == want

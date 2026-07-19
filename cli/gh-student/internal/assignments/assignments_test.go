@@ -2,6 +2,7 @@ package assignments
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -126,7 +127,7 @@ func TestFetchAutograderWorkflow_404SurfacesActionableGuidance(t *testing.T) {
 
 func TestFetchAutograderWorkflow_RejectsMalformedYAML(t *testing.T) {
 	// Malformed YAML must fail at fetch time, before landing in the student
-	// repo. The error is the signal the student forwards to the instructor.
+	// repo. The error is the signal the student forwards to the teacher.
 	server, cleanup := newAutograderServer(t, "name: Autograde\non: { invalid: [\n", http.StatusOK)
 	defer cleanup()
 
@@ -285,4 +286,25 @@ func newPagesServer(t *testing.T, body string, status int) (*httptest.Server, fu
 	})
 	server := httptest.NewServer(mux)
 	return server, server.Close
+}
+
+func TestEntryDecodesEmptyRepo(t *testing.T) {
+	// empty_repo decodes when present and defaults to false when absent —
+	// the accept flow branches on it, so the wire contract matters.
+	var file assignmentsFile
+	if err := json.Unmarshal([]byte(`{
+  "schema": "classroom50/assignments/v1",
+  "assignments": [
+    {"slug": "bare", "name": "Bare", "mode": "individual", "autograder": "default", "empty_repo": true},
+    {"slug": "hello", "name": "Hello", "mode": "individual", "autograder": "default"}
+  ]
+}`), &file); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !file.Assignments[0].EmptyRepo {
+		t.Error("bare.EmptyRepo = false, want true")
+	}
+	if file.Assignments[1].EmptyRepo {
+		t.Error("hello.EmptyRepo = true, want false (field absent)")
+	}
 }

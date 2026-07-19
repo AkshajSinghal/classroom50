@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import Papa from "papaparse"
 
-import { BarChart3, Info, LinkIcon, RefreshCw } from "lucide-react"
+import { Info, RefreshCw } from "lucide-react"
 import { useParams, Navigate } from "@tanstack/react-router"
 
 import Breadcrumb from "@/components/breadcrumb"
@@ -47,7 +47,7 @@ import useGetStudents from "@/hooks/useGetStudents"
 import { useTeamRoster } from "@/hooks/useTeamRoster"
 import { rowToStudent } from "@/util/teamRoster"
 import { getName } from "@/util/students"
-import { hasStudentEnrollment } from "@/util/rosterRoles"
+import { hasStudentEnrollment } from "@/util/classroomRoleUI"
 import type { Student } from "@/types/classroom"
 import useEmptyRosterWarning from "@/hooks/useEmptyRosterWarning"
 import { EmptyRosterNotice } from "@/components/EmptyRosterNotice"
@@ -59,6 +59,7 @@ import useTriggerRegrade from "@/hooks/useTriggerRegrade"
 import { RegradeCoordinatorProvider } from "@/context/regrade/RegradeCoordinator"
 import useGetLastCollectScoresRun from "@/hooks/useGetLastCollectScoresRun"
 import { useClassroomRoleContext } from "@/context/classroomRole/ClassroomRoleProvider"
+import { can } from "@/authz"
 import RoleResolvingFallback from "@/components/RoleResolvingFallback"
 import {
   COLLECT_SCORES_WORKFLOW,
@@ -120,10 +121,10 @@ const SubmissionsPageContent = () => {
   // last fetch (1s < 1min < 1hr). UI-only; the fetch cadence is unchanged.
   const now = useLiveNow(scoresUpdatedAt || null)
   const { data: assignmentData } = useGetClassroomAssignments(org, classroom)
-  // Team-driven usernames (Section 7): the classroom GitHub team is
-  // authoritative for enrollment; roster.csv enriches display only. The
-  // dashboard consumes Student[], so map enrolled team rows into that shape.
-  // Restrict to rows carrying a STUDENT enrollment — a pure instructor/TA is an
+  // Team-driven usernames: the classroom GitHub team is authoritative for
+  // enrollment; roster.csv enriches display only. The dashboard consumes
+  // Student[], so map enrolled team rows into that shape.
+  // Restrict to rows carrying a STUDENT enrollment — a pure teacher/TA is an
   // enrolled team member but not a gradee, and "Collect scores" already runs
   // only against the student team, so excluding them keeps this roster in step
   // with what's actually graded (a student who is also staff still counts).
@@ -184,6 +185,11 @@ const SubmissionsPageContent = () => {
     (a) => a.slug === assignment,
   )
   const isGroupAssignment = assignmentInfo?.mode === "group"
+  // empty_repo assignments never autograde: repos were created bare, with no
+  // autograde workflow. Grading UI (Regrade all, per-row regrade, scores,
+  // Feedback PR) is hidden and a notice explains why. Collect stays enabled —
+  // it's org-wide and collect_scores.py skips this assignment itself.
+  const isEmptyRepoAssignment = assignmentInfo?.empty_repo === true
   // Scope the collector's scores to the CURRENT roster (see rosterScopedRows).
   // Gate on a resolved roster so a transient load/permission failure falls back
   // to unscoped rows rather than blanking a populated gradebook.
@@ -620,15 +626,25 @@ const SubmissionsPageContent = () => {
         }
       />
       {/* Thin collection note with last-collected recency. Actions moved into
-          the toolbar menu below so the roster surfaces near the top. */}
+          the toolbar menu below so the roster surfaces near the top. An
+          empty_repo assignment never autogrades, so the note explains that
+          instead of promising score collection. */}
       <div className="flex items-start gap-2 text-sm text-base-content/70">
         <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
         <p>
-          {t("submissions.collectionNote")}{" "}
-          {lastCollectedLabel && (
-            <span>
-              {t("submissions.lastCollected", { when: lastCollectedLabel })}
-            </span>
+          {isEmptyRepoAssignment ? (
+            t("submissions.emptyRepoNote")
+          ) : (
+            <>
+              {t("submissions.collectionNote")}{" "}
+              {lastCollectedLabel && (
+                <span>
+                  {t("submissions.lastCollected", {
+                    when: lastCollectedLabel,
+                  })}
+                </span>
+              )}
+            </>
           )}
         </p>
       </div>
@@ -729,7 +745,6 @@ const SubmissionsPageContent = () => {
               onClick={() => setMetricsOpen(true)}
               title={t("submissions.metrics.title")}
             >
-              <BarChart3 aria-hidden="true" className="size-4" />
               {t("submissions.menu.metrics")}
             </Button>
             <Button
@@ -738,7 +753,6 @@ const SubmissionsPageContent = () => {
               onClick={() => setAcceptOpen(true)}
               title={t("submissions.accept.heading")}
             >
-              <LinkIcon aria-hidden="true" className="size-4" />
               {t("submissions.menu.invite")}
             </Button>
             <SubmissionsActionsMenu
@@ -746,6 +760,7 @@ const SubmissionsPageContent = () => {
               regrading={regrading}
               regradeAllActive={regradeAllActive}
               emptyRoster={emptyRoster.show}
+              emptyRepo={isEmptyRepoAssignment}
               onCollect={() => collectScores.collect()}
               onRegradeAll={() => setRegradeConfirmOpen(true)}
               viewHref={viewRun?.html_url || viewWorkflowUrl}
@@ -771,6 +786,7 @@ const SubmissionsPageContent = () => {
         thresholdFraction={thresholdFraction}
         filtered={hasActiveFilter}
         onClearFilters={clearFilters}
+        emptyRepo={isEmptyRepoAssignment}
       />
       <ConfirmModal
         open={regradeConfirmOpen}
@@ -837,13 +853,18 @@ const SubmissionsPage = () => {
   const { t } = useTranslation()
   useDocumentTitle(t("documentTitle.submissions"))
   const { org, classroom, assignment } = useParams({ strict: false })
-  const { showTeacherUi, roleResolved } = useClassroomRoleContext()
+  const { role, roleResolved } = useClassroomRoleContext()
 
   if (!roleResolved) {
     return <RoleResolvingFallback className="min-h-screen" />
   }
 
-  if (!showTeacherUi && org && classroom && assignment) {
+  if (
+    !can("viewClassroomStaffContent", { classroomRole: role }) &&
+    org &&
+    classroom &&
+    assignment
+  ) {
     return (
       <Navigate
         to="/$org/$classroom/assignments/$assignment/submission"

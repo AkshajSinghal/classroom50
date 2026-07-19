@@ -4,10 +4,15 @@ import reactHooks from "eslint-plugin-react-hooks"
 import reactRefresh from "eslint-plugin-react-refresh"
 import jsxA11y from "eslint-plugin-jsx-a11y"
 import { importX } from "eslint-plugin-import-x"
+import boundaries from "eslint-plugin-boundaries"
 import { createTypeScriptImportResolver } from "eslint-import-resolver-typescript"
 import tseslint from "typescript-eslint"
 import prettier from "eslint-config-prettier/flat"
 import { defineConfig, globalIgnores } from "eslint/config"
+import {
+  buttonFormSelector,
+  buttonFormMessage,
+} from "./src/eslint/buttonFormRule.ts"
 
 export default defineConfig([
   globalIgnores(["dist"]),
@@ -102,10 +107,8 @@ export default defineConfig([
           // Two deliberate limits: matches <form> AND `<Card as="form">` (the
           // app uses the latter); same-file lexical only, so a <Button> in a
           // child component rendered inside a form isn't reachable here.
-          selector:
-            ":matches(JSXElement[openingElement.name.name='form'], JSXElement:has(JSXAttribute[name.name='as'][value.value='form'])) JSXOpeningElement[name.name='Button']:not(:has(JSXAttribute[name.name=/^(type|as|href)$/]))",
-          message:
-            'A <Button> inside a <form> needs an explicit `type`: add type="submit" for the submit action or type="button" for a click handler. The <Button> default is "button", which silently disables implicit form submit.',
+          selector: buttonFormSelector,
+          message: buttonFormMessage,
         },
       ],
     },
@@ -147,6 +150,47 @@ export default defineConfig([
       "import-x/no-cycle": ["error", { ignoreExternal: true }],
     },
   },
+  // Enforce the authz module's public-API boundary: everything access-control
+  // (role vocabulary, resolution reducers, the can() policy) lives in src/authz/
+  // and is consumed ONLY through the barrel `@/authz`. Reaching into an internal
+  // file (`@/authz/roles`, `@/authz/resolveRole`, `@/authz/capabilities`) is
+  // forbidden, so the module's internals can be refactored without breaking
+  // callers and can() stays the single decision surface. The authz files
+  // themselves import each other by relative path (`./roles`), which the
+  // `ignores` below excludes, so the module is free internally. Turns the
+  // single-source-of-truth from a convention into an enforced invariant.
+  //
+  // The patterns block BOTH spellings of a deep import — the `@/` alias
+  // (`@/authz/roles`) and a relative path (`../authz/roles`) — because they
+  // resolve to the same internal module, and a rule that only caught the alias
+  // would go green while a relative deep import breached the barrel. The public
+  // barrel itself (`@/authz` and its explicit `/index` spelling) is excluded via
+  // a negated glob so importing the API is never flagged; the relative-path
+  // `regex` matches any `.../authz/<internal>` tail regardless of the `../`
+  // prefix (glob `**` can't cross a leading-dot segment).
+  {
+    files: ["**/*.{ts,tsx}"],
+    ignores: ["src/authz/**"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/authz/*", "!@/authz/index"],
+              message:
+                "Import authz through the public barrel `@/authz`, not its internal files. The barrel is the module's only public API (see src/authz/index.ts).",
+            },
+            {
+              regex: "(^|/)authz/(roles|resolveRole|capabilities)$",
+              message:
+                "Import authz through the public barrel `@/authz`, not its internal files by relative path. The barrel is the module's only public API (see src/authz/index.ts).",
+            },
+          ],
+        },
+      ],
+    },
+  },
   // The only files allowed to touch `console` directly: the logger wrapper
   // (it IS the console centralisation point) and the main.tsx release banner
   // (a deliberate always-on marker so the deployed build is identifiable from
@@ -155,6 +199,168 @@ export default defineConfig([
     files: ["src/lib/logger.ts", "src/main.tsx"],
     rules: {
       "no-console": "off",
+    },
+  },
+  // Enforce the layered architecture (features -> components -> domain ->
+  // github-core -> util/types, strictly downward) by disallowing the
+  // load-bearing inversions. `default: allow` + explicit disallows (not
+  // deny-by-default) keeps benign lateral edges quiet; dependency-cruiser adds
+  // the CI-side holistic pass. The leaf layers (util/lib/types) are guarded by
+  // the leaf policy below — they may not import ANY higher layer, at value OR
+  // type kind (a leaf that needs a view/data type means the type is misfiled;
+  // lift it into types/). Rationale for the policy shape lives in the Tier-2E
+  // PR (#290); the leaf rule landed in Tier-3.
+  //
+  // Adding a new src/<layer>/ dir needs THREE coordinated edits or it is
+  // silently unenforced: (1) a boundaries/elements entry below, (2) a disallow
+  // policy for its illegal edges, and (3) a matching .dependency-cruiser.cjs
+  // path rule. dependency-cruiser's path-regex rules are the CI backstop.
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/**/*.test.{ts,tsx}", "src/**/*.d.ts"],
+    plugins: { boundaries },
+    settings: {
+      // Classify all upward-reachable value edges, not just static `import`:
+      // a re-export (`export { X } from "@/pages/.."`), `require`, or dynamic
+      // `import()` is just as much a reach-up. `dependency.kind: "value"` on
+      // each disallow still scopes them to runtime edges, so type-only imports
+      // stay allowed (matching import-x/no-cycle).
+      "boundaries/dependency-nodes": [
+        "import",
+        "export",
+        "dynamic-import",
+        "require",
+      ],
+      // boundaries resolves each import to a file to classify its target
+      // element; without the `@/*` alias resolver it can't resolve the alias
+      // imports every layer uses and would treat targets as unknown (skipped).
+      "import/resolver": {
+        typescript: {
+          project: ["tsconfig.app.json", "tsconfig.node.json"],
+          alwaysTryTypes: true,
+        },
+      },
+      "boundaries/elements": [
+        { type: "pages", pattern: "src/pages/**", partialMatch: false },
+        { type: "routes", pattern: "src/routes/**", partialMatch: false },
+        {
+          type: "components",
+          pattern: "src/components/**",
+          partialMatch: false,
+        },
+        { type: "context", pattern: "src/context/**", partialMatch: false },
+        { type: "hooks", pattern: "src/hooks/**", partialMatch: false },
+        { type: "auth", pattern: "src/auth/**", partialMatch: false },
+        { type: "domain", pattern: "src/domain/**", partialMatch: false },
+        { type: "authz", pattern: "src/authz/**", partialMatch: false },
+        { type: "orgPolicy", pattern: "src/orgPolicy/**", partialMatch: false },
+        {
+          type: "githubCore",
+          pattern: "src/github-core/**",
+          partialMatch: false,
+        },
+        { type: "skeleton", pattern: "src/skeleton/**", partialMatch: false },
+        { type: "lib", pattern: "src/lib/**", partialMatch: false },
+        { type: "util", pattern: "src/util/**", partialMatch: false },
+        { type: "types", pattern: "src/types/**", partialMatch: false },
+        { type: "i18n", pattern: "src/i18n/**", partialMatch: false },
+        { type: "locales", pattern: "src/locales/**", partialMatch: false },
+        {
+          type: "eslintTooling",
+          pattern: "src/eslint/**",
+          partialMatch: false,
+        },
+      ],
+    },
+    rules: {
+      "boundaries/dependencies": [
+        "error",
+        {
+          default: "allow",
+          policies: [
+            {
+              // components are feature-agnostic and must never import a feature
+              // page (the reach-up P7/Tier-2E fixed).
+              from: { element: { type: "components" } },
+              disallow: {
+                to: { element: { type: "pages" } },
+                dependency: { kind: "value" },
+              },
+              message:
+                "components/ is a lower layer than pages/: a shared component must not import a feature page. Lift the shared piece into components/ (see Tier-2E).",
+            },
+            {
+              // domain is framework-free orchestration below the view layers.
+              from: { element: { type: "domain" } },
+              disallow: {
+                to: {
+                  element: {
+                    type: ["pages", "components", "hooks", "context", "routes"],
+                  },
+                },
+                dependency: { kind: "value" },
+              },
+              message:
+                "domain/ must not import view-layer code (pages/components/hooks/context/routes). Domain depends downward on github-core/util/types only.",
+            },
+            {
+              // github-core is the lowest data layer; it must not reach up into
+              // domain or any view layer at runtime (type-only input edges are
+              // left alone via dependency.kind: value).
+              from: { element: { type: "githubCore" } },
+              disallow: {
+                to: {
+                  element: {
+                    type: [
+                      "domain",
+                      "pages",
+                      "components",
+                      "hooks",
+                      "context",
+                      "routes",
+                    ],
+                  },
+                },
+                dependency: { kind: "value" },
+              },
+              message:
+                "github-core/ is the lowest data layer: it must not import domain or view code at runtime. Keep dependencies downward (util/types).",
+            },
+            {
+              // Leaf layers: pure helpers (util), app infra (lib), shared types
+              // (types), and lint tooling (eslintTooling) must not import the
+              // view or orchestration layers, at value OR type kind. A leaf that
+              // "needs" a page/component/hook/context/domain type means the type
+              // is misfiled — lift it into types/ (see the BadgeTone -> types/
+              // move in Tier-3). They may still depend downward/laterally on
+              // github-core, authz, auth, and each other, which is why those are
+              // NOT in the disallow set. eslintTooling (src/eslint/**) is a lint
+              // rule impl that must never import app code at all.
+              from: {
+                element: { type: ["util", "lib", "types", "eslintTooling"] },
+              },
+              disallow: {
+                to: {
+                  element: {
+                    type: [
+                      "pages",
+                      "components",
+                      "hooks",
+                      "context",
+                      "routes",
+                      "domain",
+                      "orgPolicy",
+                      "skeleton",
+                    ],
+                  },
+                },
+              },
+              message:
+                "util/lib/types/eslint are leaf layers: they must not import view or orchestration code (pages/components/hooks/context/routes/domain/orgPolicy/skeleton). Move any shared type into types/.",
+            },
+          ],
+        },
+      ],
     },
   },
   // Last: turn off ESLint rules that conflict with Prettier (formatting is

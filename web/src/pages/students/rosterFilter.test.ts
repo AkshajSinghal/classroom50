@@ -5,13 +5,13 @@ import {
   type RosterFilterInput,
 } from "./rosterFilter"
 import type {
-  RosterRole,
+  ClassroomRole,
   TeamRosterRow,
   TeamRosterRowState,
 } from "@/util/teamRoster"
 
 const row = (
-  over: Partial<TeamRosterRow> & { roles: RosterRole[] },
+  over: Partial<TeamRosterRow> & { roles: ClassroomRole[] },
 ): TeamRosterRow =>
   ({
     key: over.username ?? "k",
@@ -38,7 +38,7 @@ describe("filterRosterRows", () => {
     row({ username: "stu", roles: ["student"], state: "enrolled" }),
     row({
       username: "prof",
-      roles: ["instructor", "student"],
+      roles: ["teacher", "student"],
       state: "enrolled",
     }),
     row({
@@ -55,7 +55,7 @@ describe("filterRosterRows", () => {
 
   it("a multi-role person appears under each of their roles", () => {
     expect(
-      filterRosterRows(rows, { ...base, roleFilter: "instructor" }).map(
+      filterRosterRows(rows, { ...base, roleFilter: "teacher" }).map(
         (r) => r.username,
       ),
     ).toEqual(["prof"])

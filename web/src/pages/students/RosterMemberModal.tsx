@@ -1,27 +1,17 @@
 import { useEffect, useId, useState } from "react"
 import { useTranslation } from "react-i18next"
-import {
-  ExternalLink,
-  Pencil,
-  Send,
-  UserMinus,
-  UserPlus,
-  X,
-  XCircle,
-} from "lucide-react"
-
-import { useMutation } from "@tanstack/react-query"
+import { ExternalLink, Send, UserPlus, X } from "lucide-react"
 
 import Avatar from "@/components/avatar"
 import GitHub from "@/assets/github.svg?react"
 import EditStudentForm from "@/pages/students/EditStudentForm"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
+import { useUnenrollStudent } from "@/hooks/mutations/useUnenrollStudent"
 import {
   assignRosterMemberRole,
-  applyRosterRoleChange,
+  applyClassroomRoleChange,
   inviteRosterStudents,
   resolveTeamIdForRoleRead,
-  unenrollStudent,
   type StudentCsvRow,
 } from "@/domain/students"
 import {
@@ -32,17 +22,17 @@ import { getErrorMessage } from "@/github-core/errorMessage"
 import { nameFromParts, parseGitHubId } from "@/util/students"
 import { rosterRowInitials } from "@/util/memberRow"
 import {
-  orgRoleForRole,
+  githubOrgRoleForRole,
   rowToStudent,
   sortRolesByRank,
-  type RosterRole,
+  type ClassroomRole,
   type TeamRosterRow,
 } from "@/util/teamRoster"
 import {
   hasStudentEnrollment,
   STATE_BADGE_TONE,
   STATE_LABEL_KEY,
-} from "@/util/rosterRoles"
+} from "@/util/classroomRoleUI"
 import { Badge, Button, Modal, Select } from "@/components/ui"
 
 // Roster-owned detail modal (single native <dialog>), opened by clicking a
@@ -76,9 +66,9 @@ const RosterMemberModal = ({
   org: string
   classroom: string
   // Resolved team slug per role, so each role a member actually holds links to
-  // its real team (student -> classroom team, instructor/ta -> the staff team)
+  // its real team (student -> classroom team, teacher/ta -> the staff team)
   // instead of assuming everyone is on the student team.
-  teamSlugByRole: Record<RosterRole, string>
+  teamSlugByRole: Record<ClassroomRole, string>
   // Nullable so the <dialog> can stay mounted across open/close.
   row: TeamRosterRow | null
   // Whether the viewer can perform owner-scoped membership writes (invite,
@@ -87,7 +77,7 @@ const RosterMemberModal = ({
   // rendered as buttons that silently no-op.
   canManage?: boolean
   // True when this row IS the signed-in viewer. A viewer can't change their own
-  // role here: demoting yourself off instructor would revoke your own org-owner
+  // role here: demoting yourself off teacher would revoke your own org-owner
   // access mid-change (the mutation refuses it too — this hides the control so
   // there's no dead action). Mirrors the self-exclusion on bulk select/unenroll.
   isSelf?: boolean
@@ -118,14 +108,11 @@ const RosterMemberModal = ({
   const [resolving, setResolving] = useState(false)
   const [changingRole, setChangingRole] = useState(false)
   // The role selected in the enrolled-row role dropdown (null = matches current,
-  // no pending change). Instructor target requires the owner-grant confirmation.
-  const [pendingRole, setPendingRole] = useState<RosterRole | null>(null)
+  // no pending change). Teacher target requires the owner-grant confirmation.
+  const [pendingRole, setPendingRole] = useState<ClassroomRole | null>(null)
   const [roleOwnerConfirmed, setRoleOwnerConfirmed] = useState(false)
 
-  const unenrollMutation = useMutation({
-    mutationFn: (student: ReturnType<typeof rowToStudent>) =>
-      unenrollStudent(client, { org, classroom, student }),
-  })
+  const unenrollMutation = useUnenrollStudent(org, classroom)
 
   // `resending` covers an in-flight invite/resend; folding it into `busy` keeps
   // the modal non-closeable (button, backdrop, Escape) while a write is pending,
@@ -188,7 +175,7 @@ const RosterMemberModal = ({
   }
 
   const student = rowToStudent(row)
-  // A staff-only row is an instructor/TA with no student enrollment. Unenroll
+  // A staff-only row is a teacher/TA with no student enrollment. Unenroll
   // (dropping a student-team membership) doesn't apply to them — that's the one
   // student-only action (see canUnenroll). Profile metadata IS editable for them
   // (see canEdit): syncRosterFromTeam writes a roster.csv row per team member.
@@ -198,7 +185,7 @@ const RosterMemberModal = ({
   const staffOnly = !hasStudentEnrollment(row)
   // Profile metadata (name / email / section) is teacher-supplied and editable
   // for any enrolled member with a roster.csv row — including a staff-only
-  // instructor/TA, since syncRosterFromTeam writes a (blank-metadata) row for
+  // teacher/TA, since syncRosterFromTeam writes a (blank-metadata) row for
   // every team member for the teacher to fill in. It only gates out `pending`
   // rows (no roster row yet — the invite hasn't been accepted) and rows without
   // a resolvable roster identity. Unenroll stays student-only (see canUnenroll);
@@ -224,12 +211,12 @@ const RosterMemberModal = ({
   const canUnenroll = canManage && !staffOnly
   // Per-member role change is offered for an ENROLLED (active-team) member with
   // a resolvable username — but NOT for the viewer's own row: demoting yourself
-  // off instructor revokes your own org-owner access mid-change (the mutation
+  // off teacher revokes your own org-owner access mid-change (the mutation
   // refuses it), so the control is suppressed with a note rather than shown as a
   // dead action. The dropdown seeds from their primary current role; switching +
-  // confirming calls applyRosterRoleChange (which grants/revokes org owner for
-  // an instructor target/demotion).
-  const currentRole: RosterRole = sortRolesByRank(row.roles)[0] ?? "student"
+  // confirming calls applyClassroomRoleChange (which grants/revokes org owner for
+  // a teacher target/demotion).
+  const currentRole: ClassroomRole = sortRolesByRank(row.roles)[0] ?? "student"
   const canChangeRole =
     canManage && !isSelf && row.state === "enrolled" && Boolean(row.username)
   // Show the "can't change your own role" note only when a role change would
@@ -239,8 +226,8 @@ const RosterMemberModal = ({
   const selectedRole = pendingRole ?? currentRole
   const roleChanged = selectedRole !== currentRole
   // Single-sourced with the write mapping: a role grants org owner iff its
-  // invite carries the "admin" org role (currently only instructor).
-  const roleGrantsOwner = orgRoleForRole(selectedRole) === "admin"
+  // invite carries the "admin" org role (currently only teacher).
+  const roleGrantsOwner = githubOrgRoleForRole(selectedRole) === "admin"
   const canApplyRole = roleChanged && (!roleGrantsOwner || roleOwnerConfirmed)
 
   const handleAssignRole = async () => {
@@ -256,7 +243,7 @@ const RosterMemberModal = ({
         org,
         classroom,
         username,
-        // The roster only assigns the student role; TA/instructor are assigned
+        // The roster only assigns the student role; TA/teacher are assigned
         // in classroom Settings (staff management), keeping role-granting in one
         // place and the roster's needs-attention action a simple "enroll".
         role: "student",
@@ -354,8 +341,8 @@ const RosterMemberModal = ({
         invitationId: row.invitation_id,
         teamIds: teamId ? [teamId] : undefined,
         // Re-issue with the same org role as the original invite, so a resend
-        // never downgrades a pending instructor from org OWNER.
-        role: orgRoleForRole(role),
+        // never downgrades a pending teacher from org OWNER.
+        role: githubOrgRoleForRole(role),
       })
       onResent(row.key)
       onClose()
@@ -408,7 +395,7 @@ const RosterMemberModal = ({
     }
     setChangingRole(true)
     try {
-      await applyRosterRoleChange(client, {
+      await applyClassroomRoleChange(client, {
         org,
         classroom,
         username,
@@ -522,7 +509,6 @@ const RosterMemberModal = ({
                 disabled={busy}
                 onClick={() => setConfirmingResend(true)}
               >
-                <Send aria-hidden="true" className="size-4" />
                 {t("students.resend")}
               </Button>
             ) : null}
@@ -535,7 +521,6 @@ const RosterMemberModal = ({
                 disabled={busy}
                 onClick={() => setConfirmingCancel(true)}
               >
-                <XCircle aria-hidden="true" className="size-4" />
                 {t("students.cancelInvite")}
               </Button>
             ) : null}
@@ -548,7 +533,6 @@ const RosterMemberModal = ({
                 disabled={busy}
                 onClick={() => setConfirmingUnenroll(true)}
               >
-                <UserMinus aria-hidden="true" className="size-4" />
                 {t("students.remove")}
               </Button>
             ) : null}
@@ -679,7 +663,7 @@ const RosterMemberModal = ({
         ) : null}
 
         {/* Needs-attention resolution: an in-org member is enrolled as a student
-              (TA/instructor roles are assigned in classroom Settings); a
+              (TA/teacher roles are assigned in classroom Settings); a
               not-in-org row is invited via the header action. */}
         {needsRole ? (
           <section className="flex flex-col gap-3 rounded-box border border-warning/30 bg-warning/5 p-4">
@@ -762,16 +746,14 @@ const RosterMemberModal = ({
                     disabled={busy}
                     value={selectedRole}
                     onChange={(e) => {
-                      const next = e.target.value as RosterRole
+                      const next = e.target.value as ClassroomRole
                       setPendingRole(next)
                       setRoleOwnerConfirmed(false)
                     }}
                   >
                     <option value="student">{t("students.roleStudent")}</option>
                     <option value="ta">{t("students.roleTa")}</option>
-                    <option value="instructor">
-                      {t("students.roleInstructor")}
-                    </option>
+                    <option value="teacher">{t("students.roleTeacher")}</option>
                   </Select>
                 </div>
 
@@ -836,10 +818,8 @@ const RosterMemberModal = ({
               <Button
                 variant="ghost"
                 size="xs"
-                className="gap-1"
                 onClick={() => setEditingProfile(true)}
               >
-                <Pencil aria-hidden="true" className="size-3.5" />
                 {t("common.edit")}
               </Button>
             ) : null}

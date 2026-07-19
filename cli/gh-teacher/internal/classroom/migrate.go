@@ -217,8 +217,15 @@ func performMigration(client githubapi.Client, out, errOut io.Writer, plan migra
 	migration := classroomMigratedFromFromDetail(plan.Classroom, plan.MigratedAt)
 
 	// Create (or adopt) the per-classroom team so its ref lands in
-	// classroom.json, same as `classroom add`.
-	team, err := configrepo.EnsureClassroomTeam(client, plan.TargetOrg, plan.ShortName)
+	// classroom.json, same as `classroom add`. Its description carries the
+	// classroom50/team/v1 bootstrap record so students can enumerate the
+	// classroom without config-repo access. Migrated classrooms get a plain
+	// (listed) URL — no secret — so the description omits it.
+	teamDesc, err := configrepo.MarshalTeamDescription(plan.Classroom.Name, plan.Term, "", true)
+	if err != nil {
+		return err
+	}
+	team, err := configrepo.EnsureClassroomTeam(client, plan.TargetOrg, plan.ShortName, teamDesc)
 	if err != nil {
 		return fmt.Errorf("create classroom team: %w", err)
 	}
@@ -233,7 +240,7 @@ func performMigration(client githubapi.Client, out, errOut io.Writer, plan migra
 			plan.ShortName, plan.TargetOrg, configrepo.ConfigRepoName)
 	}
 
-	// Create (or adopt) staff teams + config-repo write grant + instructor
+	// Create (or adopt) staff teams + config-repo write grant + teacher
 	// seed, same as `classroom add`.
 	staffTeams, login, err := seedStaffTeams(client, errOut, plan.TargetOrg, plan.ShortName)
 	if err != nil {
@@ -241,8 +248,8 @@ func performMigration(client githubapi.Client, out, errOut io.Writer, plan migra
 	}
 
 	// Drop the acting teacher from the students + TA teams so their only role is
-	// instructor — mixed roles aren't allowed, same as `classroom add`.
-	dropCreatorFromNonInstructorTeams(client, errOut, plan.TargetOrg, login, team.Slug, staffTeams)
+	// teacher — mixed roles aren't allowed, same as `classroom add`.
+	dropCreatorFromNonTeacherTeams(client, errOut, plan.TargetOrg, login, team.Slug, staffTeams)
 
 	build := func(parentSHA string) (map[string]string, error) {
 		exists, err := configrepo.ContentsExists(client, plan.TargetOrg, configrepo.ConfigRepoName, plan.ShortName, parentSHA)
@@ -273,6 +280,19 @@ func performMigration(client githubapi.Client, out, errOut io.Writer, plan migra
 	// the grant, `student accept` 404s generating from it. Gate on the TARGET
 	// repo's visibility, use the team's authoritative slug, and track failures
 	// so the exit code reflects a template students can't yet accept.
+	//
+	// The TA staff team gets the same read (best-effort) so a base-permission-
+	// `none` TA can read the template without waiting for collect-scores. The
+	// TA slug comes from the just-created staffTeams (classroom.json isn't
+	// committed until CommitTree above, so it can't be re-resolved here).
+	// StaffTeamRepoPermissions is a presence gate: grant the TA team read only
+	// when the role is mapped. A TA-grant failure only warns — it's not a
+	// student blocker, so it never adds to grantFailures or changes the exit
+	// code.
+	taSlug := ""
+	if _, ok := configrepo.StaffTeamRepoPermissions[configrepo.RoleTA]; ok && staffTeams != nil && staffTeams.TA != nil {
+		taSlug = staffTeams.TA.Slug
+	}
 	var grantFailures int
 	for i := range resolved {
 		rt := resolved[i]
@@ -289,6 +309,19 @@ func performMigration(client githubapi.Client, out, errOut io.Writer, plan migra
 		if granted {
 			_, _ = fmt.Fprintf(out, "%s: granted classroom team %s read on private template %s/%s\n",
 				plan.TargetOrg, team.Slug, rt.Template.Owner, rt.Template.Repo)
+		}
+		if taSlug == "" {
+			continue
+		}
+		taGranted, taErr := configrepo.GrantTeamRepoRead(client, plan.TargetOrg, taSlug, rt.Template.Owner, rt.Template.Repo)
+		if taErr != nil {
+			_, _ = fmt.Fprintf(errOut, "Warning: %s: could not grant TA staff team %s read on private template %s/%s (%v); TAs get read at the next collect-scores run.\n",
+				plan.TargetOrg, taSlug, rt.Template.Owner, rt.Template.Repo, taErr)
+			continue
+		}
+		if taGranted {
+			_, _ = fmt.Fprintf(out, "%s: granted TA staff team %s read on private template %s/%s\n",
+				plan.TargetOrg, taSlug, rt.Template.Owner, rt.Template.Repo)
 		}
 	}
 

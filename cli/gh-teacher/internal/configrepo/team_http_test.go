@@ -12,15 +12,143 @@ import (
 	"github.com/foundation50/gh-teacher/internal/githubtest"
 )
 
+func TestEnsureClassroomTeam_WritesDescription(t *testing.T) {
+	var gotDescription string
+	var gotPrivacy string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/orgs/o/teams" && r.Method == http.MethodPost:
+			var body struct {
+				Name        string `json:"name"`
+				Privacy     string `json:"privacy"`
+				Description string `json:"description"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			gotDescription = body.Description
+			gotPrivacy = body.Privacy
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 1, "slug": body.Name})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	client := githubtest.NewTestClient(t, server)
+
+	desc, err := MarshalTeamDescription("Intro CS", "Fall 2026", "a1b2c3d4", true)
+	if err != nil {
+		t.Fatalf("MarshalTeamDescription: %v", err)
+	}
+	ref, err := EnsureClassroomTeam(client, "o", "cs101", desc)
+	if err != nil {
+		t.Fatalf("EnsureClassroomTeam: %v", err)
+	}
+	if ref.Slug != "classroom50-cs101" {
+		t.Errorf("slug = %q, want classroom50-cs101", ref.Slug)
+	}
+	if gotPrivacy != "secret" {
+		t.Errorf("privacy = %q, want secret (the secret MUST only live on a secret team)", gotPrivacy)
+	}
+	if gotDescription != desc {
+		t.Errorf("description = %q, want %q", gotDescription, desc)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(gotDescription), &decoded); err != nil {
+		t.Fatalf("description is not valid JSON: %v", err)
+	}
+	if decoded["secret"] != "a1b2c3d4" {
+		t.Errorf("description secret = %v, want a1b2c3d4", decoded["secret"])
+	}
+}
+
+// TestEnsureClassroomTeam_AdoptReconcilesDescription: a 422 name-collision
+// adopts the existing team and PATCHes the description (and privacy) so a
+// rotated secret / renamed classroom propagates to the student-facing record.
+func TestEnsureClassroomTeam_AdoptReconcilesDescription(t *testing.T) {
+	var patched map[string]any
+	newDesc, err := MarshalTeamDescription("Intro CS", "Fall 2026", "newsecret", true)
+	if err != nil {
+		t.Fatalf("MarshalTeamDescription: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/orgs/o/teams" && r.Method == http.MethodPost:
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"message":"name already taken"}`))
+		case r.URL.Path == "/orgs/o/teams/classroom50-cs101" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": 7, "slug": "classroom50-cs101", "privacy": "secret",
+				"description": `{"schema":"classroom50/team/v1","name":"Intro CS","secret":"oldsecret"}`,
+			})
+		case r.URL.Path == "/orgs/o/teams/classroom50-cs101" && r.Method == http.MethodPatch:
+			_ = json.NewDecoder(r.Body).Decode(&patched)
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	client := githubtest.NewTestClient(t, server)
+
+	ref, err := EnsureClassroomTeam(client, "o", "cs101", newDesc)
+	if err != nil {
+		t.Fatalf("EnsureClassroomTeam adopt: %v", err)
+	}
+	if ref.ID != 7 || ref.Slug != "classroom50-cs101" {
+		t.Errorf("adopted ref = %+v, want id 7 / classroom50-cs101", ref)
+	}
+	if patched == nil {
+		t.Fatal("expected a PATCH reconciling the drifted description")
+	}
+	if patched["description"] != newDesc {
+		t.Errorf("PATCH description = %v, want %q", patched["description"], newDesc)
+	}
+}
+
+// TestEnsureClassroomTeam_AdoptSkipsPatchWhenDescriptionMatches: an adopted
+// secret team whose description already equals the desired record issues no
+// PATCH (idempotent reconcile).
+func TestEnsureClassroomTeam_AdoptSkipsPatchWhenDescriptionMatches(t *testing.T) {
+	desc, err := MarshalTeamDescription("Intro CS", "", "", true)
+	if err != nil {
+		t.Fatalf("MarshalTeamDescription: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/orgs/o/teams" && r.Method == http.MethodPost:
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"message":"name already taken"}`))
+		case r.URL.Path == "/orgs/o/teams/classroom50-cs101" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": 7, "slug": "classroom50-cs101", "privacy": "secret", "description": desc,
+			})
+		case r.Method == http.MethodPatch:
+			t.Errorf("must not PATCH when privacy and description already match")
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	client := githubtest.NewTestClient(t, server)
+
+	if _, err := EnsureClassroomTeam(client, "o", "cs101", desc); err != nil {
+		t.Fatalf("EnsureClassroomTeam adopt: %v", err)
+	}
+}
+
 func TestStaffTeamName(t *testing.T) {
 	cases := []struct {
 		short string
 		role  StaffRole
 		want  string
 	}{
+		{"cs-principles", RoleTeacher, "classroom50-cs-principles-teacher"},
 		{"cs-principles", RoleInstructor, "classroom50-cs-principles-instructor"},
 		{"cs-principles", RoleTA, "classroom50-cs-principles-ta"},
-		{"cs50", RoleInstructor, "classroom50-cs50-instructor"},
+		{"cs50", RoleTeacher, "classroom50-cs50-teacher"},
 	}
 	for _, tc := range cases {
 		if got := staffTeamName(tc.short, tc.role); got != tc.want {
@@ -30,12 +158,15 @@ func TestStaffTeamName(t *testing.T) {
 }
 
 // TestStaffTeamRepoPermissions pins the collect-time grant map: the TA team
-// gets read (pull), and the instructor role is intentionally absent (its access
+// gets read (pull), and the teacher role is intentionally absent (its access
 // is granted at classroom setup, not by the collector). This map is the source
 // of truth the collector's STAFF_TEAM_PERMISSIONS mirror must match in lockstep.
 func TestStaffTeamRepoPermissions(t *testing.T) {
 	if got := StaffTeamRepoPermissions[RoleTA]; got != "pull" {
 		t.Errorf("StaffTeamRepoPermissions[ta] = %q, want %q", got, "pull")
+	}
+	if _, ok := StaffTeamRepoPermissions[RoleTeacher]; ok {
+		t.Error("teacher must NOT be in StaffTeamRepoPermissions — the collector grants it nothing")
 	}
 	if _, ok := StaffTeamRepoPermissions[RoleInstructor]; ok {
 		t.Error("instructor must NOT be in StaffTeamRepoPermissions — the collector grants it nothing")
@@ -94,8 +225,8 @@ func TestEnsureStaffTeams(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureStaffTeams: %v", err)
 	}
-	if refs.Instructor == nil || refs.Instructor.Slug != "classroom50-cs-principles-instructor" {
-		t.Errorf("instructor ref = %+v, want slug classroom50-cs-principles-instructor", refs.Instructor)
+	if refs.Teacher == nil || refs.Teacher.Slug != "classroom50-cs-principles-teacher" {
+		t.Errorf("teacher ref = %+v, want slug classroom50-cs-principles-teacher", refs.Teacher)
 	}
 	if refs.TA == nil || refs.TA.Slug != "classroom50-cs-principles-ta" {
 		t.Errorf("ta ref = %+v, want slug classroom50-cs-principles-ta", refs.TA)
@@ -103,7 +234,7 @@ func TestEnsureStaffTeams(t *testing.T) {
 	if len(createdNames) != 2 {
 		t.Fatalf("created %d teams, want 2: %v", len(createdNames), createdNames)
 	}
-	for _, slug := range []string{"classroom50-cs-principles-instructor", "classroom50-cs-principles-ta"} {
+	for _, slug := range []string{"classroom50-cs-principles-teacher", "classroom50-cs-principles-ta"} {
 		if grantPerms[slug] != "push" {
 			t.Errorf("staff team %q granted %q on config repo, want push", slug, grantPerms[slug])
 		}

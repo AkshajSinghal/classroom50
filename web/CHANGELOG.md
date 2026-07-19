@@ -17,6 +17,43 @@ classroom50.org (see `.github/workflows/web-release-please.yaml`). You no longer
 edit this file or tag by hand; write Conventional Commit messages and
 release-please compiles the notes.
 
+## [1.9.0](https://github.com/foundation50/classroom50/compare/web-v1.8.0...web-v1.9.0) (2026-07-17)
+
+
+### Features
+
+* **assignments:** add opt-in empty-repo option ([#311](https://github.com/foundation50/classroom50/issues/311)) ([f06ee63](https://github.com/foundation50/classroom50/commit/f06ee632d0005a3db499178f57c0504a6be01052))
+* standardize on "teacher" terminology (backward-compatible role/team migration) ([#321](https://github.com/foundation50/classroom50/issues/321)) ([0b6d5a0](https://github.com/foundation50/classroom50/commit/0b6d5a0a24d8d874724cca549d20dd9e618c8d05))
+* **web:** harden setup + auth flow against stuck GitHub reads (derive wizard stage, add recovery affordances, warn on outages) ([#310](https://github.com/foundation50/classroom50/issues/310)) ([1967f67](https://github.com/foundation50/classroom50/commit/1967f67f55b563eec608da8422ea4c13282ad9ae))
+* **web:** hint at GitHub outages on transient template-verify and save failures ([#319](https://github.com/foundation50/classroom50/issues/319)) ([8253ae0](https://github.com/foundation50/classroom50/commit/8253ae0dee918e0384f97b32c58cd0eea4407b8d))
+
+
+### Bug Fixes
+
+* **web:** recover classroom team read access to assignment templates ([#305](https://github.com/foundation50/classroom50/issues/305)) ([#308](https://github.com/foundation50/classroom50/issues/308)) ([02e52ea](https://github.com/foundation50/classroom50/commit/02e52ea8239f02b8199a6d77459e3c0458f470e6))
+
+## [1.8.0](https://github.com/foundation50/classroom50/compare/web-v1.7.0...web-v1.8.0) (2026-07-16)
+
+
+### Features
+
+* grant TA staff team read on templates at setup, not only at collect-scores ([#288](https://github.com/foundation50/classroom50/issues/288)) ([9e4e5a3](https://github.com/foundation50/classroom50/commit/9e4e5a3bb71c6c3ec2247851c9abe66d828e5e0f))
+* **web:** show assignment description to students ([#299](https://github.com/foundation50/classroom50/issues/299)) ([572953c](https://github.com/foundation50/classroom50/commit/572953c5cd305494a972ae758ff64157741006c3))
+
+## [1.7.0](https://github.com/foundation50/classroom50/compare/web-v1.6.0...web-v1.7.0) (2026-07-15)
+
+
+### Features
+
+* **web:** enforce the i18n dead-key + hardcoded-string gate in CI ([#281](https://github.com/foundation50/classroom50/issues/281)) ([79d5e57](https://github.com/foundation50/classroom50/commit/79d5e57bf1e9143a85b00fe1df57e7a27410e589))
+
+
+### Bug Fixes
+
+* **web:** let org owners accept assignments despite residual admin ([#286](https://github.com/foundation50/classroom50/issues/286)) ([23c8515](https://github.com/foundation50/classroom50/commit/23c8515f3515fdb13bc7a2f087d565a609953aea))
+* **web:** set safe QueryClient defaultOptions for queries ([#278](https://github.com/foundation50/classroom50/issues/278)) ([bbd1cb8](https://github.com/foundation50/classroom50/commit/bbd1cb8f97210eaba8338c9fb62f0e8bc1471e3a))
+* **web:** treat an org owner as org-staff so a fresh org isn't stranded ([#285](https://github.com/foundation50/classroom50/issues/285)) ([3a826e1](https://github.com/foundation50/classroom50/commit/3a826e126cc163bc172b6cb097626c5011d69d19)), closes [#280](https://github.com/foundation50/classroom50/issues/280)
+
 ## [1.6.0](https://github.com/foundation50/classroom50/compare/web-v1.5.0...web-v1.6.0) (2026-07-15)
 
 

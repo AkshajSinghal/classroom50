@@ -1,16 +1,11 @@
 import { useState, type ReactNode } from "react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 
-import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { useSafeSubmit } from "@/hooks/useSafeSubmit"
 import { Button } from "@/components/ui"
-import {
-  initClassroom50,
-  type InitStepId,
-  type InitStepUpdate,
-} from "@/github-core/mutations"
+import { type InitStepId, type InitStepUpdate } from "@/github-core/mutations"
 import { githubKeys } from "@/github-core/queries"
+import useRunOrgSetup from "@/hooks/mutations/useRunOrgSetup"
 import useGetOrgPlanDetails from "@/hooks/useGetOrgPlanDetails"
 import {
   INIT_STEP_ORDER,
@@ -23,7 +18,7 @@ import { CalloutDiv } from "@/lib/motionComponents"
 import {
   SkeletonOverwriteModal,
   useSkeletonOverwriteConfirm,
-} from "./skeletonOverwriteUi"
+} from "@/components/skeletonOverwrite/skeletonOverwriteUi"
 
 const BANNER_TONE = {
   error: "border-error/30 bg-error/10 text-error",
@@ -54,13 +49,11 @@ const RERUN_ORG_SETUP_ANCHOR = "rerun-org-setup"
 
 // Re-run the org setup from Org Settings: re-invokes the idempotent
 // initClassroom50 to re-apply lockdown, rulesets, and repo settings. Owner-gated
-// by the page's <RequireTeacher allow="owner"> (see TeardownSection); shows the
+// by the page's <RequireRole allow="owner"> (see TeardownSection); shows the
 // wizard's badge board. The "repair everything" path complementing the
 // per-concern audit (U5/U6).
 const RerunOrgSetup = ({ org }: { org: string }) => {
   const { t } = useTranslation()
-  const client = useGitHubClient()
-  const queryClient = useQueryClient()
   const runRerun = useSafeSubmit()
 
   const { data: planDetails } = useGetOrgPlanDetails(org)
@@ -87,41 +80,51 @@ const RerunOrgSetup = ({ org }: { org: string }) => {
     ? INIT_STEP_ORDER.filter((id) => steps[id].status === "warning").length
     : 0
 
-  const mutation = useMutation({
-    mutationFn: async () => {
-      setStarted(true)
-      setFailed(false)
-      setDone(false)
-      setSteps(initialInitSteps)
-      return initClassroom50({
-        client,
-        org,
-        plan: planDetails?.plan?.name,
-        onStepUpdate: (update) => {
-          // init fires onStepUpdate across ~10 sequential steps; the user can
-          // navigate away mid-run. The work isn't cancelable (no AbortSignal),
-          // so the mounted guard just stops setState churn.
-          if (!mountedRef.current) return
-          setSteps((prev) => applyStepUpdate(prev, update))
-        },
-        confirmSkeletonOverwrite,
-      })
-    },
-    onSuccess: (data) => {
+  const mutation = useRunOrgSetup({
+    org,
+    plan: planDetails?.plan?.name,
+    onStepUpdate: (update) => {
+      // init fires onStepUpdate across ~10 sequential steps; the user can
+      // navigate away mid-run. The work isn't cancelable (no AbortSignal), so
+      // the mounted guard just stops setState churn.
       if (!mountedRef.current) return
-      setDone(true)
-      // init resolves (not throws) with status "error" on a prerequisite
-      // failure; surface it instead of treating it as success.
-      if (data && data.status === "error") {
-        setFailed(true)
-        return
-      }
+      setSteps((prev) => applyStepUpdate(prev, update))
+    },
+    confirmSkeletonOverwrite,
+    // Unmount-safe: runs in the hook's onSuccess so a mid-run navigation can't
+    // drop the post-setup refetch. Only on a non-error outcome (init resolves
+    // with status "error" on a prerequisite failure).
+    invalidate: (queryClient, result) => {
+      if (result && result.status === "error") return
       void queryClient.invalidateQueries({
         queryKey: githubKeys.orgAuditPrefix(org),
       })
       void queryClient.invalidateQueries({ queryKey: ["orgs"] })
     },
   })
+
+  // Reset the board before the init call (must run before mutateAsync), then
+  // run setup. The step-machine setState (done/failed) stays here via the
+  // per-call onSuccess (correctly skipped on unmount); the cache invalidation
+  // lives in the hook so it survives an unmount.
+  const runRerunFlow = () => {
+    setStarted(true)
+    setFailed(false)
+    setDone(false)
+    setSteps(initialInitSteps)
+    return mutation.mutateAsync(undefined, {
+      onSuccess: (data) => {
+        if (!mountedRef.current) return
+        setDone(true)
+        // init resolves (not throws) with status "error" on a prerequisite
+        // failure; surface it instead of treating it as success. (The cache
+        // invalidation is the hook's job — see `invalidate` above.)
+        if (data && data.status === "error") {
+          setFailed(true)
+        }
+      },
+    })
+  }
 
   return (
     <SettingsSection
@@ -136,7 +139,7 @@ const RerunOrgSetup = ({ org }: { org: string }) => {
           loadingLabel={t("orgSettings.rerun.running")}
           disabled={mutation.isPending}
           onClick={() => {
-            if (!mutation.isPending) void runRerun(() => mutation.mutateAsync())
+            if (!mutation.isPending) void runRerun(() => runRerunFlow())
           }}
         >
           {mutation.isPending

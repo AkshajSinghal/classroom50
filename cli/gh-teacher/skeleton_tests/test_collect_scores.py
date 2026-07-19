@@ -1011,9 +1011,8 @@ class TestGroupCollectClassroom:
 
 class TestAssignmentRepoName:
     def test_lowercases_all_three_components(self):
-        # Cross-binary contract with assignmentRepoName in
-        # cli/gh-student/accept.go — drift makes the collect
-        # releases/latest call 404 for every student.
+        # Cross-binary contract single-sourced in cli/shared/contract — drift
+        # makes the collect releases/latest call 404 for every student.
         assert (
             cs.assignment_repo_name("CS-Principles", "Hello", "Alice")
             == "cs-principles-hello-alice"
@@ -1026,6 +1025,19 @@ class TestAssignmentRepoName:
             cs.assignment_repo_name("cs-principles", "hello-world", "ada-l")
             == "cs-principles-hello-world-ada-l"
         )
+
+    def test_shared_fixture_parity(self):
+        # Same golden cases the Go contract test asserts, so this mirror can't
+        # drift from the single source in cli/shared/contract.
+        repo_root = pathlib.Path(__file__).resolve().parents[3]
+        fixture = (repo_root / "cli" / "shared" / "testdata"
+                   / "assignment_repo_name_cases.json")
+        cases = json.loads(fixture.read_text())["cases"]
+        assert cases, "shared fixture has no cases"
+        for case in cases:
+            assert cs.assignment_repo_name(
+                case["classroom"], case["assignment"], case["username"]
+            ) == case["name"], case["name"]
 
 
 # Due-date / lateness ---------------------------------------------------------
@@ -2202,6 +2214,79 @@ class TestCollectClassroomModeFlip:
         assert mode_flip == 0
         err = capsys.readouterr().err
         assert "NONE were creditable" not in err
+
+
+# empty_repo skip -------------------------------------------------------------
+
+
+def test_valid_assignment_slugs_excludes_empty_repo():
+    # empty_repo assignments never autograde, so they don't count toward the
+    # "collectable assignments" total main() uses for its zero-submission guard.
+    assignments = {
+        "assignments": [
+            {"slug": "hello"},
+            {"slug": "actions-lab", "empty_repo": True},
+            {"slug": "world", "empty_repo": False},
+        ]
+    }
+    assert cs.valid_assignment_slugs(assignments) == ["hello", "world"]
+
+
+def test_is_empty_repo_is_strict_boolean_true():
+    # The wire contract is a JSON boolean (Go decodes a strict bool; TS uses
+    # === true). is_empty_repo must agree: only the literal True is empty_repo,
+    # so a non-boolean value from a hand-edited manifest is NOT treated as bare
+    # (it would otherwise diverge from the Go/TS readers).
+    assert cs.is_empty_repo({"empty_repo": True}) is True
+    assert cs.is_empty_repo({"empty_repo": False}) is False
+    assert cs.is_empty_repo({}) is False
+    for non_bool in ("true", "yes", 1, [1], {"x": 1}):
+        assert cs.is_empty_repo({"empty_repo": non_bool}) is False, non_bool
+    # A non-boolean truthy value must still be COLLECTED (not silently skipped).
+    assert cs.valid_assignment_slugs(
+        {"assignments": [{"slug": "a", "empty_repo": "yes"}]}
+    ) == ["a"]
+
+
+def test_runner_empty_repo_guard_uses_strict_predicate():
+    # The autograde runner's inline guard is student-repo-facing (a hand-added
+    # workflow could call it), so it must skip bare assignments with the SAME
+    # strict predicate as the importable readers — a truthiness check here
+    # would diverge from Go/TS and from is_empty_repo.
+    runner = (
+        pathlib.Path(__file__).resolve().parent.parent
+        / "skeleton"
+        / "dotgithub"
+        / "workflows"
+        / "autograde-runner.yaml"
+    ).read_text()
+    assert 'entry.get("empty_repo") is True' in runner, (
+        "runner empty_repo guard must use the strict `is True` predicate "
+        "(matching is_empty_repo / Go bool / TS === true)"
+    )
+    assert "autograding is disabled for it" in runner
+
+
+def test_collect_classroom_skips_empty_repo_assignment(monkeypatch, capsys):
+    # An empty_repo assignment is skipped with a log line: its bare repos are
+    # never polled for releases, so no dead gradebook rows are produced.
+    def fail_releases(*args, **kwargs):
+        raise AssertionError("empty_repo repos must not be polled for releases")
+
+    monkeypatch.setattr(cs, "all_submit_releases", fail_releases)
+    stub_team_members(monkeypatch, ["alice"])
+
+    results, _ = cs.collect_classroom(
+        api_url="https://api.github.com",
+        org="cs50",
+        classroom_short="cs-principles",
+        classroom_meta={},
+        assignments={"assignments": [{"slug": "actions-lab", "empty_repo": True}]},
+        service_token="token",
+    )
+
+    assert results == []
+    assert "empty_repo" in capsys.readouterr().out
 
 
 # Staff-team repo-access grant ------------------------------------------------

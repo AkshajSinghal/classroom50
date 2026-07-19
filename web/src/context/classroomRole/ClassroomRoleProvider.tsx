@@ -6,38 +6,39 @@ import {
 } from "react"
 import { useGithubAuth } from "@/auth/useGithubAuth"
 import { useClassroomRole } from "@/hooks/useClassroomRole"
-import { isStaffRole, type EffectiveRole } from "@/util/resolveRole"
+import { useTeacherTeamMigration } from "@/hooks/useTeacherTeamMigration"
+import { useTeamDescriptionBackfill } from "@/hooks/useTeamDescriptionBackfill"
+import { isTeacherRole, type ResolvedRole } from "@/authz"
 
 // The single authoritative effective-role signal for the current classroom,
 // resolved ONCE at the $org/$classroom boundary and shared with every child
-// page + guard. Carries both the fine classroom role (instructor/ta/student)
-// and the coarse staff verdict (showTeacherUi/isStudent/...) DERIVED from that
-// fine role, so the two can't diverge. Preview-aware fields respect the
-// downgrade-only "view as" lens; `actualRole` is the real one.
+// page + guard. Carries the fine classroom role (teacher/ta/student) plus
+// the `roleResolved` load signal; permission verdicts are derived at call sites
+// through the central `can()` policy off `role` (preview-aware; `actualRole` is
+// the real one).
 export type ClassroomRoleContextValue = {
-  role: EffectiveRole
-  actualRole: EffectiveRole
+  role: ResolvedRole
+  actualRole: ResolvedRole
   isLoading: boolean
-  // An elevation (instructor/ta) read settled in a non-definitive error with
+  // An elevation (teacher/ta) read settled in a non-definitive error with
   // the role still `unresolved` and nothing in flight — the guard shows an
   // error+retry surface instead of holding a spinner forever.
   isError: boolean
   // Re-run the classroom team reads (the error surface's retry).
   retry: () => void
-  // Coarse staff verdict, DERIVED from the fine role (not a separate config-repo
-  // read) so it can't diverge from `role`. Preview-aware via `role`.
-  isTeacher: boolean
-  isStudent: boolean
+  // Whether the fine role has settled (not `unresolved`) — the spinner-vs-render
+  // signal. NOT a permission verdict: gate access via can(), gate loading state
+  // via this.
   roleResolved: boolean
-  showTeacherUi: boolean
 }
 
 const ClassroomRoleContext = createContext<ClassroomRoleContextValue | null>(
   null,
 )
 
-// Resolve the classroom role from the three per-classroom team reads and derive
-// the coarse staff verdict from it. One resolution per classroom mount.
+// Resolve the classroom role from the three per-classroom team reads. One
+// resolution per classroom mount; permission verdicts come from can() at the
+// call site off `role`.
 function useClassroomRoleResolution(
   org: string | undefined,
   classroom: string | undefined,
@@ -50,13 +51,21 @@ function useClassroomRoleResolution(
     user?.login,
   )
 
-  // DERIVE the coarse staff verdict from the resolved fine role (which already
-  // folds in team membership AND the "view as" clamp) so the two can't diverge.
-  // `unresolved` is the fail-closed sentinel (not resolved, no teacher UI, not
-  // yet a definitive student).
+  // Self-heal the instructor -> teacher team rename on classroom entry, for the
+  // whole classroom subtree rather than only the settings page. Gated on the
+  // viewer being an org owner (the resolved teacher role) since the migration
+  // creates/deletes teams and commits config; use actualRole so a teacher
+  // previewing as a lower role still triggers the (idempotent) heal.
+  useTeacherTeamMigration(org, classroom, isTeacherRole(actualRole))
+
+  // Backfill the classroom50/team/v1 bootstrap record onto the student team's
+  // description (the web mirror of the CLI's write-at-create), so classrooms
+  // created via the GUI or before this feature converge on any owner entry.
+  // Same gate/rationale as the migration above: an org-owner PATCH, keyed on
+  // actualRole so a preview still triggers the idempotent reconcile.
+  useTeamDescriptionBackfill(org, classroom, isTeacherRole(actualRole))
+
   const roleResolved = role !== "unresolved"
-  const isTeacher = isStaffRole(role) && roleResolved
-  const isStudent = role === "student"
 
   return {
     role,
@@ -64,10 +73,7 @@ function useClassroomRoleResolution(
     isLoading,
     isError,
     retry: refetch,
-    isTeacher,
-    isStudent,
     roleResolved,
-    showTeacherUi: isTeacher,
   }
 }
 
@@ -92,10 +98,7 @@ export function ClassroomRoleProvider({
       resolved.isLoading,
       resolved.isError,
       resolved.retry,
-      resolved.isTeacher,
-      resolved.isStudent,
       resolved.roleResolved,
-      resolved.showTeacherUi,
     ],
   )
   return (

@@ -44,11 +44,17 @@ export type { CopyableCodeProps } from "./CopyableCode"
 export { CopyableDetails } from "./CopyableDetails"
 export type { CopyableDetailsProps } from "./CopyableDetails"
 
+export { FileDropzone } from "./FileDropzone"
+export type { FileDropzoneProps, PickedFile } from "./FileDropzone"
+
 export { StatCard } from "./StatCard"
 export type { StatCardProps } from "./StatCard"
 
 export { LabeledControl } from "./LabeledControl"
 export type { LabeledControlProps } from "./LabeledControl"
+
+export { Markdown } from "./Markdown"
+export type { MarkdownProps } from "./Markdown"
 
 export { Toolbar } from "./Toolbar"
 export type {

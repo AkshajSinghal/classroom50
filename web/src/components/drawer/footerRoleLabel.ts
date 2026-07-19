@@ -4,8 +4,8 @@
 // roleLabelKey/i18n; this helper has no "owner" concept to reuse there).
 //
 // Non-obvious gotcha: owner-pending only counts as a spinner when an org is in
-// scope. Off the $org boundary useOrgRole stays `unresolved` forever, so gating
-// on `hasOrg` prevents a permanent spinner on the org-less /orgs list.
+// scope. Off the $org boundary useGitHubOrgRole stays `unresolved` forever, so
+// gating on `hasOrg` prevents a permanent spinner on the org-less /orgs list.
 
 export type OrgFooterLabelInput = {
   hasOrg: boolean
@@ -13,16 +13,16 @@ export type OrgFooterLabelInput = {
   isOwner: boolean
   ownerPending: boolean
   // Owner read settled in a transient error (retries exhausted). The verdict is
-  // not trustworthy, so it neither grants "Instructor" nor falls back to
+  // not trustworthy, so it neither grants "Teacher" nor falls back to
   // "Student".
   ownerError: boolean
-  isStudent: boolean
+  isNonStaff: boolean
   roleLoading: boolean
 }
 
 export type OrgFooterLabel = {
   // Translation key, or null for no label. Callers pass through t().
-  labelKey: "nav.roleInstructor" | "nav.roleStudent" | null
+  labelKey: "nav.roleTeacher" | "nav.roleStudent" | null
   pending: boolean
 }
 
@@ -33,7 +33,7 @@ export function orgFooterRoleLabel(input: OrgFooterLabelInput): OrgFooterLabel {
     isOwner,
     ownerPending,
     ownerError,
-    isStudent,
+    isNonStaff,
     roleLoading,
   } = input
 
@@ -41,8 +41,8 @@ export function orgFooterRoleLabel(input: OrgFooterLabelInput): OrgFooterLabel {
 
   let labelKey: OrgFooterLabel["labelKey"] = null
   if (isOrgSetup || isOwner) {
-    labelKey = "nav.roleInstructor"
-  } else if (!ownerUnsettled && !roleLoading && isStudent) {
+    labelKey = "nav.roleTeacher"
+  } else if (!ownerUnsettled && !roleLoading && isNonStaff) {
     labelKey = "nav.roleStudent"
   }
 

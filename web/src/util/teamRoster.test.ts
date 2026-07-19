@@ -2,13 +2,14 @@ import { describe, expect, it } from "vitest"
 import {
   buildTeamRoster,
   countByState,
-  orgRoleForRole,
-  roleForOrgRole,
+  githubOrgRoleForRole,
+  roleForGitHubOrgRole,
   rowToStudent,
   teamMembersMissingFromCsv,
   rowsNeedingBackfill,
 } from "./teamRoster"
-import { enrolledCountsByRole } from "./rosterRoles"
+import { isOwnerGitHubOrgRole } from "@/authz"
+import { enrolledCountsByRole } from "./classroomRoleUI"
 import type { Student } from "@/types/classroom"
 import { STAFF_ROLES } from "@/types/classroom"
 import type { GitHubUser, GitHubOrgInvitation } from "@/github-core/types"
@@ -313,7 +314,7 @@ describe("buildTeamRoster — needs-attention (CSV row on no team)", () => {
   it("a removed TA (CSV role ta, on no team, still an org member) reads as needs_attention_in_org, not student/enrolled", () => {
     const rows = buildTeamRoster({
       members: [],
-      staffMembers: { instructor: [], ta: [] },
+      staffMembers: { teacher: [], ta: [] },
       students: [
         csvRow({
           github_id: "50",
@@ -378,6 +379,7 @@ describe("buildTeamRoster — needs-attention (CSV row on no team)", () => {
       orgMemberLogins: new Set(["wanda"]),
     })
     expect(enrolledCountsByRole(rows)).toEqual({
+      teacher: 0,
       instructor: 0,
       ta: 0,
       student: 1,
@@ -422,26 +424,26 @@ describe("buildTeamRoster — roles (union across student + staff teams)", () =>
     expect(rows[0].roles).toEqual(["ta"])
   })
 
-  it("unions roles for a person on both the student and instructor teams (one row)", () => {
+  it("unions roles for a person on both the student and teacher teams (one row)", () => {
     const rows = buildTeamRoster({
       members: [member(3, "prof")],
-      staffMembers: { instructor: [member(3, "prof")] },
+      staffMembers: { teacher: [member(3, "prof")] },
       students: [],
     })
     expect(rows).toHaveLength(1)
-    // Sorted by ROLE_RANK: instructor before student.
-    expect(rows[0].roles).toEqual(["instructor", "student"])
+    // Sorted by ROLE_RANK: teacher before student.
+    expect(rows[0].roles).toEqual(["teacher", "student"])
   })
 
   it("credits a staff member who is also pending elsewhere as enrolled (no dup)", () => {
     const rows = buildTeamRoster({
       members: [member(4, "ada")],
-      staffInvitations: { instructor: [invite({ id: 5, login: "ada" })] },
+      staffInvitations: { teacher: [invite({ id: 5, login: "ada" })] },
       students: [],
     })
     expect(rows).toHaveLength(1)
     expect(rows[0].state).toBe("enrolled")
-    // The stale login-invite for an active member is skipped, so no instructor
+    // The stale login-invite for an active member is skipped, so no teacher
     // role is added from it.
     expect(rows[0].roles).toEqual(["student"])
   })
@@ -462,13 +464,13 @@ describe("buildTeamRoster — roles (union across student + staff teams)", () =>
     const rows = buildTeamRoster({
       members: [],
       staffInvitations: {
-        instructor: [invite({ id: 7, email: "prof@uni.edu" })],
+        teacher: [invite({ id: 7, email: "prof@uni.edu" })],
       },
       students: [csvRow({ email: "prof@uni.edu", first_name: "Prof" })],
     })
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ state: "pending", first_name: "Prof" })
-    expect(rows[0].roles).toEqual(["instructor"])
+    expect(rows[0].roles).toEqual(["teacher"])
   })
 
   it("tags a TA-team invite as TA only, not student, when GitHub also echoes it into the org-level invitations", () => {
@@ -510,19 +512,19 @@ describe("buildTeamRoster — roles (union across student + staff teams)", () =>
     expect(rows[0].roles).toEqual(["student"])
   })
 
-  it("unions a person pending on both staff teams (instructor + ta)", () => {
+  it("unions a person pending on both staff teams (teacher + ta)", () => {
     const rows = buildTeamRoster({
       members: [],
       invitations: [invite({ id: 45, login: "both" })],
       staffInvitations: {
-        instructor: [invite({ id: 45, login: "both" })],
+        teacher: [invite({ id: 45, login: "both" })],
         ta: [invite({ id: 45, login: "both" })],
       },
       students: [],
     })
     expect(rows).toHaveLength(1)
     // Sorted by ROLE_RANK; no spurious "student".
-    expect(rows[0].roles).toEqual(["instructor", "ta"])
+    expect(rows[0].roles).toEqual(["teacher", "ta"])
   })
 
   it("includes every STAFF_ROLES role (guards STAFF_ROLES drift)", () => {
@@ -550,11 +552,9 @@ describe("rowsNeedingBackfill", () => {
   })
 
   it("flags a row whose recorded role is stale vs the team", () => {
-    const needing = rowsNeedingBackfill(
-      [],
-      { instructor: [member(1, "prof")] },
-      [csvRow({ github_id: "1", username: "prof", role: "student" })],
-    )
+    const needing = rowsNeedingBackfill([], { teacher: [member(1, "prof")] }, [
+      csvRow({ github_id: "1", username: "prof", role: "student" }),
+    ])
     expect(needing.map((s) => s.username)).toEqual(["prof"])
   })
 
@@ -642,23 +642,35 @@ describe("buildTeamRoster — CSV-only rows do not render (team-driven)", () => 
   })
 })
 
-describe("orgRoleForRole / roleForOrgRole — classroom<->org role mapping", () => {
-  it("maps instructor to org OWNER (admin), student/ta to direct_member", () => {
-    expect(orgRoleForRole("instructor")).toBe("admin")
-    expect(orgRoleForRole("ta")).toBe("direct_member")
-    expect(orgRoleForRole("student")).toBe("direct_member")
+describe("githubOrgRoleForRole / roleForGitHubOrgRole — classroom<->org role mapping", () => {
+  it("maps teacher to org OWNER (admin), student/ta to direct_member", () => {
+    expect(githubOrgRoleForRole("teacher")).toBe("admin")
+    expect(githubOrgRoleForRole("instructor")).toBe("admin")
+    expect(githubOrgRoleForRole("ta")).toBe("direct_member")
+    expect(githubOrgRoleForRole("student")).toBe("direct_member")
   })
 
-  it("maps admin back to instructor, everything else to student", () => {
-    expect(roleForOrgRole("admin")).toBe("instructor")
-    expect(roleForOrgRole("direct_member")).toBe("student")
+  it("maps admin back to teacher, everything else to student", () => {
+    expect(roleForGitHubOrgRole("admin")).toBe("teacher")
+    expect(roleForGitHubOrgRole("direct_member")).toBe("student")
     // An unrecognized/absent org role is treated as a plain student, never a
     // silent owner grant.
-    expect(roleForOrgRole("")).toBe("student")
-    expect(roleForOrgRole("member")).toBe("student")
+    expect(roleForGitHubOrgRole("")).toBe("student")
+    expect(roleForGitHubOrgRole("member")).toBe("student")
   })
 
-  it("round-trips instructor (the security-sensitive owner grant)", () => {
-    expect(roleForOrgRole(orgRoleForRole("instructor"))).toBe("instructor")
+  it("round-trips teacher (the security-sensitive owner grant)", () => {
+    expect(roleForGitHubOrgRole(githubOrgRoleForRole("teacher"))).toBe(
+      "teacher",
+    )
+  })
+})
+
+describe("isOwnerGitHubOrgRole — wire org-role owner test", () => {
+  it("only `admin` is an owner; member/absent/unknown are not", () => {
+    expect(isOwnerGitHubOrgRole("admin")).toBe(true)
+    expect(isOwnerGitHubOrgRole("member")).toBe(false)
+    expect(isOwnerGitHubOrgRole("")).toBe(false)
+    expect(isOwnerGitHubOrgRole("direct_member")).toBe(false)
   })
 })

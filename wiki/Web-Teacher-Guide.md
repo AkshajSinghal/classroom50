@@ -91,7 +91,7 @@ To view a configured Classroom 50 organization, click "Open" on its card on the 
 
 ![View of the "+ Create classroom" form](images/web_create_classroom.png)
 
-Click "Create classroom" on the "My classes" page to create a new classroom. Each classroom needs a **name** and a **slug** (a unique identifier for the classroom). The **term** is optional but is displayed in various places and can help differentiate between different offerings of the same course.
+Click "Create classroom" on the "My classrooms" page to create a new classroom. Each classroom needs a **name** and a **slug** (a unique identifier for the classroom). The **term** is optional but is displayed in various places and can help differentiate between different offerings of the same course.
 
 ![View of "unlisted links" toggle form in "+ Create classroom form"](images/web_create_classroom_hash.png)
 
@@ -121,6 +121,7 @@ Click the "+ Assignment" button on the classroom page to create a new assignment
 - **Due Date**: A specific date and time at which the assignment is due in your local timezone.
 - **Assignment Type**: Students may submit either **Individual** or **Group** assignments. In individual assignments, each repository belongs to only one student; in group assignments, students can collaborate on the same repository and submit their work together.
 - - **Feedback pull request**: This feature creates a pull request (PR) automatically for students when they submit, in order to provide a clean and flexible way for teachers to view a student's changes and provide feedback on their work.
+- **Empty repository**: Creates each student's repository completely empty — no starter files, no autograding setup, no feedback pull request. Use this for assignments where students build everything from scratch, including their own GitHub Actions workflows (which would otherwise conflict with the autograding setup). Because the repositories carry no grading machinery, autograding, scores, and the feedback PR are disabled for the assignment, and the submissions page shows who accepted rather than grades. **This choice is permanent**: it can't be toggled after the assignment is created, since repositories students have already accepted can't be retrofitted. Enabling it hides the template, autograding-test, and grading-related fields.
 
 ### Creating an Assignment - Advanced Settings
 
@@ -184,7 +185,7 @@ In order for students to accept an assignment, they need to be added to the clas
 
 ![View of Students page with no students](images/web_students_none.png)
 
-On the "Students" page within each classroom, you can add students to your class roster for that classroom, as well as see which students have already been added and which students still have pending invitations. When students are added to the roster, they will be sent an invitation to join your GitHub organization. Students **must accept the invitation in order to start work on assignments in the classroom**.
+On the "Students" page within each classroom, you can add students to your classroom roster for that classroom, as well as see which students have already been added and which students still have pending invitations. When students are added to the roster, they will be sent an invitation to join your GitHub organization. Students **must accept the invitation in order to start work on assignments in the classroom**.
 
 ### Add Student
 
@@ -218,8 +219,8 @@ Assuming you have students who have accepted the assignment, the next important 
 
 As you can see, we have a few important pieces of data we can now view:
 
-- **Submitted**: The number of submissions / the number of students enrolled in the course.
-- **Class Average**: The average grade of the students who have submitted thus far.
+- **Submitted**: The number of submissions / the number of students enrolled in the classroom.
+- **Classroom Average**: The average grade of the students who have submitted thus far.
 - **Passing**: The number of students who are passing the assignment, as well as the number who are failing.
 - **Accepted**: The number of submissions that have been accepted (one per student).
 

@@ -1,6 +1,8 @@
 import { AlertTriangle, UserPlus } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { GitHubAPIError } from "@/github-core/errors"
+import { isDefiniteOutageError } from "@/lib/githubHealth"
+import { GitHubStatusNote } from "@/components/GitHubStatusNote"
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
 import { Card, CopyableDetails, Button, Badge } from "@/components/ui"
 import type { BadgeTone } from "@/components/ui"
@@ -20,7 +22,11 @@ export type MembershipErrorInfo = {
   cause: MembershipErrorCause
   // Present only for `ssoWithUrl`; a validated https://github.com SSO URL.
   ssoUrl: string | null
-  // Data-minimized diagnostics for the copyable "for your instructor" block.
+  // True when a `generic` failure is a positively-identified GitHub outage (5xx
+  // / network), so the card can add the githubstatus.com hint instead of reading
+  // as a local problem. Never set for definitive causes (SSO / not-a-member).
+  isOutage: boolean
+  // Data-minimized diagnostics for the copyable "for your teacher" block.
   // NOT the raw response body or raw X-GitHub-SSO header (which carries an
   // authorization_request token) — only an allow-listed, non-sensitive subset.
   details: {
@@ -56,16 +62,26 @@ export function classifyMembershipError(
     if (error.isSsoRequired) {
       const ssoUrl = error.ssoAuthorizationUrl
       return ssoUrl
-        ? { cause: "ssoWithUrl", ssoUrl, details }
-        : { cause: "ssoUrlless", ssoUrl: null, details }
+        ? { cause: "ssoWithUrl", ssoUrl, isOutage: false, details }
+        : { cause: "ssoUrlless", ssoUrl: null, isOutage: false, details }
     }
     if (error.isNotFound) {
-      return { cause: "notAMember", ssoUrl: null, details }
+      return { cause: "notAMember", ssoUrl: null, isOutage: false, details }
     }
-    return { cause: "generic", ssoUrl: null, details }
+    return {
+      cause: "generic",
+      ssoUrl: null,
+      isOutage: isDefiniteOutageError(error),
+      details,
+    }
   }
 
-  return { cause: "generic", ssoUrl: null, details: base }
+  return {
+    cause: "generic",
+    ssoUrl: null,
+    isOutage: isDefiniteOutageError(error),
+    details: base,
+  }
 }
 
 const MembershipDetails = ({
@@ -114,7 +130,7 @@ const MembershipDetails = ({
 
 // Shared, cause-specific membership error card for the onboarding and accept
 // pages: a per-cause title/body, at least one recovery action (never a dead
-// end), and a collapsed, data-minimized diagnostics block for the instructor.
+// end), and a collapsed, data-minimized diagnostics block for the teacher.
 // `onRetry` backs the generic Retry action; SSO/not-a-member causes point
 // elsewhere.
 export const MembershipError = ({
@@ -203,6 +219,12 @@ export const MembershipError = ({
               <Button variant="primary" size="sm" onClick={onRetry}>
                 {t("membership.generic.retry")}
               </Button>
+            )}
+
+            {cause === "generic" && info.isOutage && (
+              <p className="text-sm leading-5 text-base-content/70">
+                <GitHubStatusNote statusDescription={null} />
+              </p>
             )}
           </div>
         </div>

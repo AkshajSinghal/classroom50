@@ -6,10 +6,10 @@ Visit [classroom50.org](https://www.classroom50.org) to access the web interface
 
 This guide describes how to use Classroom 50 via its web interface at [classroom50.org](https://www.classroom50.org). Classroom 50 is also available as a [command-line tool](/CLI-Student-Guide.md).
 
-This guide will cover the following topics, roughly in the order a student is likely to encounter them when taking a class with Classroom 50:
+This guide will cover the following topics, roughly in the order a student is likely to encounter them when joining a classroom in Classroom 50:
 
 - [GitHub Setup](#github-setup)
-- [Joining Your Class](#joining-your-class)
+- [Joining Your Classroom](#joining-your-classroom)
 - [Logging Into Classroom 50](#logging-into-classroom-50)
 - [Viewing Organizations](#viewing-organizations)
 - [Accepting Assignments](#accepting-assignments)
@@ -21,11 +21,11 @@ This guide will cover the following topics, roughly in the order a student is li
 
 # GitHub Setup
 
-Classroom 50 is built entirely atop GitHub's existing infrastructure; as a result, in order to use Classroom 50 for your classes and assignments, [you will need a GitHub account first](https://docs.github.com/en/get-started/start-your-journey/creating-an-account-on-github).
+Classroom 50 is built entirely atop GitHub's existing infrastructure; as a result, in order to use Classroom 50 for your classrooms and assignments, [you will need a GitHub account first](https://docs.github.com/en/get-started/start-your-journey/creating-an-account-on-github).
 
-# Joining Your Class
+# Joining Your Classroom
 
-Before you can view and accept assignments for your class, you will need to be invited to the [GitHub organization](https://docs.github.com/en/organizations/collaborating-with-groups-in-organizations/about-organizations) to which your class belongs.
+Before you can view and accept assignments for your classroom, you will need to be invited to the [GitHub organization](https://docs.github.com/en/organizations/collaborating-with-groups-in-organizations/about-organizations) to which your classroom belongs.
 
 When your teacher invites you to the organization, you'll receive an email from GitHub with a link to accept the invitation. Accept the invitation before logging into Classroom 50.
 
@@ -46,7 +46,7 @@ Classroom 50 uses your GitHub credentials to establish a connection to GitHub us
 
 ![Organizations view of Classroom 50](images/web_organizations_student.png)
 
-After logging in, you'll see a list of GitHub organizations. Look for the organization that corresponds to the class you're taking and that has a "Student" label beneath it.
+After logging in, you'll see a list of GitHub organizations. Look for the organization that corresponds to the classroom you're joining and that has a "Student" label beneath it.
 
 Clicking on any organization will then show you your list of assignments across the organization's classrooms to which you have access and have accepted.
 
@@ -78,7 +78,7 @@ To access the interface for adding collaborators, first click the edit pencil at
 
 ![View of group assignment page for student](images/web_assignment_edit_student.png)
 
-Then, click the "Manage collaborators" button for the assignment to be taken to the following interface, where you can then add collaborators to your project (note that they must be members of the organization and enrolled in the class for this to work):
+Then, click the "Manage collaborators" button for the assignment to be taken to the following interface, where you can then add collaborators to your project (note that they must be members of the organization and enrolled in the classroom for this to work):
 
 ![View of managing collaborators for student](images/web_assignment_manage_collaborators_student.png)
 

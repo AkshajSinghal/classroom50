@@ -3,22 +3,25 @@ import { STAFF_ROLES, type StaffRole } from "@/types/classroom"
 import type { GitHubUser, GitHubOrgInvitation } from "@/github-core/types"
 import { rosterClaimSet } from "@/util/identity"
 import {
-  type RosterRole,
+  type ClassroomRole,
   ROLE_RANK,
   sortRolesByRank,
-  orgRoleForRole,
-  roleForOrgRole,
-} from "@/util/roles"
+  isTeacherRole,
+  githubOrgRoleForRole,
+  roleForGitHubOrgRole,
+} from "@/authz"
 
-// Role vocabulary is single-sourced in util/roles. Re-exported here because the
-// roster row logic below is its primary consumer and callers naturally reach for
-// these alongside TeamRosterRow; roles.ts stays the definition home.
+// Role vocabulary is single-sourced in the authz module (authz/roles). Re-exported
+// here because the roster row logic below is its primary consumer and callers
+// naturally reach for these alongside TeamRosterRow; authz/roles stays the
+// definition home, consumed via the @/authz barrel.
 export {
-  type RosterRole,
+  type ClassroomRole,
   ROLE_RANK,
   sortRolesByRank,
-  orgRoleForRole,
-  roleForOrgRole,
+  isTeacherRole,
+  githubOrgRoleForRole,
+  roleForGitHubOrgRole,
 }
 
 // Team-driven roster: the classroom GitHub team is the source of truth for
@@ -58,7 +61,7 @@ export type TeamRosterRow = {
   // For a needs-attention row the team hasn't assigned a role yet, so this holds
   // the placeholder ["student"] purely for the non-empty invariant — the view
   // renders NO role badge for those states.
-  roles: RosterRole[]
+  roles: ClassroomRole[]
   // GitHub identity when known. Empty only for an email-only pending invite.
   username: string
   github_id: string
@@ -130,7 +133,7 @@ export type BuildTeamRosterInput = {
   // (owner-only endpoint) — enrolled rows still render.
   invitations?: GitHubOrgInvitation[]
   // Active members of the per-classroom staff teams, keyed by role. Merged into
-  // the same rows as `members` (a person on both the student and instructor
+  // the same rows as `members` (a person on both the student and teacher
   // team is one enrolled row with roles ["instructor","student"]).
   staffMembers?: Partial<Record<StaffRole, GitHubUser[]>>
   // Pending team invitations for the staff teams, keyed by role. Team-scoped, so
@@ -200,7 +203,7 @@ export function buildTeamRoster(input: BuildTeamRosterInput): TeamRosterRow[] {
   // another PENDING invite, which must instead union its role onto that pending
   // row. Adding a not-yet-org-member to a staff team lists the same person in
   // BOTH the org-level invitations (tagged student) and the team invitations
-  // (tagged ta/instructor); keying only on member logins would drop the second.
+  // (tagged ta/teacher); keying only on member logins would drop the second.
   const memberLogins = new Set<string>()
   // Enrolled rows already emitted, keyed by member id, so a person on several
   // teams gets one row with their roles unioned rather than duplicate rows.
@@ -212,7 +215,7 @@ export function buildTeamRoster(input: BuildTeamRosterInput): TeamRosterRow[] {
   // Members tagged with the role of the team they came from. The student team
   // is "student"; each staff team its role. Student first so a student+staff
   // person keeps their student metadata join, with staff roles unioned on.
-  const roleMembers: Array<{ role: RosterRole; member: GitHubUser }> = [
+  const roleMembers: Array<{ role: ClassroomRole; member: GitHubUser }> = [
     ...members.map((member) => ({ role: "student" as const, member })),
     ...STAFF_ROLES.flatMap((role) =>
       (staffMembers[role] ?? []).map((member) => ({ role, member })),
@@ -245,12 +248,12 @@ export function buildTeamRoster(input: BuildTeamRosterInput): TeamRosterRow[] {
 
   // Pending, tagged by role. Staff-team invitations are AUTHORITATIVE for a
   // staff role and are processed FIRST: adding a not-yet-org-member to a staff
-  // team lists them in BOTH the team invitations (tagged ta/instructor) AND the
+  // team lists them in BOTH the team invitations (tagged ta/teacher) AND the
   // org-level invitations (which we can only blanket-tag "student"). Ordering
   // staff first lets the org-level "student" invite recognize the person as an
   // already-tagged pending staffer and NOT add a spurious "student" role.
   const roleInvites: Array<{
-    role: RosterRole
+    role: ClassroomRole
     invite: GitHubOrgInvitation
   }> = [
     ...STAFF_ROLES.flatMap((role) =>
@@ -275,7 +278,7 @@ export function buildTeamRoster(input: BuildTeamRosterInput): TeamRosterRow[] {
     if (existingPending) {
       // A staffer already pending: the org-level list re-reports them as a
       // generic invite, but they aren't a student — don't add the "student"
-      // role. A genuine multi-team pending (e.g. instructor + ta) still unions.
+      // role. A genuine multi-team pending (e.g. teacher + ta) still unions.
       if (role !== "student") addRole(existingPending, role)
       continue
     }
@@ -359,7 +362,7 @@ export function buildTeamRoster(input: BuildTeamRosterInput): TeamRosterRow[] {
 }
 
 // Add a role to a row's set (idempotent), keeping ROLE_RANK order.
-function addRole(row: TeamRosterRow, role: RosterRole): void {
+function addRole(row: TeamRosterRow, role: ClassroomRole): void {
   if (row.roles.includes(role)) return
   row.roles = sortRolesByRank([...row.roles, role])
 }
@@ -399,7 +402,7 @@ export function rowToStudent(row: TeamRosterRow): Student {
     section: row.section,
     github_id: row.github_id,
     // Primary (highest-precedence) role as recorded metadata. roles is always
-    // non-empty and rank-sorted (instructor > ta > student).
+    // non-empty and rank-sorted (teacher > ta > student).
     role: row.roles[0],
   }
 }
@@ -452,16 +455,16 @@ export function teamMembersMissingFromCsv(
 // they aren't "missing" (teamMembersMissingFromCsv skips them because their
 // login/id is claimed), so the drift trigger would otherwise never fire for a
 // login-only row like `student1,,,,,,`. `staffMembers` is keyed by role so the
-// primary role can be derived (instructor > ta > student). Pure + testable.
+// primary role can be derived (teacher > ta > student). Pure + testable.
 export function rowsNeedingBackfill(
   members: GitHubUser[],
   staffMembers: Partial<Record<StaffRole, GitHubUser[]>>,
   students: Student[],
 ): Student[] {
   // Primary team role per id and per login (highest precedence wins).
-  const roleById = new Map<string, RosterRole>()
-  const roleByLogin = new Map<string, RosterRole>()
-  const consider = (m: GitHubUser, role: RosterRole) => {
+  const roleById = new Map<string, ClassroomRole>()
+  const roleByLogin = new Map<string, ClassroomRole>()
+  const consider = (m: GitHubUser, role: ClassroomRole) => {
     const id = String(m.id)
     const login = m.login.toLowerCase()
     if (!roleById.has(id) || ROLE_RANK[role] > ROLE_RANK[roleById.get(id)!]) {

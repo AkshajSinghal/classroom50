@@ -1,6 +1,6 @@
 import { useId, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { Plus, Send, Upload, UserMinus, X, XCircle } from "lucide-react"
+import { Plus, Send, Upload, X } from "lucide-react"
 
 import type { GitHubClient } from "@/github-core/client"
 import { ConfirmModal } from "@/components/modals"
@@ -17,7 +17,7 @@ import {
 } from "@/domain/roster/bulkUnenrollRoster"
 import { resolveTeamIdForRoleRead } from "@/domain/students"
 import { parseGitHubId } from "@/util/students"
-import { orgRoleForRole, sortRolesByRank } from "@/util/teamRoster"
+import { githubOrgRoleForRole, sortRolesByRank } from "@/util/teamRoster"
 import {
   BulkResultSection,
   type BulkPhase,
@@ -268,8 +268,8 @@ const RosterBulkActionsBar = ({
           inviteeId,
           invitationId: row.invitation_id,
           teamIds: teamId ? [teamId] : undefined,
-          // Preserve the original invite's org role (instructor -> org OWNER).
-          role: orgRoleForRole(role),
+          // Preserve the original invite's org role (teacher -> org OWNER).
+          role: githubOrgRoleForRole(role),
         })
         if (outcome.state === "invited") invited.push({ key: row.key, label })
         else skipped.push({ key: row.key, label })
@@ -465,7 +465,6 @@ const RosterBulkActionsBar = ({
                   }
                   onClick={() => setConfirmingCancel(true)}
                 >
-                  <XCircle aria-hidden="true" className="size-4" />
                   {t("students.bulk.cancelInvite")}
                 </Button>
                 <Button
@@ -480,7 +479,6 @@ const RosterBulkActionsBar = ({
                   })}
                   onClick={() => setConfirmingUnenroll(true)}
                 >
-                  <UserMinus aria-hidden="true" className="size-4" />
                   {t("students.bulk.unenroll")}
                 </Button>
               </div>

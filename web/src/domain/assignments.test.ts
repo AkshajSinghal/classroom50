@@ -632,6 +632,147 @@ describe("editAssignment (preserved-entry integration)", () => {
     ).rejects.toThrow(/runtime\.runs-on/i)
   })
 
+  it("rejects flipping empty_repo on after creation (immutable)", async () => {
+    // existingEntry has no empty_repo (false); the edit tries to enable it.
+    const { client } = makeClient()
+    await expect(
+      editAssignment(client, editInput({ empty_repo: true })),
+    ).rejects.toThrow(/empty_repo cannot be changed after creation/)
+  })
+
+  it("rejects flipping empty_repo off after creation (immutable)", async () => {
+    const bareEntry: Assignment = {
+      slug: SLUG,
+      name: "Homework 1",
+      mode: "individual",
+      autograder: "default",
+      feedback_pr: false,
+      empty_repo: true,
+    }
+    const { client } = makeBareClient(bareEntry)
+    // Form sends empty_repo: false (or omits it) — either way it's a flip.
+    await expect(
+      editAssignment(client, editInput({ empty_repo: false })),
+    ).rejects.toThrow(/empty_repo cannot be changed after creation/)
+  })
+
+  it("preserves empty_repo and forces feedback_pr off on a same-value edit", async () => {
+    const bareEntry: Assignment = {
+      slug: SLUG,
+      name: "Actions Lab",
+      mode: "individual",
+      autograder: "default",
+      feedback_pr: false,
+      empty_repo: true,
+    }
+    const { client, committedContent } = makeBareClient(bareEntry)
+
+    await editAssignment(
+      client,
+      editInput({ name: "Actions Lab (edited)", empty_repo: true }),
+    )
+
+    const written = JSON.parse(committedContent()) as {
+      assignments: Assignment[]
+    }
+    const edited = written.assignments.find((a) => a.slug === SLUG)!
+    expect(edited.empty_repo).toBe(true)
+    expect(edited.name).toBe("Actions Lab (edited)")
+    // feedback_pr stays structurally off even though the input omitted it
+    // (the ?? true default must not apply to an empty repo).
+    expect(edited.feedback_pr).toBe(false)
+  })
+
+  it("rejects grading-adjacent fields alongside empty_repo (mutual exclusion)", async () => {
+    const bareEntry: Assignment = {
+      slug: SLUG,
+      name: "Actions Lab",
+      mode: "individual",
+      autograder: "default",
+      feedback_pr: false,
+      empty_repo: true,
+    }
+    const cases: [Record<string, unknown>, RegExp][] = [
+      [{ template_repo: "acme/starter" }, /can't use a template/],
+      [{ setup_command: "make" }, /never autogrades/],
+      [{ feedback_pr: true }, /no baseline commit/],
+      [{ allowed_files: "*.py" }, /restrict allowed files/],
+      [{ pass_threshold: 70 }, /passing threshold/],
+    ]
+    for (const [overrides, want] of cases) {
+      const { client } = makeBareClient(bareEntry)
+      await expect(
+        editAssignment(client, editInput({ empty_repo: true, ...overrides })),
+      ).rejects.toThrow(want)
+    }
+  })
+
+  // Route-table client like makeClient(), but seeded with a caller-supplied
+  // existing entry (the empty_repo tests need a bare one).
+  function makeBareClient(entry: Assignment): {
+    client: GitHubClient
+    committedContent: () => string
+  } {
+    const assignmentsFile = {
+      schema: "classroom50/assignments/v1",
+      assignments: [entry],
+    }
+    const b64 = (s: string) => Buffer.from(s, "utf-8").toString("base64")
+    let committedContent = ""
+
+    const request = vi.fn(async (url: string, init?: { method?: string }) => {
+      const method = init?.method ?? "GET"
+      if (method === "GET" && /\/repos\/[^/]+\/classroom50$/.test(url)) {
+        return { default_branch: "main" }
+      }
+      if (method === "GET" && url.includes("/git/ref/heads/main")) {
+        return { object: { sha: "refsha" } }
+      }
+      if (method === "GET" && url.includes("/git/commits/refsha")) {
+        return { tree: { sha: "basetree" } }
+      }
+      if (method === "GET" && url.includes("/contents/cs50/assignments.json")) {
+        return {
+          type: "file",
+          encoding: "base64",
+          content: b64(JSON.stringify(assignmentsFile)),
+        }
+      }
+      if (method === "POST" && url.endsWith("/git/trees")) {
+        const body = (init as { body?: { tree: { content: string }[] } }).body
+        committedContent = body!.tree[0].content
+        return { sha: "newtree" }
+      }
+      if (method === "POST" && url.endsWith("/git/commits")) {
+        return { sha: "newcommit" }
+      }
+      if (method === "PATCH" && url.includes("/git/refs/heads/main")) {
+        return { object: { sha: "newcommit" } }
+      }
+      throw new Error(`unexpected request: ${method} ${url}`)
+    })
+    const requestRaw = vi.fn(async () => {
+      throw new GitHubAPIError({
+        status: 404,
+        url: "classroom.json",
+        message: "Not Found",
+        body: null,
+        rateLimit: {
+          limit: null,
+          remaining: null,
+          used: null,
+          reset: null,
+          resource: null,
+          retryAfter: null,
+        },
+      })
+    })
+    return {
+      client: { request, requestRaw } as unknown as GitHubClient,
+      committedContent: () => committedContent,
+    }
+  }
+
   it("re-validates an unchanged stored ref and blocks a now-cross-org private fork", async () => {
     // An assignment whose stored template is an in-org private fork of a private
     // cross-org upstream (created before the fork guard shipped, or a parent
@@ -704,6 +845,207 @@ describe("editAssignment (preserved-entry integration)", () => {
         editInput({ slug: SLUG, template_repo: "hw1-fork" }),
       ),
     ).rejects.toThrow(/other-org\/secret-upstream in another org/)
+  })
+})
+
+describe("grantTeamTemplateRead (TA staff team eager grant)", () => {
+  const ORG = "cs50"
+  const CLASSROOM = "cs50"
+  const SLUG = "hw1"
+  const b64 = (s: string) => Buffer.from(s, "utf-8").toString("base64")
+
+  // Drives editAssignment down the in-org-private-template grant path and
+  // records every team-repo PUT so a test can assert which teams got read on
+  // the template. classroomJson controls the recorded team/teams block.
+  function makeGrantClient(opts: {
+    classroomJson: Record<string, unknown>
+    taGrantThrows?: boolean
+    // Visibility/kind of the template the edit resolves to. Defaults to a
+    // private in-org template repo (the grant path). Set private:false to model
+    // a public template (no grant), or isTemplate:false to model a non-template.
+    templatePrivate?: boolean
+    templateIsTemplate?: boolean
+  }): { client: GitHubClient; grants: () => string[] } {
+    const grants: string[] = []
+    const templatePrivate = opts.templatePrivate ?? true
+    const templateIsTemplate = opts.templateIsTemplate ?? true
+    // Serve a repo read for BOTH the changed ref (tmpl-v2) and the stored ref
+    // (tmpl), so a test can drive either the changed-ref or the unchanged-ref
+    // branch of buildAssignmentEntry.
+    const makeRepo = (name: string) => ({
+      name,
+      full_name: `${ORG}/${name}`,
+      private: templatePrivate,
+      is_template: templateIsTemplate,
+      default_branch: "main",
+    })
+    const assignmentsFile = {
+      schema: "classroom50/assignments/v1",
+      assignments: [
+        {
+          slug: SLUG,
+          name: "Homework 1",
+          mode: "individual",
+          autograder: "default",
+          feedback_pr: true,
+          template: { owner: ORG, repo: "tmpl", branch: "main" },
+        },
+      ],
+    }
+
+    const request = vi.fn(async (url: string, init?: { method?: string }) => {
+      const method = init?.method ?? "GET"
+      // Team-repo grant PUT: /orgs/{org}/teams/{slug}/repos/{owner}/{repo}
+      const grantMatch = url.match(/\/orgs\/[^/]+\/teams\/([^/]+)\/repos\//)
+      if (method === "PUT" && grantMatch) {
+        if (grantMatch[1].endsWith("-ta") && opts.taGrantThrows) {
+          throw new GitHubAPIError({
+            status: 500,
+            url,
+            message: "boom",
+            body: null,
+            rateLimit: {
+              limit: null,
+              remaining: null,
+              used: null,
+              reset: null,
+              resource: null,
+              retryAfter: null,
+            },
+          })
+        }
+        grants.push(grantMatch[1])
+        return {}
+      }
+      if (/\/repos\/[^/]+\/classroom50$/.test(url))
+        return { default_branch: "main" }
+      if (url.includes("/git/ref/heads/main")) return { object: { sha: "s" } }
+      if (url.includes("/git/commits/s")) return { tree: { sha: "t" } }
+      if (url.includes("/contents/cs50/assignments.json")) {
+        return {
+          type: "file",
+          encoding: "base64",
+          content: b64(JSON.stringify(assignmentsFile)),
+        }
+      }
+      if (url.includes(`/repos/${ORG}/tmpl-v2`)) return makeRepo("tmpl-v2")
+      if (/\/repos\/[^/]+\/tmpl(\?|$)/.test(url)) return makeRepo("tmpl")
+      if (url.endsWith("/git/trees")) return { sha: "newtree" }
+      if (url.endsWith("/git/commits")) return { sha: "newcommit" }
+      if (method === "PATCH" && url.includes("/git/refs/heads/main"))
+        return { object: { sha: "newcommit" } }
+      throw new Error(`unexpected request: ${method} ${url}`)
+    })
+
+    // getClassroomJson (requestRaw) returns the recorded team block; the
+    // archive guard reads the same body (active by default).
+    const requestRaw = vi.fn(async () => JSON.stringify(opts.classroomJson))
+
+    return {
+      client: { request, requestRaw } as unknown as GitHubClient,
+      grants: () => grants,
+    }
+  }
+
+  // `template_repo` defaults to a CHANGED ref (tmpl-v2 vs stored tmpl); pass
+  // "tmpl" to exercise the unchanged-ref re-affirm branch.
+  function editInput(templateRepo = "tmpl-v2") {
+    return {
+      org: ORG,
+      classroom: CLASSROOM,
+      slug: SLUG,
+      name: "Homework 1",
+      description: "",
+      template_repo: templateRepo,
+      due_date: "",
+      mode: "individual",
+      max_group_size: 0,
+      tests: [],
+    } as unknown as Parameters<typeof editAssignment>[1]
+  }
+
+  it("grants both the student team and the TA staff team on a private in-org template", async () => {
+    const { client, grants } = makeGrantClient({
+      classroomJson: {
+        schema: "classroom50/classroom/v1",
+        short_name: CLASSROOM,
+        team: { id: 7, slug: "classroom50-cs50" },
+        teams: { ta: { id: 9, slug: "classroom50-cs50-ta" } },
+      },
+    })
+
+    const result = await editAssignment(client, editInput())
+
+    expect(result.templateGrantWarning).toBeUndefined()
+    expect(grants()).toEqual(["classroom50-cs50", "classroom50-cs50-ta"])
+  })
+
+  it("grants only the student team when no TA team is recorded", async () => {
+    const { client, grants } = makeGrantClient({
+      classroomJson: {
+        schema: "classroom50/classroom/v1",
+        short_name: CLASSROOM,
+        team: { id: 7, slug: "classroom50-cs50" },
+      },
+    })
+
+    const result = await editAssignment(client, editInput())
+
+    expect(result.templateGrantWarning).toBeUndefined()
+    expect(grants()).toEqual(["classroom50-cs50"])
+  })
+
+  it("keeps the edit successful when the TA grant fails (non-blocking)", async () => {
+    const { client, grants } = makeGrantClient({
+      classroomJson: {
+        schema: "classroom50/classroom/v1",
+        short_name: CLASSROOM,
+        team: { id: 7, slug: "classroom50-cs50" },
+        teams: { ta: { id: 9, slug: "classroom50-cs50-ta" } },
+      },
+      taGrantThrows: true,
+    })
+
+    const result = await editAssignment(client, editInput())
+
+    // Student grant landed; TA failure did not surface as a save warning.
+    expect(result.templateGrantWarning).toBeUndefined()
+    expect(grants()).toEqual(["classroom50-cs50"])
+  })
+
+  it("re-affirms the grant on an UNCHANGED in-org private template ref", async () => {
+    const { client, grants } = makeGrantClient({
+      classroomJson: {
+        schema: "classroom50/classroom/v1",
+        short_name: CLASSROOM,
+        team: { id: 7, slug: "classroom50-cs50" },
+        teams: { ta: { id: 9, slug: "classroom50-cs50-ta" } },
+      },
+    })
+
+    // Same owner/repo/branch as the stored template (tmpl) — the unchanged-ref
+    // branch. It must still re-affirm both teams so a dropped grant is repaired.
+    const result = await editAssignment(client, editInput("tmpl"))
+
+    expect(result.templateGrantWarning).toBeUndefined()
+    expect(grants()).toEqual(["classroom50-cs50", "classroom50-cs50-ta"])
+  })
+
+  it("does not grant on an unchanged PUBLIC template ref", async () => {
+    const { client, grants } = makeGrantClient({
+      classroomJson: {
+        schema: "classroom50/classroom/v1",
+        short_name: CLASSROOM,
+        team: { id: 7, slug: "classroom50-cs50" },
+        teams: { ta: { id: 9, slug: "classroom50-cs50-ta" } },
+      },
+      templatePrivate: false,
+    })
+
+    const result = await editAssignment(client, editInput("tmpl"))
+
+    expect(result.templateGrantWarning).toBeUndefined()
+    expect(grants()).toEqual([])
   })
 })
 
@@ -1218,6 +1560,19 @@ describe("permissionSatisfies — verified founder demotion", () => {
   it("rejects an under-grant (read only) for a push target", () => {
     expect(permissionSatisfies("read", "read", "push")).toBe(false)
   })
+
+  it("tolerates an owner's unavoidable admin for a push target when isOwner", () => {
+    expect(permissionSatisfies("admin", "admin", "push", true)).toBe(true)
+    expect(permissionSatisfies("admin", undefined, "push", true)).toBe(true)
+  })
+
+  it("still rejects a maintain read-back for a push target even for an owner", () => {
+    expect(permissionSatisfies("write", "maintain", "push", true)).toBe(false)
+  })
+
+  it("does not let isOwner leak into an admin target", () => {
+    expect(permissionSatisfies("write", "maintain", "admin", true)).toBe(false)
+  })
 })
 
 // Drives addFounderCollaborator end-to-end (PUT grant -> read-back -> throw),
@@ -1309,6 +1664,27 @@ describe("addFounderCollaborator — grant + read-back verification", () => {
         permission: "push",
       }),
     ).rejects.toThrow(/"push"/)
+  })
+
+  it("resolves for an org owner whose read-back stays admin after a push grant", async () => {
+    const { client, request } = makeClient({
+      permission: "admin",
+      role_name: "admin",
+    })
+    await expect(
+      addFounderCollaborator({
+        client,
+        owner,
+        repo,
+        username,
+        permission: "push",
+        isOwner: true,
+      }),
+    ).resolves.toBeUndefined()
+    expect(request).toHaveBeenCalledWith(collabPath, {
+      method: "PUT",
+      body: { permission: "push" },
+    })
   })
 })
 
@@ -1444,5 +1820,67 @@ describe("resolveAutograderWorkflow default shim branch templating", () => {
         configBranch: "main",
       }),
     ).resolves.toContain('branches: ["main"]')
+  })
+})
+
+describe("createAssignmentRepo (bare / empty_repo)", () => {
+  // The empty_repo wire contract: a bare create POSTs auto_init:false (no
+  // initial commit, no branches) and returns the dedicated kind:"bare" so no
+  // caller trusts a default_branch or attempts a commit. Mirrors the CLI's
+  // TestCreateEmptyPrivateAssignmentRepoInOrg_Bare.
+  function makeClient() {
+    let createBody: Record<string, unknown> | undefined
+    const request = vi.fn(async (url: string, init?: unknown) => {
+      const method = (init as { method?: string })?.method ?? "GET"
+      if (method === "POST" && url === "/orgs/cs50/repos") {
+        createBody = (init as { body?: Record<string, unknown> }).body
+        return {
+          name: "cs101-actions-lab-alice",
+          full_name: "cs50/cs101-actions-lab-alice",
+          html_url: "https://github.com/cs50/cs101-actions-lab-alice",
+          ssh_url: "git@github.com:cs50/cs101-actions-lab-alice.git",
+          default_branch: "main",
+        }
+      }
+      throw new Error(`unexpected request: ${method} ${url}`)
+    })
+    return {
+      client: { request } as unknown as GitHubClient,
+      getCreateBody: () => createBody,
+    }
+  }
+
+  it("bare:true POSTs auto_init:false and returns kind:bare", async () => {
+    const { client, getCreateBody } = makeClient()
+
+    const result = await createAssignmentRepo({
+      client,
+      owner: "cs50",
+      name: "cs101-actions-lab-alice",
+      fallbackBranch: "main",
+      bare: true,
+    })
+
+    expect(getCreateBody()).toMatchObject({ auto_init: false, private: true })
+    expect(result.kind).toBe("bare")
+  })
+
+  it("without bare, POSTs auto_init:true (the shim-only path)", async () => {
+    const { client, getCreateBody } = makeClient()
+
+    // The non-bare template-less path commits control files after create; here
+    // we only assert the create body's auto_init, so the follow-up commit
+    // requests are irrelevant (the create response drives kind resolution).
+    await createAssignmentRepo({
+      client,
+      owner: "cs50",
+      name: "cs101-actions-lab-alice",
+      fallbackBranch: "main",
+    }).catch(() => {
+      // The full non-bare flow makes further requests this minimal mock
+      // doesn't stub; the create body assertion below is what matters.
+    })
+
+    expect(getCreateBody()).toMatchObject({ auto_init: true })
   })
 })

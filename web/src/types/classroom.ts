@@ -15,8 +15,11 @@ export type Classroom = {
   team?: TeamRef
   // Per-classroom GitHub staff teams backing in-app roles. Each is a `secret`
   // team `classroom50-<short_name>-<role>` granted config-repo write, ensured
-  // on touch. Absent on classrooms created before this feature.
+  // on touch. Absent on classrooms created before this feature. `instructor`
+  // is the legacy name for `teacher`, kept for backward-compatible reads during
+  // the rename migration; writers prefer `teacher`.
   teams?: {
+    teacher?: TeamRef
     instructor?: TeamRef
     ta?: TeamRef
   }
@@ -34,11 +37,25 @@ export type TeamRef = {
   slug: string
 }
 
-// The two staff roles modeled as per-classroom GitHub teams, named
-// `classroom50-<short_name>-<StaffRole>`.
-export type StaffRole = "instructor" | "ta"
+// The staff roles modeled as per-classroom GitHub teams, named
+// `classroom50-<short_name>-<StaffRole>`. `teacher` is canonical; `instructor`
+// is its legacy alias, retained so pre-rename classrooms (whose team slug and
+// `teams.instructor` ref say "instructor") still resolve. New teams/writes use
+// `teacher`; reads accept either.
+export type StaffRole = "teacher" | "instructor" | "ta"
 
-export const STAFF_ROLES: readonly StaffRole[] = ["instructor", "ta"]
+// The canonical staff roles used for creation, enumeration, and slug parsing.
+// `teacher` first (top precedence); the legacy `instructor` is intentionally
+// absent — reads fall back to it explicitly where needed.
+export const STAFF_ROLES: readonly StaffRole[] = ["teacher", "ta"]
+
+// Every staff role including the legacy `instructor` alias — for slug parsing
+// that must still recognize a pre-rename `-instructor` team.
+export const STAFF_ROLES_WITH_LEGACY: readonly StaffRole[] = [
+  "teacher",
+  "instructor",
+  "ta",
+]
 
 // Archived when `active` is explicitly false (see the `active` field).
 export const isClassroomArchived = (cl: { active?: boolean }): boolean =>
@@ -88,6 +105,12 @@ export type Assignment = {
   autograder: string
   max_group_size?: number
   feedback_pr?: boolean
+  // Truly bare student repos: accept creates the repo with no initial commit
+  // and NO control files (no .classroom50.yaml, no autograde workflow), so the
+  // assignment never autogrades and the Feedback PR is off. Mutually exclusive
+  // with template/tests/feedback_pr/allowed_files/pass_threshold and IMMUTABLE
+  // after creation. Omitted when false (CLI omitempty); absent reads as false.
+  empty_repo?: boolean
   // Mirrors classroom50/assignments/v1's `runtime` block and the CLI's
   // RuntimeRef. `runs-on`/`container` select the runner; python/node/java/go/rust
   // pick the setup-X toolchain version the autograder provisions; apt installs
@@ -119,6 +142,15 @@ export type Assignment = {
   tests?: AssignmentTest[]
   // CLI migrate provenance. The GUI doesn't write it but must round-trip it.
   migrated_from?: MigratedFrom
+}
+
+// Trimmed assignment description, or "" when absent. assignments.json is read
+// with an unchecked `as` cast, so a teacher-authored non-string `description:`
+// (a YAML block/list/number) would otherwise reach `.trim()` and throw during
+// render; coercing at this boundary keeps every student surface safe.
+export function assignmentDescription(assignment?: Assignment): string {
+  const value = assignment?.description
+  return typeof value === "string" ? value.trim() : ""
 }
 
 // classroom50/assignments/v1 `migrated_from`.
@@ -174,9 +206,10 @@ export type AssignmentTest = {
 // The roster's identity/metadata columns — the classroom GitHub team is the
 // source of truth for enrollment, so the email-first onboarding lifecycle
 // columns were pruned. `role` is best-effort recorded metadata
-// (instructor/ta/student, or ""), refreshed from the classroom's GitHub teams
-// on sync; nothing reads it for logic. A data contract shared with the
-// gh-teacher CLI and the Python collector; all three moved in lockstep.
+// (teacher/ta/student, the legacy "instructor", or ""), refreshed from the
+// classroom's GitHub teams on sync; nothing reads it for logic. A data contract
+// shared with the gh-teacher CLI and the Python collector; all moved in
+// lockstep.
 export type Student = {
   username: string
   first_name: string

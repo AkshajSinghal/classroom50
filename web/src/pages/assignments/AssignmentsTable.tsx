@@ -1,23 +1,26 @@
 import { useNavigate } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
-import { Copy, Eye, Pencil, Trash2, UserRound, UsersRound } from "lucide-react"
+import {
+  Copy,
+  Eye,
+  Pencil,
+  ShieldCheck,
+  Trash2,
+  UserRound,
+  UsersRound,
+} from "lucide-react"
 
-import GitHub from "@/assets/github.svg?react"
 import useGetScores from "@/hooks/useGetScores"
 import { formatDueDate } from "@/util/formatDate"
-import { githubTemplateRepoUrl } from "@/util/orgUrl"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { ConfirmModal } from "@/components/modals"
 import { ReuseAssignmentModal } from "@/components/modals/ReuseAssignmentModal"
+import { TemplateAccessModal } from "@/components/modals/TemplateAccessModal"
 import { githubKeys } from "@/github-core/queries"
 import { CONFIG_REPO } from "@/util/configRepo"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
-import {
-  deleteAssignment,
-  type DeleteAssignmentInput,
-} from "@/domain/assignments"
-import { useGitHubClient } from "@/context/github/GitHubProvider"
+import { useQueryClient } from "@tanstack/react-query"
+import { useDeleteAssignment } from "@/hooks/mutations/useDeleteAssignment"
 import type { Assignment } from "@/types/classroom"
 import { EnterDiv } from "@/lib/motionComponents"
 import { Badge, Button } from "@/components/ui"
@@ -34,13 +37,8 @@ const DeleteAssignmentButton = ({
   onDeleteAssignment: () => void
 }) => {
   const { t } = useTranslation()
-  const client = useGitHubClient()
   const [open, setOpen] = useState(false)
-  const deleteAssignmentMutation = useMutation({
-    mutationFn: (input: DeleteAssignmentInput) =>
-      deleteAssignment(client, input),
-    onSuccess: () => onDeleteAssignment(),
-  })
+  const deleteAssignmentMutation = useDeleteAssignment()
 
   return (
     <>
@@ -124,6 +122,52 @@ const ReuseAssignmentButton = ({
 
       {open ? (
         <ReuseAssignmentModal
+          org={org}
+          classroom={classroom}
+          assignment={assignment}
+          onClose={() => setOpen(false)}
+        />
+      ) : null}
+    </>
+  )
+}
+
+// Per-row "Template access": opens a modal to review which template repo the
+// assignment uses and which GitHub teams can read it, and (org owners only)
+// re-grant the classroom student/TA teams read — the acceptance-blocking fix
+// from issue #305. Merges the former source-repo link and fix-access button.
+const TemplateAccessButton = ({
+  org,
+  classroom,
+  assignment,
+}: {
+  org: string
+  classroom: string
+  assignment: Assignment
+}) => {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  if (!assignment.template) return null
+
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="sm"
+        shape="circle"
+        title={t("assignments.template.accessModal.triggerTitle")}
+        aria-label={t("assignments.template.accessModal.triggerAria", {
+          name: assignment.name || assignment.slug,
+        })}
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen(true)
+        }}
+      >
+        <ShieldCheck aria-hidden="true" className="size-4" />
+      </Button>
+      {open ? (
+        <TemplateAccessModal
           org={org}
           classroom={classroom}
           assignment={assignment}
@@ -324,27 +368,6 @@ const AssignmentsTable = ({
                   })()}
                 </td>
                 <td>
-                  {assignment.template && (
-                    <a
-                      href={githubTemplateRepoUrl(
-                        assignment.template.owner,
-                        assignment.template.repo,
-                        assignment.template.branch,
-                      )}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="btn btn-circle btn-sm btn-ghost"
-                      title={t("assignments.table.sourceRepoTitle")}
-                      aria-label={t("assignments.table.sourceRepoAria", {
-                        name: assignment.name || assignment.slug,
-                      })}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                      }}
-                    >
-                      <GitHub aria-hidden="true" className="size-4" />
-                    </a>
-                  )}
                   <Link
                     className="btn btn-circle btn-sm btn-ghost"
                     to="/$org/$classroom/assignments/$assignment/edit"
@@ -368,13 +391,30 @@ const AssignmentsTable = ({
                       <Pencil aria-hidden="true" className="size-4" />
                     )}
                   </Link>
-                  {archived ? null : (
+                  {archived ? (
+                    // Archived rows are view-only, but reviewing template access
+                    // (and reaching the source repo) stays available.
+                    assignment.template && (
+                      <TemplateAccessButton
+                        org={org}
+                        classroom={classroom}
+                        assignment={assignment}
+                      />
+                    )
+                  ) : (
                     <>
                       <ReuseAssignmentButton
                         org={org}
                         classroom={classroom}
                         assignment={assignment}
                       />
+                      {assignment.template && (
+                        <TemplateAccessButton
+                          org={org}
+                          classroom={classroom}
+                          assignment={assignment}
+                        />
+                      )}
                       <DeleteAssignmentButton
                         org={org}
                         classroom={classroom}

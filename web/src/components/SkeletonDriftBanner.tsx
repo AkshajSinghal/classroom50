@@ -1,21 +1,20 @@
 import { useEffect, useRef, useState } from "react"
 import { useParams } from "@tanstack/react-router"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { CheckCircle2, FileWarning } from "lucide-react"
 import { AnimatePresence } from "motion/react"
 import { useTranslation } from "react-i18next"
 
 import { AppBanner } from "@/components/AppBanner"
-import { useGitHubClient } from "@/context/github/GitHubProvider"
-import { ensureSkeletonFiles } from "@/github-core/mutations"
-import type { StaleSkeletonFile } from "@/github-core/mutations"
-import { githubKeys } from "@/github-core/queries"
+import {
+  useFixSkeletonDrift,
+  isFixResolvedClean,
+} from "@/hooks/mutations/useFixSkeletonDrift"
 import { useSkeletonDrift } from "@/hooks/useSkeletonDrift"
 import { useSafeSubmit } from "@/hooks/useSafeSubmit"
 import {
   SkeletonOverwriteModal,
   useSkeletonOverwriteConfirm,
-} from "@/pages/orgSettings/skeletonOverwriteUi"
+} from "@/components/skeletonOverwrite/skeletonOverwriteUi"
 import { Button } from "@/components/ui"
 
 export type DriftBannerView = "warning" | "success" | "hidden"
@@ -53,17 +52,6 @@ export function resolveDriftBannerView(
   return "hidden"
 }
 
-// A fix leaves the org clean only when it completed and skipped nothing; a
-// declined overwrite leaves skippedOverwrite non-empty and must stay on the
-// warning view. Pure so the result-contract mapping is testable (mirrors
-// resolveSkeletonDrift), independent of the component's async wiring.
-export function isFixResolvedClean(result: {
-  status: string
-  skippedOverwrite: string[]
-}): boolean {
-  return result.status === "complete" && result.skippedOverwrite.length === 0
-}
-
 // Global warning banner for an org owner when the `classroom50` config repo's
 // scaffolded workflows have drifted from the bundled skeleton (e.g. after an
 // action-pin bump). Self-service: the owner refreshes the drifted files inline
@@ -82,8 +70,6 @@ export function SkeletonDriftBanner() {
   const [dismissedOrg, setDismissedOrg] = useState<string>()
   const { t } = useTranslation()
 
-  const client = useGitHubClient()
-  const queryClient = useQueryClient()
   const runFix = useSafeSubmit()
 
   // The org whose fix just completed with nothing left drifted. Drives the green
@@ -113,30 +99,7 @@ export function SkeletonDriftBanner() {
     return () => resolveOverwriteRef.current(false)
   }, [org])
 
-  const mutation = useMutation({
-    // org is captured as a mutate variable so onSuccess attributes the result to
-    // the org the fix actually ran against, not the live param (which can change
-    // if the owner navigates while the run is in flight).
-    mutationFn: (targetOrg: string) =>
-      ensureSkeletonFiles(client, targetOrg, confirmSkeletonOverwrite),
-    onSuccess: (result, targetOrg) => {
-      if (!mountedRef.current) return
-      const key = githubKeys.skeletonDrift(targetOrg)
-      // A declined overwrite leaves files drifted -> stay on the warning view.
-      if (isFixResolvedClean(result)) {
-        setFixedCleanOrg(targetOrg)
-        // Seed the drift cache as clean directly. A post-commit tree read is
-        // eventually consistent and would refetch the old (drifted) SHAs, so
-        // invalidating here could re-flash the warning on the next mount.
-        queryClient.setQueryData<StaleSkeletonFile[]>(key, [])
-      } else {
-        void queryClient.invalidateQueries({ queryKey: key })
-      }
-    },
-    onSettled: () => {
-      if (mountedRef.current) setPendingOrg(undefined)
-    },
-  })
+  const mutation = useFixSkeletonDrift(confirmSkeletonOverwrite)
 
   const view = resolveDriftBannerView({
     hasOrg: Boolean(org),
@@ -204,8 +167,28 @@ export function SkeletonDriftBanner() {
                   disabled={pendingOrg === org}
                   onClick={() => {
                     if (org && pendingOrg !== org) {
-                      setPendingOrg(org)
-                      void runFix(() => mutation.mutateAsync(org))
+                      const targetOrg = org
+                      setPendingOrg(targetOrg)
+                      // Guard call-site UI state on mountedRef: these run
+                      // through useSafeSubmit, so treat the callbacks as
+                      // possibly firing after unmount and skip stale setState.
+                      void runFix(() =>
+                        mutation.mutateAsync(targetOrg, {
+                          onSuccess: (result) => {
+                            // Success view only; the cache reconcile is the
+                            // hook's job (and runs even if we've unmounted).
+                            if (
+                              mountedRef.current &&
+                              isFixResolvedClean(result)
+                            ) {
+                              setFixedCleanOrg(targetOrg)
+                            }
+                          },
+                          onSettled: () => {
+                            if (mountedRef.current) setPendingOrg(undefined)
+                          },
+                        }),
+                      )
                     }
                   }}
                 >

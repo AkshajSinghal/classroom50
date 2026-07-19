@@ -4,8 +4,7 @@ import { useGitHubClient } from "@/context/github/GitHubProvider"
 import { findStaleSkeletonFiles } from "@/github-core/mutations"
 import { githubKeys } from "@/github-core/queries"
 import useGetOwnOrgMembership from "@/hooks/useGetOwnOrgMembership"
-import { resolveOrgRole } from "@/util/resolveRole"
-import { can } from "@/util/capabilities"
+import { resolveOrgRole, can } from "@/authz"
 
 // State subset the verdict depends on — structural so the fail-open logic stays
 // a pure, testable function.
@@ -29,20 +28,21 @@ export function resolveSkeletonDrift(input: SkeletonDriftInput): boolean {
 // read-only — no version marker.
 //
 // Gated on org owner (admin), not any staff: the banner routes to the owner-only
-// Re-run org setup section, so surfacing it to a TA/non-owner instructor would
+// Re-run org setup section, so surfacing it to a TA/non-owner teacher would
 // dead-end their CTA on a NotFound.
 export function useSkeletonDrift(org: string | undefined) {
   const client = useGitHubClient()
-  // Resolve the role from the membership read, not useOrgRole(): this banner
-  // mounts above the OrgRoleProvider, so the context would always be unresolved.
+  // Resolve the role from the membership read, not useGitHubOrgRole(): this
+  // banner mounts above the GitHubOrgRoleProvider, so the context would always
+  // be unresolved.
   const membership = useGetOwnOrgMembership(org)
-  const orgRole = resolveOrgRole({
+  const githubOrgRole = resolveOrgRole({
     isSuccess: membership.isSuccess,
     role: membership.data?.role,
     state: membership.data?.state,
     error: membership.error,
   })
-  const isOwner = can("manageOrg", { orgRole })
+  const isOwner = can("manageOrg", { githubOrgRole })
 
   const query = useQuery({
     queryKey: githubKeys.skeletonDrift(org ?? ""),

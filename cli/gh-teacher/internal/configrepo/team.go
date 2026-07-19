@@ -43,22 +43,34 @@ type TeamRef struct {
 type StaffRole string
 
 const (
+	RoleTeacher StaffRole = "teacher"
+	RoleTA      StaffRole = "ta"
+	// RoleInstructor is the legacy name for RoleTeacher, kept so pre-rename
+	// classrooms (whose team slug + `teams.instructor` ref say "instructor")
+	// still resolve. New writes use RoleTeacher; reads accept either.
 	RoleInstructor StaffRole = "instructor"
-	RoleTA         StaffRole = "ta"
 )
 
-// StaffRoles is every staff role, in a stable order (instructor first).
-var StaffRoles = []StaffRole{RoleInstructor, RoleTA}
+// StaffRoles is every CANONICAL staff role, in a stable order (teacher first).
+// The legacy RoleInstructor is intentionally absent — creation and enumeration
+// use the canonical set, while reads fall back to the legacy team via
+// ResolveClassroomStaffTeam.
+var StaffRoles = []StaffRole{RoleTeacher, RoleTA}
 
-// StaffTeamRepoPermissions maps a staff role to the repo permission
-// collect-scores grants that role's team on each student assignment repo and on
-// private in-org templates. Source of truth for the collector's hand-mirrored
-// STAFF_TEAM_PERMISSIONS (collect_scores.py) — keep the two in lockstep.
+// StaffTeamRepoPermissions maps a staff role to the repo permission a staff
+// team gets on each student assignment repo and on private in-org templates.
+// The TA-team template read is applied at TWO points: eagerly at assignment
+// add/reuse and classroom migrate (see grantStaffTeamTemplateRead / migrate.go),
+// and again as an idempotent re-affirm at collect-scores. The eager sites use
+// this map only as a presence gate and hardcode read (GrantTeamRepoRead);
+// collect-scores reads the value. Source of truth for the collector's
+// hand-mirrored STAFF_TEAM_PERMISSIONS (collect_scores.py) — keep in lockstep.
 //
-// A role absent from this map is granted nothing (the instructor team already
-// gets its access at classroom setup, so only the TA team needs a collect-time
-// grant today). Adding a future head-TA write team is a one-line addition here
-// and in the mirror.
+// A role absent from this map is granted nothing (the teacher team already
+// gets its access at classroom setup, so only the TA team needs a grant today).
+// Adding a future non-read staff permission is a one-line addition here and in
+// the mirror, but would also need the eager sites to consume the value instead
+// of hardcoding read.
 var StaffTeamRepoPermissions = map[StaffRole]string{
 	RoleTA: "pull",
 }
@@ -70,8 +82,11 @@ func staffTeamName(shortName string, role StaffRole) string {
 }
 
 // StaffTeamsRef holds the per-classroom staff team refs the web GUI persists
-// under classroom.json `teams`. Mirrors classroom-v1's `teams` $def.
+// under classroom.json `teams`. Mirrors classroom-v1's `teams` $def. `Teacher`
+// is the canonical staff team; `Instructor` is the legacy pre-rename ref, read
+// as a fallback and migrated to `Teacher` on touch.
 type StaffTeamsRef struct {
+	Teacher    *TeamRef `json:"teacher,omitempty"`
 	Instructor *TeamRef `json:"instructor,omitempty"`
 	TA         *TeamRef `json:"ta,omitempty"`
 }
@@ -105,8 +120,13 @@ func ResolveClassroomStaffTeam(client githubapi.Client, org, shortName, ref stri
 	}
 	var team *TeamRef
 	switch role {
-	case RoleInstructor:
-		team = c.Teams.Instructor
+	case RoleTeacher, RoleInstructor:
+		// Prefer the canonical teacher ref; fall back to the legacy
+		// instructor ref so pre-rename classrooms still resolve.
+		team = c.Teams.Teacher
+		if team == nil || team.Slug == "" {
+			team = c.Teams.Instructor
+		}
 	case RoleTA:
 		team = c.Teams.TA
 	}
@@ -136,15 +156,21 @@ func CanonicalTeamSlugShortName(shortName string) bool {
 // rostered students read on private org-owned templates so `student accept`
 // can generate their repo.
 //
+// `description` is the classroom50/team/v1 bootstrap record (see
+// MarshalTeamDescription) written into the team so a plain student can
+// enumerate their classrooms and read the capability secret without config-repo
+// access. Safe because the team is `secret` (members + owners only). Pass ""
+// to leave the description unset.
+//
 // `members_can_create_teams: false` (init's lockdown) doesn't block this — the
 // teacher authenticates as an org owner.
-func EnsureClassroomTeam(client githubapi.Client, org, shortName string) (TeamRef, error) {
+func EnsureClassroomTeam(client githubapi.Client, org, shortName, description string) (TeamRef, error) {
 	// Guard the slug==name invariant (see CanonicalTeamSlugShortName):
 	// ShortNamePattern alone permits hyphens GitHub would slugify away.
 	if !CanonicalTeamSlugShortName(shortName) {
 		return TeamRef{}, fmt.Errorf("classroom short-name %q can't back a GitHub team — remove consecutive or trailing hyphens (GitHub would rewrite the team slug, breaking membership and template grants)", shortName)
 	}
-	return ensureSecretTeamByName(client, org, classroomTeamName(shortName))
+	return ensureSecretTeamByName(client, org, classroomTeamName(shortName), description)
 }
 
 // EnsureClassroomStaffTeam creates (or adopts) the per-classroom STAFF team for
@@ -154,10 +180,12 @@ func EnsureClassroomStaffTeam(client githubapi.Client, org, shortName string, ro
 	if !CanonicalTeamSlugShortName(shortName) {
 		return TeamRef{}, fmt.Errorf("classroom short-name %q can't back a GitHub team — remove consecutive or trailing hyphens (GitHub would rewrite the team slug, breaking staff membership and config-repo grants)", shortName)
 	}
-	return ensureSecretTeamByName(client, org, staffTeamName(shortName, role))
+	// Staff teams carry no bootstrap description: staff read the authoritative
+	// classroom.json directly, and the secret belongs only on the student team.
+	return ensureSecretTeamByName(client, org, staffTeamName(shortName, role), "")
 }
 
-// EnsureStaffTeams creates (or adopts) both staff teams (instructor, ta) and
+// EnsureStaffTeams creates (or adopts) both staff teams (teacher, ta) and
 // grants each `push` on the org's `classroom50` config repo so staff can author
 // assignments. Returns the refs to record under classroom.json `teams`.
 // Mirrors the web's ensureStaffTeams.
@@ -172,8 +200,8 @@ func EnsureStaffTeams(client githubapi.Client, org, shortName string) (*StaffTea
 			return nil, fmt.Errorf("grant %s staff team write on %s: %w", role, ConfigRepoName, err)
 		}
 		switch role {
-		case RoleInstructor:
-			refs.Instructor = &team
+		case RoleTeacher:
+			refs.Teacher = &team
 		case RoleTA:
 			refs.TA = &team
 		}
@@ -181,17 +209,94 @@ func EnsureStaffTeams(client githubapi.Client, org, shortName string) (*StaffTea
 	return refs, nil
 }
 
+// ReconcileClassroomTeamDescription re-derives the classroom50/team/v1 bootstrap
+// record from the authoritative classroom.json at `ref` and PATCHes it onto the
+// SECRET student team's description when it drifts — the CLI counterpart of the
+// web's reconcileStudentTeamDescription. The record is a PROJECTION of
+// classroom.json, so a name/term/secret/active change must be re-projected here;
+// classroom `add` writes it at create, but `edit`/`archive`/`unarchive` mutate
+// only classroom.json and would otherwise leave a student seeing a stale title.
+//
+// Best-effort and idempotent: resolves the team by its authoritative slug
+// (classroom.json `team.slug`, else derived), and only PATCHes a `secret` team
+// whose description differs. A missing team block, a non-secret team, a 404, or
+// an unchanged description is a no-op — never an error that fails the edit
+// (matching the web reconcile's skip-don't-expose posture). Returns whether a
+// PATCH was applied.
+func ReconcileClassroomTeamDescription(client githubapi.Client, org, shortName, ref string) (changed bool, err error) {
+	c, ok, err := LoadClassroom(client, org, shortName, ref)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, nil
+	}
+
+	desired, err := MarshalTeamDescription(c.Name, c.Term, c.Secret, !c.IsArchived())
+	if err != nil {
+		return false, err
+	}
+
+	// The persisted slug is authoritative (GitHub may re-slug on collision);
+	// fall back to the derived slug for a pre-team-ref classroom.
+	slug := classroomTeamSlug(shortName)
+	if c.Team != nil && c.Team.Slug != "" {
+		slug = c.Team.Slug
+	}
+
+	getPath := fmt.Sprintf("orgs/%s/teams/%s", url.PathEscape(org), url.PathEscape(slug))
+	var existing struct {
+		Slug        string `json:"slug"`
+		Privacy     string `json:"privacy"`
+		Description string `json:"description"`
+	}
+	if err := client.Get(getPath, &existing); err != nil {
+		// A 404 (wrong derived slug / deleted team) is a skip, not a failure:
+		// the projection just can't be reconciled from here.
+		if cliutil.IsHTTPStatus(err, http.StatusNotFound) {
+			return false, nil
+		}
+		return false, fmt.Errorf("GET %s (reconcile team description): %w", getPath, err)
+	}
+
+	// Only ever write the record (which may carry the capability secret) onto a
+	// `secret` team, so it can't leak via a `closed` team's description. A
+	// non-secret team is a misconfiguration the adopt path reconciles; skip here.
+	if existing.Privacy != "secret" || existing.Description == desired {
+		return false, nil
+	}
+
+	patch, err := json.Marshal(map[string]any{"description": desired})
+	if err != nil {
+		return false, fmt.Errorf("encode team description patch: %w", err)
+	}
+	patchPath := fmt.Sprintf("orgs/%s/teams/%s", url.PathEscape(org), url.PathEscape(existing.Slug))
+	resp, err := client.Request(http.MethodPatch, patchPath, bytes.NewReader(patch))
+	if err != nil {
+		return false, fmt.Errorf("PATCH %s (reconcile team description): %w", patchPath, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return true, nil
+}
+
 // ensureSecretTeamByName creates a `secret` GitHub team named `name`,
 // adopting an existing team of the same name rather than failing. `name` is a
-// canonical short-name-derived value, so its slug equals the name.
+// canonical short-name-derived value, so its slug equals the name. A non-empty
+// `description` is written on create AND reconciled on adopt so a rotated
+// secret / renamed classroom propagates to the student-facing record.
 //
 // `members_can_create_teams: false` (init's lockdown) doesn't block this — the
 // teacher authenticates as an org owner.
-func ensureSecretTeamByName(client githubapi.Client, org, name string) (TeamRef, error) {
-	body, err := json.Marshal(map[string]any{
+func ensureSecretTeamByName(client githubapi.Client, org, name, description string) (TeamRef, error) {
+	teamBody := map[string]any{
 		"name":    name,
 		"privacy": "secret",
-	})
+	}
+	if description != "" {
+		teamBody["description"] = description
+	}
+	body, err := json.Marshal(teamBody)
 	if err != nil {
 		return TeamRef{}, fmt.Errorf("encode team body: %w", err)
 	}
@@ -199,11 +304,11 @@ func ensureSecretTeamByName(client githubapi.Client, org, name string) (TeamRef,
 	var created TeamRef
 	if err := client.Post(createPath, bytes.NewReader(body), &created); err != nil {
 		// 422 = a team with this name already exists. Adopt it in place
-		// (read id/slug, ensure privacy `secret`) so a re-run reconciles. If
-		// the adopt read 404s, the 422 wasn't a name collision — surface the
-		// original create error.
+		// (read id/slug, ensure privacy `secret`, reconcile description) so a
+		// re-run reconciles. If the adopt read 404s, the 422 wasn't a name
+		// collision — surface the original create error.
 		if cliutil.IsHTTPStatus(err, http.StatusUnprocessableEntity) {
-			adopted, adoptErr := adoptSecretTeamByName(client, org, name)
+			adopted, adoptErr := adoptSecretTeamByName(client, org, name, description)
 			if adoptErr != nil {
 				if cliutil.IsHTTPStatus(adoptErr, http.StatusNotFound) {
 					return TeamRef{}, fmt.Errorf("POST %s: %w", createPath, err)
@@ -219,27 +324,40 @@ func ensureSecretTeamByName(client githubapi.Client, org, name string) (TeamRef,
 
 // adoptSecretTeamByName reads an existing team by slug (== name, given the
 // canonical short-name guard) and reconciles its privacy to `secret` (an older
-// or hand-created team might be `closed`). Used on the 422 already-exists path.
-func adoptSecretTeamByName(client githubapi.Client, org, name string) (TeamRef, error) {
+// or hand-created team might be `closed`) and, when `description` is non-empty
+// and differs, its description. Used on the 422 already-exists path.
+func adoptSecretTeamByName(client githubapi.Client, org, name, description string) (TeamRef, error) {
 	slug := name
 	getPath := fmt.Sprintf("orgs/%s/teams/%s", url.PathEscape(org), url.PathEscape(slug))
 	var existing struct {
-		ID      int64  `json:"id"`
-		Slug    string `json:"slug"`
-		Privacy string `json:"privacy"`
+		ID          int64  `json:"id"`
+		Slug        string `json:"slug"`
+		Privacy     string `json:"privacy"`
+		Description string `json:"description"`
 	}
 	if err := client.Get(getPath, &existing); err != nil {
 		return TeamRef{}, fmt.Errorf("GET %s (adopting existing team): %w", getPath, err)
 	}
-	if existing.Privacy != "secret" {
-		body, err := json.Marshal(map[string]any{"privacy": "secret"})
+	// Reconcile privacy and (for the student team) the bootstrap description in
+	// one PATCH when either drifts from the desired state.
+	needPrivacy := existing.Privacy != "secret"
+	needDescription := description != "" && existing.Description != description
+	if needPrivacy || needDescription {
+		patch := map[string]any{}
+		if needPrivacy {
+			patch["privacy"] = "secret"
+		}
+		if needDescription {
+			patch["description"] = description
+		}
+		body, err := json.Marshal(patch)
 		if err != nil {
 			return TeamRef{}, fmt.Errorf("encode team patch: %w", err)
 		}
 		patchPath := fmt.Sprintf("orgs/%s/teams/%s", url.PathEscape(org), url.PathEscape(existing.Slug))
 		resp, err := client.Request(http.MethodPatch, patchPath, bytes.NewReader(body))
 		if err != nil {
-			return TeamRef{}, fmt.Errorf("PATCH %s (set privacy secret): %w", patchPath, err)
+			return TeamRef{}, fmt.Errorf("PATCH %s (reconcile team): %w", patchPath, err)
 		}
 		defer func() { _ = resp.Body.Close() }()
 		_, _ = io.Copy(io.Discard, resp.Body)
@@ -307,6 +425,32 @@ func DeleteClassroomTeam(client githubapi.Client, org string, team TeamRef) erro
 	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return nil
+}
+
+// ResolveLegacyInstructorTeam reads the legacy `teams.instructor` ref only when
+// it is DISTINCT from the canonical `teams.teacher` team — the
+// partially-migrated case where both refs point at different teams. Used by
+// teardown to sweep a stale instructor team that ResolveClassroomStaffTeam
+// (which prefers `teacher`) would otherwise skip. Returns ok=false when there
+// is no teacher ref yet (the legacy team is already covered by the RoleTeacher
+// fallback), when the instructor ref is absent, or when both refs share a slug.
+func ResolveLegacyInstructorTeam(client githubapi.Client, org, shortName, ref string) (TeamRef, bool, error) {
+	c, ok, err := LoadClassroom(client, org, shortName, ref)
+	if err != nil {
+		return TeamRef{}, false, err
+	}
+	if !ok || c.Teams == nil || c.Teams.Instructor == nil || c.Teams.Instructor.Slug == "" {
+		return TeamRef{}, false, nil
+	}
+	// No canonical teacher ref: the RoleTeacher resolve already falls back to
+	// this instructor team, so returning it here would double-count.
+	if c.Teams.Teacher == nil || c.Teams.Teacher.Slug == "" {
+		return TeamRef{}, false, nil
+	}
+	if c.Teams.Teacher.Slug == c.Teams.Instructor.Slug {
+		return TeamRef{}, false, nil
+	}
+	return *c.Teams.Instructor, true, nil
 }
 
 // TeamMemberRole is a GitHub team-membership role — distinct from the

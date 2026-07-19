@@ -2,8 +2,8 @@ import { useCallback, useMemo } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useGitHubClient } from "@/context/github/GitHubProvider"
 import useGetClassroom from "@/hooks/useGetClassroom"
-import { useOrgRole } from "@/context/orgRole/OrgRoleProvider"
-import { can } from "@/util/capabilities"
+import { useGitHubOrgRole } from "@/context/githubOrgRole/GitHubOrgRoleProvider"
+import { can } from "@/authz"
 import {
   githubKeys,
   teamMembersQuery,
@@ -20,9 +20,9 @@ import {
   rowsNeedingBackfill,
   type TeamRosterRow,
   type TeamRosterRowState,
-  type RosterRole,
+  type ClassroomRole,
 } from "@/util/teamRoster"
-import { enrolledCountsByRole, type RoleCounts } from "@/util/rosterRoles"
+import { enrolledCountsByRole, type RoleCounts } from "@/util/classroomRoleUI"
 import { memberIdentitySets } from "@/util/identity"
 import type { Student } from "@/types/classroom"
 import type { GitHubUser, GitHubOrgInvitation } from "@/github-core/types"
@@ -41,7 +41,7 @@ export type UseTeamRosterResult = {
   rows: TeamRosterRow[]
   counts: Record<TeamRosterRowState, number>
   // Enrolled (active-member) head counts by role for the header: how many
-  // students, instructors, and TAs are actually on a team. A person on two
+  // students, teachers, and TAs are actually on a team. A person on two
   // teams counts toward each of their roles (tallies, not a partition).
   roleCounts: RoleCounts
   // The team-member fetch (the enrolled source of truth) is still resolving.
@@ -54,7 +54,7 @@ export type UseTeamRosterResult = {
   // The classroom has zero team members AND zero pending invites — a brand-new
   // classroom nobody has joined yet.
   isEmpty: boolean
-  // Pending invites couldn't be read (owner-only; a non-owner TA/instructor
+  // Pending invites couldn't be read (owner-only; a non-owner TA/teacher
   // can't read them). The view then hides the pending section and shows an
   // "owners only" note instead of rendering zero pending.
   pendingHidden: boolean
@@ -66,9 +66,9 @@ export type UseTeamRosterResult = {
   // The resolved team slug (classroom.json.team.slug, else classroom50-<c>).
   teamSlug: string
   // Resolved team slug per role, so the detail view can link each role a member
-  // actually holds to its real team (student -> classroom team, instructor/ta ->
+  // actually holds to its real team (student -> classroom team, teacher/ta ->
   // the staff team) rather than assuming everyone is on the student team.
-  teamSlugByRole: Record<RosterRole, string>
+  teamSlugByRole: Record<ClassroomRole, string>
   // Count of team members with no roster.csv row — the exact set "Sync roster"
   // appends. 0 = in sync (button disabled, "In sync"); >0 = drift the teacher
   // can sync (auto-synced on open).
@@ -103,20 +103,23 @@ export function useTeamRoster(
   students: Student[],
 ): UseTeamRosterResult {
   const client = useGitHubClient()
-  const { orgRole } = useOrgRole()
+  const { githubOrgRole } = useGitHubOrgRole()
   // Team invitations are owner-only (like org invitations). Gate the reads on
   // the manageOrg capability so a non-owner doesn't fire a guaranteed 403. This
   // gate stays IN the hook: a non-owner staffer (TA) legitimately uses the hook
   // for the ungated member reads, so it can't move to a caller/owner guard.
-  const isOwner = can("manageOrg", { orgRole })
+  const isOwner = can("manageOrg", { githubOrgRole })
 
   const { data: classroomJson } = useGetClassroom(org, classroom)
   const teamSlug = classroomJson?.team?.slug || classroomTeamSlug(classroom)
   // Staff team slugs: prefer the classroom's stored slug, else the derived
-  // classroomTeamSlug (same precedence as the student slug above).
-  const instructorSlug =
+  // classroomTeamSlug (same precedence as the student slug above). The teacher
+  // slug prefers the canonical `teams.teacher`, falling back to a not-yet-
+  // migrated classroom's legacy `teams.instructor`, then the derived slug.
+  const teacherSlug =
+    classroomJson?.teams?.teacher?.slug ||
     classroomJson?.teams?.instructor?.slug ||
-    classroomTeamSlug(classroom, "instructor")
+    classroomTeamSlug(classroom, "teacher")
   const taSlug =
     classroomJson?.teams?.ta?.slug || classroomTeamSlug(classroom, "ta")
 
@@ -133,11 +136,11 @@ export function useTeamRoster(
   // uncreated staff team reads as "no staff". A non-404 failure (transient 5xx,
   // 403) is a real error and is folded into isError below — staff data gets the
   // same failure semantics as the student roster, never a silent "no staff".
-  const instructorMembersQuery = useQuery(
-    teamMembersQuery(client, org, instructorSlug),
+  const teacherMembersQuery = useQuery(
+    teamMembersQuery(client, org, teacherSlug),
   )
   const taMembersQuery = useQuery(teamMembersQuery(client, org, taSlug))
-  const instructorMembers = instructorMembersQuery.data
+  const teacherMembers = teacherMembersQuery.data
   const taMembers = taMembersQuery.data
 
   // Student pending invitations, TEAM-SCOPED (owner-only, like the staff teams).
@@ -160,9 +163,9 @@ export function useTeamRoster(
   // Team-scoped pending invitations for the staff teams (owner-only, like org
   // invitations). Gated on org ownership so a non-owner never fires the 403;
   // 404 (uncreated team) -> [].
-  const instructorInvitesQuery = useQuery({
-    ...teamInvitationsQuery(client, org, instructorSlug),
-    enabled: Boolean(org && instructorSlug) && isOwner,
+  const teacherInvitesQuery = useQuery({
+    ...teamInvitationsQuery(client, org, teacherSlug),
+    enabled: Boolean(org && teacherSlug) && isOwner,
   })
   const taInvitesQuery = useQuery({
     ...teamInvitationsQuery(client, org, taSlug),
@@ -210,7 +213,7 @@ export function useTeamRoster(
         // section collapses to the owners-only note.)
         invitations: pendingHidden ? [] : invitations,
         staffMembers: {
-          instructor: instructorMembers ?? [],
+          teacher: teacherMembers ?? [],
           ta: taMembers ?? [],
         },
         // Each staff team's pending is independent: an owner who can read org
@@ -220,7 +223,7 @@ export function useTeamRoster(
         staffInvitations: pendingHidden
           ? {}
           : {
-              instructor: instructorInvitesQuery.data ?? [],
+              teacher: teacherInvitesQuery.data ?? [],
               ta: taInvitesQuery.data ?? [],
             },
         students,
@@ -231,10 +234,10 @@ export function useTeamRoster(
       }),
     [
       members,
-      instructorMembers,
+      teacherMembers,
       taMembers,
       invitations,
-      instructorInvitesQuery.data,
+      teacherInvitesQuery.data,
       taInvitesQuery.data,
       pendingHidden,
       students,
@@ -245,24 +248,24 @@ export function useTeamRoster(
   )
 
   const counts = useMemo(() => countByState(rows), [rows])
-  // Enrolled head counts by role for the header (students / instructors / TAs).
+  // Enrolled head counts by role for the header (students / teachers / TAs).
   const roleCounts = useMemo(() => enrolledCountsByRole(rows), [rows])
 
   // CSV drift / reconcile: role is now recorded metadata, so every classroom
-  // member (student + instructor + ta) belongs in roster.csv. Count all three
+  // member (student + teacher + ta) belongs in roster.csv. Count all three
   // teams against the CSV so auto-sync also populates a staff-only classroom
-  // (an instructor/TA with no students still needs a roster.csv row).
+  // (a teacher/TA with no students still needs a roster.csv row).
   const allTeamMembers = useMemo(() => {
     const byId = new Map<number, GitHubUser>()
     for (const m of [
       ...(members ?? []),
-      ...(instructorMembers ?? []),
+      ...(teacherMembers ?? []),
       ...(taMembers ?? []),
     ]) {
       if (!byId.has(m.id)) byId.set(m.id, m)
     }
     return [...byId.values()]
-  }, [members, instructorMembers, taMembers])
+  }, [members, teacherMembers, taMembers])
   const csvMissing = useMemo(
     () => teamMembersMissingFromCsv(allTeamMembers, students),
     [allTeamMembers, students],
@@ -284,10 +287,10 @@ export function useTeamRoster(
     () =>
       rowsNeedingBackfill(
         members ?? [],
-        { instructor: instructorMembers ?? [], ta: taMembers ?? [] },
+        { teacher: teacherMembers ?? [], ta: taMembers ?? [] },
         students,
       ),
-    [members, instructorMembers, taMembers, students],
+    [members, teacherMembers, taMembers, students],
   )
   const backfillNeededCount = backfillNeeded.length
   // Lowercased logins of the stale rows, so the auto-sync trigger can drop a
@@ -309,7 +312,7 @@ export function useTeamRoster(
   // excluded.
   const isError = Boolean(
     membersError ||
-    instructorMembersQuery.isError ||
+    teacherMembersQuery.isError ||
     taMembersQuery.isError ||
     (!pendingHidden &&
       (studentInvitesQuery.isError || studentFailedInvitesQuery.isError)),
@@ -322,7 +325,7 @@ export function useTeamRoster(
   // no staff teams.
   const isLoading =
     membersLoading ||
-    instructorMembersQuery.isLoading ||
+    teacherMembersQuery.isLoading ||
     taMembersQuery.isLoading ||
     (!pendingHidden && studentInvitesQuery.isLoading)
 
@@ -339,7 +342,8 @@ export function useTeamRoster(
     teamSlug,
     teamSlugByRole: {
       student: teamSlug,
-      instructor: instructorSlug,
+      teacher: teacherSlug,
+      instructor: teacherSlug,
       ta: taSlug,
     },
     csvMissingCount,
@@ -348,17 +352,17 @@ export function useTeamRoster(
     backfillNeededLogins,
     orgMembersKnown,
     // isError folds in the staff-member fetches too, so a retry must re-run
-    // every team-member query (student + instructor + ta), not just the
+    // every team-member query (student + teacher + ta), not just the
     // student one — otherwise a staff-team failure stays stuck in error. Also
     // refetch the staff invitation queries so a recovered permission/transient
     // failure repopulates pending.
     refetch: () => {
       void refetchMembers()
-      void instructorMembersQuery.refetch()
+      void teacherMembersQuery.refetch()
       void taMembersQuery.refetch()
       void studentInvitesQuery.refetch()
       void studentFailedInvitesQuery.refetch()
-      void instructorInvitesQuery.refetch()
+      void teacherInvitesQuery.refetch()
       void taInvitesQuery.refetch()
       void orgMembersQuery.refetch()
     },

@@ -1,8 +1,8 @@
 import { useTranslation } from "react-i18next"
 
 import { Alert, Button, Select } from "@/components/ui"
-import { ROLE_LABEL_KEY } from "@/util/rosterRoles"
-import type { RosterRole } from "@/util/teamRoster"
+import { ROLE_LABEL_KEY } from "@/util/classroomRoleUI"
+import type { ClassroomRole } from "@/util/teamRoster"
 import type { BulkInviteByEmailResult } from "@/domain/students"
 import type { UploadKind } from "@/pages/students/uploadClassify"
 
@@ -42,13 +42,13 @@ export const DetectedFormatSelect = ({
 
 // The email-invite preview: the parsed addresses with a per-row role picker,
 // the org-owner confirmation gate (shown only when an address is assigned
-// instructor), and the send/cancel actions. Presentational — the parent owns
+// teacher), and the send/cancel actions. Presentational — the parent owns
 // the emails/roles/confirmation state and the send handler.
 export const EmailInvitePreview = ({
   emails,
   emailRoles,
   emailOwnerConfirmed,
-  emailHasInstructor,
+  emailHasTeacher,
   canProcess,
   onRoleChange,
   onOwnerConfirmedChange,
@@ -56,9 +56,9 @@ export const EmailInvitePreview = ({
   onSend,
 }: {
   emails: string[]
-  emailRoles: Record<string, RosterRole>
+  emailRoles: Record<string, ClassroomRole>
   emailOwnerConfirmed: boolean
-  emailHasInstructor: boolean
+  emailHasTeacher: boolean
   canProcess: boolean
   onRoleChange: (key: string, rawValue: string) => void
   onOwnerConfirmedChange: (confirmed: boolean) => void
@@ -112,8 +112,8 @@ export const EmailInvitePreview = ({
                             {t("students.roleStudent")}
                           </option>
                           <option value="ta">{t("students.roleTa")}</option>
-                          <option value="instructor">
-                            {t("students.roleInstructor")}
+                          <option value="teacher">
+                            {t("students.roleTeacher")}
                           </option>
                         </Select>
                       </td>
@@ -124,10 +124,10 @@ export const EmailInvitePreview = ({
             </table>
           </div>
 
-          {emailHasInstructor ? (
+          {emailHasTeacher ? (
             <div className="mt-3 flex flex-col gap-2 rounded-box border border-error/30 bg-error/5 p-4">
               <Alert tone="warning">
-                <span>{t("students.uploadInstructorOwnerNotice")}</span>
+                <span>{t("students.uploadTeacherOwnerNotice")}</span>
               </Alert>
               <label className="flex items-start gap-2 text-sm">
                 <input

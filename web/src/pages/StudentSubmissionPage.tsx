@@ -2,7 +2,6 @@ import { Link, useParams } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
 import {
   ExternalLink,
-  FileText,
   UserRound,
   UsersRound,
   CalendarClock,
@@ -24,8 +23,11 @@ import { formatDueDateTime, isPastDue } from "@/util/formatDate"
 import { safeHttpUrl } from "@/util/url"
 import type { GitHubRelease } from "@/github-core/types"
 import type { Assignment } from "@/types/classroom"
+import { assignmentDescription } from "@/types/classroom"
 import { EnterDiv } from "@/lib/motionComponents"
-import { Alert, Badge, Button, Card } from "@/components/ui"
+import { Alert, Badge, Button, Card, Markdown } from "@/components/ui"
+import SubmitGuidance from "@/components/SubmitGuidance"
+import SubmitUpload from "@/components/SubmitUpload"
 
 // Strips the `submit/` tag prefix for a friendlier label, falling back to the
 // release name when present.
@@ -59,7 +61,6 @@ const ReleaseRow = ({ release }: { release: GitHubRelease }) => {
           rel="noreferrer"
           className="shrink-0"
         >
-          <FileText aria-hidden="true" className="size-4" />
           {t("submissions.student.viewGrade")}
         </Button>
       ) : (
@@ -197,6 +198,12 @@ const SubmissionBody = ({
           <ExternalLink aria-hidden="true" className="size-4" />
           {t("submissions.student.openMyRepo")}
         </Button>
+        <SubmitUpload
+          org={org}
+          repo={studentRepo.name}
+          assignment={assignment}
+        />
+        <SubmitGuidance repoHtmlUrl={studentRepo.html_url} />
       </EnterDiv>
     )
   }
@@ -227,6 +234,8 @@ const SubmissionBody = ({
           ))}
         </ul>
       </Card>
+
+      <SubmitUpload org={org} repo={studentRepo.name} assignment={assignment} />
     </div>
   )
 }
@@ -239,7 +248,7 @@ const StudentSubmissionPage = () => {
   // Resolve the capability-URL secret (protected classrooms) from two sources
   // in order: (1) the student's accepted repo's .classroom50.yaml — the only
   // source a real student can read; (2) the private classroom.json — staff-only
-  // (incl. an instructor previewing as a student), so a not-yet-accepted
+  // (incl. a teacher previewing as a student), so a not-yet-accepted
   // preview still gets a working link. Empty when unprotected.
   const repoName =
     classroom && assignment && user?.login
@@ -258,6 +267,8 @@ const StudentSubmissionPage = () => {
     secret,
   )
 
+  const description = assignmentDescription(assignmentData)
+
   return (
     <PageShell selected="assignments">
       <Breadcrumb endpoint={t("nav.mySubmission")} />
@@ -269,6 +280,14 @@ const StudentSubmissionPage = () => {
         }
       />
       <AssignmentMeta assignment={assignmentData} />
+      {description ? (
+        <div className="mt-3 flex flex-col gap-1">
+          <span className="text-sm font-medium text-base-content/70">
+            {t("submissions.student.descriptionLabel")}
+          </span>
+          <Markdown content={description} />
+        </div>
+      ) : null}
       {org && classroom && assignment ? (
         <SubmissionBody
           org={org}
